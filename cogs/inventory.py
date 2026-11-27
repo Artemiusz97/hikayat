@@ -650,7 +650,7 @@ class DropItemSelectDropdown(discord.ui.Select):
         super().__init__(placeholder="Choose an item to discard...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        from mechanics.combat.items import is_key_item
+        from mechanics.combat.items import is_digital_item, is_key_item
         item_name = self.values[0]
         inv = await adb(db.get_inventory, self.user_id)
         match = next((i for i in inv if i.get("name") == item_name), None)
@@ -658,11 +658,17 @@ class DropItemSelectDropdown(discord.ui.Select):
             await interaction.response.edit_message(content=f"🚫 **{item_name}** is a Key Item or Narrative Artifact and cannot be discarded!", view=None)
             return
 
-        removed = await adb(db.remove_item_by_name, self.user_id, item_name)
+        if match and match.get("id") is not None:
+            removed = await adb(db.remove_item, self.user_id, int(match["id"]))
+        else:
+            removed = await adb(db.remove_item_by_name, self.user_id, item_name)
         if removed:
-            if match:
+            if match and not is_digital_item(match):
                 await adb(db.drop_item_to_session_floor, self.user_id, match)
-            await interaction.response.edit_message(content=f"🗑️ Dropped **{item_name}** onto the floor.", view=None)
+                msg = f"🗑️ Dropped **{item_name}** onto the floor."
+            else:
+                msg = f"🗑️ Deleted **{item_name}** from your device."
+            await interaction.response.edit_message(content=msg, view=None)
         else:
             await interaction.response.edit_message(content=f"❌ Could not find **{item_name}** to discard.", view=None)
 

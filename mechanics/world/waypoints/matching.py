@@ -300,7 +300,6 @@ def _resolve_waypoint_scheduled_location_in_memory(
     active_commitments: Optional[list[dict]] = None,
     skip_uncached_db: bool = False,
 ) -> tuple[str, str]:
-    from mechanics.social.races import is_myobu_fox_race
     from mechanics.social.roster_tags import npc_is_folklore_villager
     from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
     from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
@@ -329,6 +328,8 @@ def _resolve_waypoint_scheduled_location_in_memory(
         except Exception:
             pass
 
+    from mechanics.social.races import is_folklore_beast_race
+
     scen_low = str(scen_key or "").lower()
     node_sched = dict(
         get_npc_schedule_node_ids(
@@ -341,7 +342,7 @@ def _resolve_waypoint_scheduled_location_in_memory(
         or {}
     )
 
-    skip_spare = npc_is_folklore_villager(npc_dict) and is_myobu_fox_race(str(npc_dict.get("race") or ""))
+    skip_spare = npc_is_folklore_villager(npc_dict) and is_folklore_beast_race(str(npc_dict.get("race") or ""))
     if session_id and is_anomalous_realty_scenario(scen_low) and not skip_spare and (primary_property_loaded or not skip_uncached_db):
         sk_eve = resolve_spare_key_evening_visit_node(
             int(session_id),

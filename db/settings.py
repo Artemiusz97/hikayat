@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import db
 import sqlite3
 from .core import *

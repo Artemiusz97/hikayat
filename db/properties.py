@@ -279,6 +279,8 @@ def atomic_purchase_property(
         entry = resolve_realty_entry(property_id, session_or_id=sess)
         if not entry:
             return {"ok": False, "reason": "unknown_property"}
+        if entry.get("is_spirit_court_grant"):
+            return {"ok": False, "reason": "spirit_court_grant_not_purchasable"}
 
         existing = conn.execute(
             "SELECT * FROM player_properties WHERE session_id = ? AND property_id = ? AND is_starter = 0",
@@ -438,7 +440,7 @@ def _is_npc_eligible_for_spare_key(conn: sqlite3.Connection, session_id: int, np
     ):
         return False, "", "contact_deceased"
 
-    if str(matched.get("race") or b_info.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+    if str(matched.get("race") or b_info.get("race") or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid"):
         return False, canonical_id, "beast_form_disallowed"
 
     rel_score = int(matched.get("relationship_score") or 0)

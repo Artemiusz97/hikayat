@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
@@ -1295,7 +1294,7 @@ def evaluate_quest_state_predicates(
     # Pool unequipped inventory items across party
     all_inventory = []
     for uid in party_uids:
-        all_inventory.extend(db.get_inventory(uid))
+        all_inventory.extend(db.get_inventory(uid, session_id=session_id))
 
     active_quests = db.get_session_quests(session_id, status="Active")
     results = []
@@ -1407,11 +1406,11 @@ def evaluate_quest_state_predicates(
                                     sub_dirty = True
                                     results.append({"quest_id": qid, "sub_obj_id": so_id, "type": "partial_progress", "progress": new_so_prog})
             if sub_dirty:
-                cleaned_sub_objs = db._clean_sub_objectives_for_storage(sub_objs) if hasattr(db, "_clean_sub_objectives_for_storage") else sub_objs
+                sub_objs_json = db._clean_sub_objectives_for_storage(sub_objs)
                 with db.get_conn() as conn:
                     conn.execute(
                         "UPDATE quests SET sub_objectives_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
-                        (json.dumps(cleaned_sub_objs), time.time(), session_id, qid)
+                        (sub_objs_json, time.time(), session_id, qid)
                     )
 
         # 3. Reactive NPCStatusChanged check
@@ -1511,7 +1510,7 @@ def grant_stage_acquisition_item_if_needed(
 
     matching = []
     for uid in party_uids:
-        inv = db.get_inventory(uid)
+        inv = db.get_inventory(uid, session_id=session_id)
         matching.extend(find_matching_inventory_items_for_quest(req_item, inv, exclude_equipped=True))
     held_cnt = len(matching)
 
@@ -1521,7 +1520,7 @@ def grant_stage_acquisition_item_if_needed(
         label = sub_obj.get("text") if sub_obj else quest.get("title", "Quest")
         desc = f"Acquired for {label}"
         for _ in range(needed):
-            db.add_item(target_uid, req_item, "Quest Item", desc, slot_cost=0, force=True)
+            db.add_item(target_uid, req_item, "Quest Item", desc, slot_cost=0, force=True, session_id=session_id)
         return req_item
     return None
 
@@ -1592,12 +1591,12 @@ def consume_quest_delivery_item_if_needed(
     for uid in party_uids:
         if consumed >= req_cnt:
             break
-        inv = db.get_inventory(uid)
+        inv = db.get_inventory(uid, session_id=session_id)
         matching = find_matching_inventory_items_for_quest(req_item, inv, exclude_equipped=True)
         for item in matching:
             if consumed >= req_cnt:
                 break
-            if db.remove_item(uid, item["id"], force=True):
+            if db.remove_item(uid, item["id"], force=True, session_id=session_id):
                 consumed += 1
 
     if sub_obj:
@@ -1727,7 +1726,7 @@ def apply_quest_approach_effects(
     # 1. Gold Buyout / Bribery
     if app == "buyout_bribe" or "[buyout / bribe" in str(waypoint.get("stage_label", "")).lower():
         cost = gold_cost if gold_cost > 0 else calculate_quest_buyout_cost(quest)
-        db.apply_hp_mp_delta(lead_uid, gold_delta=-cost)
+        db.apply_hp_mp_delta(lead_uid, gold_delta=-cost, session_id=session_id)
         db.set_quest_resolution_approach(session_id, qid, "bought_or_bribed")
         stage_desc = waypoint.get("stage_label") or "objective"
         return {
@@ -1756,7 +1755,7 @@ def apply_quest_approach_effects(
     elif app == "counter_offer" or "[accept counter-offer]" in str(waypoint.get("stage_label", "")).lower():
         betrayal_gold = int(round(int(quest.get("reward_gold") or 30) * 1.5))
         for uid in (party_user_ids or [lead_uid]):
-            db.apply_hp_mp_delta(uid, gold_delta=betrayal_gold)
+            db.apply_hp_mp_delta(uid, gold_delta=betrayal_gold, session_id=session_id)
         target_npc = waypoint.get("target_npc") or quest.get("target_npc") or ""
         if target_npc:
             try:
@@ -3158,7 +3157,7 @@ def _resolve_pre_turn_quests_impl(
                                 q["resolution_approach"] = "pyrrhic_climax"
                                 q["reward_xp"] = max(25, int(int(q.get("reward_xp") or 100) * 0.5))
                                 q["reward_gold"] = max(10, int(int(q.get("reward_gold") or 30) * 0.5))
-                                db.apply_hp_mp_delta(party_uids[0], hp_delta=-10)
+                                db.apply_hp_mp_delta(party_uids[0], hp_delta=-10, session_id=session_id)
                                 directives.append(
                                     f"[MANDATORY PYRRHIC CLIMAX RESOLUTION]: The Chapter Climax '{q.get('title')}' concluded with bittersweet compromise and dark consequences! Complete the climax and narrate the heavy toll."
                                 )
@@ -3270,7 +3269,7 @@ def _resolve_pre_turn_quests_impl(
                     )
                     for uid in party_uids:
                         try:
-                            db.add_xp(uid, 50)
+                            db.add_xp(uid, 50, session_id=session_id)
                         except Exception:
                             pass
                     deduction_xp_bonus = 50
@@ -3391,8 +3390,16 @@ def forfeit_side_bounty(
 
 
 def can_accept_side_bounty(session_id: int, quest: dict | None = None) -> bool:
-    """Checks if session is below the max active side bounties concurrency cap of 3 (exempting mandatory dispatches, rumor leads, and loyalty quests)."""
+    """Checks if session is below the max active side bounties concurrency cap of 3 (exempting mandatory dispatches, rumor leads, loyalty quests, and Spirit Court commissions)."""
+    from mechanics.narrative.spirit_court_bounties import (
+        can_accept_spirit_court_commission,
+        is_spirit_court_quest,
+    )
+
     if isinstance(quest, dict):
+        if is_spirit_court_quest(quest):
+            allowed, _ = can_accept_spirit_court_commission(session_id, quest)
+            return allowed
         q_notes = str(quest.get("quest_notes") or "")
         q_id = str(quest.get("quest_id") or "").upper()
         if q_id.startswith("MAND-") or "mandatory_daily:1" in q_notes:
@@ -3406,6 +3413,7 @@ def can_accept_side_bounty(session_id: int, quest: dict | None = None) -> bool:
     active_bounties = [
         q for q in (db.get_session_quests(session_id, status="Active") or [])
         if not q.get("is_story_quest")
+        and not is_spirit_court_quest(q)
         and not str(q.get("quest_id") or "").upper().startswith("MAND-")
         and "mandatory_daily:1" not in str(q.get("quest_notes") or "")
         and not str(q.get("quest_id") or "").upper().startswith("RMR-")

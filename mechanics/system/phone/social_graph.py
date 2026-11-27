@@ -69,7 +69,7 @@ def _is_peerpulse_or_dm_connected(
 
 def get_mutual_friends_and_ties(session_id: int, user_id: int, target_dict: dict) -> dict:
     """Calculates mutual contacts, shared clubs, and sibling connections with a target NPC."""
-    char = db.get_character(user_id)
+    char = (db.get_character(user_id, session_id=session_id) if session_id else None) or db.get_character(user_id)
     contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
     contact_names = {c.get("name", "").strip().lower(): c for c in contacts}
 
@@ -116,8 +116,45 @@ def get_mutual_friends_and_ties(session_id: int, user_id: int, target_dict: dict
     }
 
 
+def _is_adult_world_row(row: dict, scen_key: str) -> bool:
+    """Return True if a roster row represents an adult (not a teen/student or campus_seed student)."""
+    if not isinstance(row, dict):
+        return False
+    from mechanics.social.roster_tags import derive_age_group
+
+    bi = row.get("basic_info") if isinstance(row.get("basic_info"), dict) else {}
+    grade_val = str(row.get("grade") or bi.get("grade") or "").strip()
+    role_val = str(row.get("role") or bi.get("role") or "").strip()
+    srt_val = str(row.get("social_role_type") or bi.get("social_role_type") or "").strip()
+    grade_low = grade_val.lower()
+    role_low = role_val.lower()
+
+    if grade_low in ("freshman", "sophomore", "junior", "senior", "youth peer", "student", "class 2-b", "class 1-a"):
+        return False
+    if any(tok in grade_low for tok in ("grade 9", "grade 10", "grade 11", "grade 12", "class ")):
+        return False
+    if "student" in role_low and "former student" not in role_low:
+        return False
+    if derive_age_group(grade=grade_val, role=role_val, social_role_type=srt_val, scen_key=scen_key) == "teen":
+        # Unknown/neutral adult citizens in anomalous scenarios sometimes lack explicit grade; check role/origin carefully
+        if str(row.get("origin") or "").lower() == "campus_seed":
+            return False
+        if not grade_low and role_low and not any(tok in role_low for tok in ("teen", "student", "high school", "pupil", "delinquent")):
+            return True
+        return False
+    return True
+
+
+def _is_adult_profile(profile: dict | None, scen_key: str) -> bool:
+    """Return True when a looked-up social profile belongs to an adult contact candidate."""
+    if not isinstance(profile, dict):
+        return False
+    raw = profile.get("raw_record") if isinstance(profile.get("raw_record"), dict) else profile
+    return _is_adult_world_row(raw, scen_key)
+
+
 def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dict | None:
-    """Looks up a character's faux social media profile across directory, contacts, and lorebook."""
+    """Looks up a character's faux social media profile across world roster, directory, contacts, and lorebook."""
     if not query_name or not session_id:
         return None
     session = db.get_session(session_id)
@@ -125,24 +162,70 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
     char = db.get_character(user_id)
     q = str(query_name).strip().lower().replace("@", "")
 
+    from mechanics.social.origin_mode import resolve_player_age_profile
+    is_student = bool(resolve_player_age_profile(session, char).get("is_student"))
+
     target_rec = None
-    # 1. School directory lookup
-    roster = db.get_school_roster(session_id)
-    # Exact match first
-    for r in roster:
-        r_name = str(r.get("name", "")).lower()
-        r_id = str(r.get("npc_id", "")).lower()
-        if q == r_name or q == r_id:
-            target_rec = dict(r)
+    # 1a. World roster lookup (for adult/city NPCs across scenarios)
+    world_roster = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+    for wr in world_roster:
+        r_name = str(wr.get("name", "")).lower()
+        r_id = str(wr.get("npc_id") or wr.get("person_key") or "").lower()
+        if q == r_name or (r_id and q == r_id):
+            target_rec = {
+                "session_id": session_id,
+                "name": wr.get("name"),
+                "npc_id": wr.get("npc_id") or str(wr.get("name", "")).lower().replace(" ", "_"),
+                "role": wr.get("role") or "Local Resident",
+                "grade": wr.get("grade") or "Adult",
+                "club": wr.get("club") or "",
+                "clique": wr.get("clique") or "",
+                "primary_facility": wr.get("workplace_node_id") or wr.get("hangout_node_id") or wr.get("home_node_id") or "",
+                "sibling_name": "",
+                "social_role_type": wr.get("social_role_type") or "",
+                "origin": wr.get("origin") or "",
+                "personality_summary": wr.get("personality_summary") or wr.get("description") or "",
+                "is_hydrated": 1,
+            }
             break
-    # Substring match if no exact match
     if not target_rec:
+        for wr in world_roster:
+            r_name = str(wr.get("name", "")).lower()
+            r_id = str(wr.get("npc_id") or wr.get("person_key") or "").lower()
+            if q in r_name or (r_id and q in r_id):
+                target_rec = {
+                    "session_id": session_id,
+                    "name": wr.get("name"),
+                    "npc_id": wr.get("npc_id") or str(wr.get("name", "")).lower().replace(" ", "_"),
+                    "role": wr.get("role") or "Local Resident",
+                    "grade": wr.get("grade") or "Adult",
+                    "club": wr.get("club") or "",
+                    "clique": wr.get("clique") or "",
+                    "primary_facility": wr.get("workplace_node_id") or wr.get("hangout_node_id") or wr.get("home_node_id") or "",
+                    "sibling_name": "",
+                    "social_role_type": wr.get("social_role_type") or "",
+                    "origin": wr.get("origin") or "",
+                    "personality_summary": wr.get("personality_summary") or wr.get("description") or "",
+                    "is_hydrated": 1,
+                }
+                break
+
+    # 1b. School directory lookup (full match for all if met by exact name; substring for students)
+    if not target_rec:
+        roster = db.get_school_roster(session_id) or []
         for r in roster:
             r_name = str(r.get("name", "")).lower()
             r_id = str(r.get("npc_id", "")).lower()
-            if q in r_name or q in r_id:
+            if q == r_name or q == r_id:
                 target_rec = dict(r)
                 break
+        if not target_rec and is_student:
+            for r in roster:
+                r_name = str(r.get("name", "")).lower()
+                r_id = str(r.get("npc_id", "")).lower()
+                if q in r_name or q in r_id:
+                    target_rec = dict(r)
+                    break
 
     # 2. Existing contacts lookup
     if not target_rec:
@@ -359,7 +442,7 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
 def resolve_social_friend_request(session: dict, user_id: int, profile: dict) -> dict:
     """Resolves sending a friend request with dynamic skill check modifiers."""
     session_id = session["id"]
-    char = db.get_character(user_id)
+    char = (db.get_character(user_id, session_id=session_id) if session_id else None) or db.get_character(user_id)
     npc_id = profile["npc_id"]
     name = profile["name"]
 
@@ -596,12 +679,15 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
         }
 
 
-def discover_suggested_peer(session_id: int, user_id: int) -> dict:
-    """Discovers an un-contacted student peer or dynamically generates a new one."""
+def discover_suggested_peer(session_id: int, user_id: int) -> dict | None:
+    """Discovers an un-contacted contact candidate matching the player's origin (student peer vs adult contact)."""
     char = db.get_character(user_id)
     contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "high_school_drama") if session else "high_school_drama"
+    from mechanics.social.origin_mode import resolve_player_age_profile
+
+    is_student = bool(resolve_player_age_profile(session, char).get("is_student"))
     party_npcs = db.get_session_party_npcs(session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
     contact_ids = {
@@ -609,6 +695,61 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
         for c in contacts
         if _is_peerpulse_or_dm_connected(c, party_names, scenario=scen_key) or _is_blocked_or_deceased_contact(c)
     }
+    contact_names_low = {
+        str(c.get("name") or "").strip().lower()
+        for c in contacts
+        if _is_peerpulse_or_dm_connected(c, party_names, scenario=scen_key) or _is_blocked_or_deceased_contact(c)
+    }
+
+    if not is_student:
+        import namegen
+        wr = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+        eligible_adults = [
+            r for r in wr
+            if _is_adult_world_row(r, scen_key)
+            and str(r.get("staff_status") or "active").strip().lower() not in ("deceased", "wiped", "removed")
+            and str(r.get("npc_id") or "").lower() not in contact_ids
+            and str(r.get("name") or "").strip().lower() not in contact_names_low
+        ]
+        chosen = None
+        if eligible_adults:
+            cur_loc = str((session or {}).get("current_location") or "").lower()
+            local_adults = [
+                r for r in eligible_adults
+                if str(r.get("workplace_node_id") or "").lower() in cur_loc
+                or str(r.get("hangout_node_id") or "").lower() in cur_loc
+            ]
+            chosen = random.choice(local_adults or eligible_adults)
+        if chosen and chosen.get("name"):
+            prof = lookup_social_profile(session_id, user_id, chosen["name"])
+            if prof and _is_adult_profile(prof, scen_key):
+                return prof
+
+        # Fallback: discover an adult local NPC without ever touching school_roster or student generators
+        cand_name = namegen.generate_person_name(scen_key)
+        npc_id = cand_name.lower().replace(" ", "_")
+        return {
+            "name": cand_name,
+            "handle": f"@{npc_id[:16]}",
+            "role": "Field Liaison",
+            "grade": "Adult",
+            "club": "None",
+            "clique": "Civic Network",
+            "facility": str((session or {}).get("current_location") or "Metropolitan Grid"),
+            "personality": "Composed local specialist open to reliable field contacts.",
+            "is_eligible": True,
+            "is_faculty": False,
+            "is_already_contact": False,
+            "can_dm": False,
+            "is_blocked_or_deceased": False,
+            "cooldown_turns_left": 0,
+            "on_cooldown": False,
+            "npc_id": npc_id,
+            "mutual_friends": [],
+            "is_sibling_friend": False,
+            "sibling_name": "",
+            "shared_club": "",
+        }
 
     roster = db.get_school_roster(session_id)
     import scenario_data
@@ -646,22 +787,17 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
 
 def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[dict]:
     """
-    Returns a prioritized list of suggested peer profiles for the PeerPulse social graph app.
-    
-    Priority order:
-    1. Known student/peers from the current scene & session history who are NOT yet unlocked contacts
-       (e.g. classmates in Homeroom like Henry Sterling, Diana Yamada, Kayo Yamamoto, Raphaël Ito).
-    2. Other students who share sibling bonds or club affiliations with known contacts.
-    3. Other eligible student peers from the school directory.
-    
-    Excludes:
-    - Faculty, staff, and adult authority figures (who cannot be added to student friend circles).
-    - Characters who are already unlocked contacts (relationship_score >= 100 or contact_added).
+    Returns prioritized connection suggestions tailored to the player's origin mode:
+    - Student PC: classmate/peer suggestions from scene, history, contacts, and school_roster (excludes faculty).
+    - Adult PC: adult city/agency/world contacts from scene, history, contacts, and world_roster (never school_roster or teen/student NPCs).
     """
     session = db.get_session(session_id) or {}
     scen_key = str(session.get("scenario") or "")
     char = db.get_character(user_id)
     char_name = str(char.get("name", "")).strip().lower() if char else ""
+    from mechanics.social.origin_mode import resolve_player_age_profile
+
+    is_student = bool(resolve_player_age_profile(session, char).get("is_student"))
     party_npcs = db.get_session_party_npcs(session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
 
@@ -679,7 +815,7 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
 
     suggested_names = []
 
-    # 1. Known peers in current scene
+    # 1. Known NPCs in current scene
     for n in (session.get("current_npcs") or []):
         name = n.get("name") if isinstance(n, dict) else str(n)
         clean_n = str(name or "").strip()
@@ -687,7 +823,7 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
             suggested_names.append(clean_n)
             seen_names.add(clean_n.lower())
 
-    # 2. Known peers in turn history (witnesses, dialogue partners)
+    # 2. Known NPCs in turn history (witnesses, dialogue partners)
     for h in reversed(session.get("history") or []):
         if not isinstance(h, dict):
             continue
@@ -704,30 +840,47 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
                 suggested_names.append(cdp)
                 seen_names.add(cdp.lower())
 
-    # 3. Known peers in contacts table who are not yet unlocked
+    # 3. Known NPCs in contacts table who are not yet unlocked
     for c in contacts:
         name = str(c.get("name") or "").strip()
         if name and name.lower() not in seen_names:
             suggested_names.append(name)
             seen_names.add(name.lower())
 
-    # 4. Fill remaining slots with school directory students
-    roster = db.get_school_roster(session_id) or []
-    for r in roster:
-        if len(suggested_names) >= limit:
-            break
-        r_name = str(r.get("name") or "").strip()
-        grade = str(r.get("grade", "")).strip().lower()
-        if r_name and r_name.lower() not in seen_names and grade not in ("faculty", "citizen"):
+    # 4. Origin-gated roster fill: students -> school_roster, adults -> world_roster ONLY
+    if is_student:
+        roster = db.get_school_roster(session_id) or []
+        for r in roster:
+            if len(suggested_names) >= limit:
+                break
+            r_name = str(r.get("name") or "").strip()
+            grade = str(r.get("grade", "")).strip().lower()
+            if r_name and r_name.lower() not in seen_names and grade not in ("faculty", "citizen"):
+                suggested_names.append(r_name)
+                seen_names.add(r_name.lower())
+    else:
+        world_roster = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+        for r in world_roster:
+            if len(suggested_names) >= limit:
+                break
+            r_name = str(r.get("name") or "").strip()
+            if not r_name or r_name.lower() in seen_names:
+                continue
+            if not _is_adult_world_row(r, scen_key):
+                continue
             suggested_names.append(r_name)
             seen_names.add(r_name.lower())
 
-    # Convert names into full PeerPulse social profiles
     profiles = []
     for name in suggested_names:
         prof = lookup_social_profile(session_id, user_id, name)
-        if prof and prof.get("is_eligible") and not prof.get("is_faculty") and not prof.get("is_blocked_or_deceased"):
-            if not prof.get("is_already_contact"):
+        if not prof or prof.get("is_blocked_or_deceased") or prof.get("is_already_contact"):
+            continue
+        if is_student:
+            if prof.get("is_eligible") and not prof.get("is_faculty"):
+                profiles.append(prof)
+        else:
+            if _is_adult_profile(prof, scen_key) and prof.get("is_eligible"):
                 profiles.append(prof)
         if len(profiles) >= limit:
             break

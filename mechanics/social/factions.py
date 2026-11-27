@@ -45,6 +45,27 @@ def get_faction_discount(score: int) -> int:
     return get_faction_tier(score)["discount_pct"]
 
 
+def is_spirit_court_faction(faction: Mapping[str, Any] | None) -> bool:
+    """Returns True when a faction row represents an autonomous Veiled Spirit Court."""
+    if not isinstance(faction, Mapping):
+        return False
+    cat = str(faction.get("category") or "").strip().lower()
+    tmpl = str(faction.get("hierarchy_template") or "").strip().lower()
+    fid = str(faction.get("faction_id") or "").strip().lower()
+    if (
+        cat == "spirit_court"
+        or tmpl == "spirit_court"
+        or fid in ("faction_spirit_kitsune", "faction_spirit_bunian", "faction_spirit_ghoul")
+    ):
+        return True
+    try:
+        from mechanics.combat.spells.spirit_court_perks import resolve_village_key_for_spirit_faction
+
+        return bool(resolve_village_key_for_spirit_faction(faction))
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------- Rank Hierarchy Templates
 FACTION_HIERARCHIES: Dict[str, List[Dict[str, Any]]] = {
     "council": [
@@ -160,6 +181,12 @@ FACTION_HIERARCHIES: Dict[str, List[Dict[str, Any]]] = {
         {"rank": 2, "title": "Salvage Specialist",            "required_rep": 30, "is_leader": False},
         {"rank": 3, "title": "Wreckmaster",                   "required_rep": 60, "is_leader": False},
         {"rank": 4, "title": "Scrap Baron",                   "required_rep": 85, "is_leader": True},
+    ],
+    "spirit_court": [
+        {"rank": 1, "title": "Threshold Guest",               "required_rep": 1,  "is_leader": False},
+        {"rank": 2, "title": "Court Confidant",               "required_rep": 25, "is_leader": False},
+        {"rank": 3, "title": "Cottage Honoree",               "required_rep": 70, "is_leader": False},
+        {"rank": 4, "title": "Sovereign's Sworn Ally",        "required_rep": 90, "is_leader": True},
     ],
     "default": [
         {"rank": 1, "title": "Chief Coordinator",             "required_rep": 1,  "is_leader": False},
@@ -1049,7 +1076,7 @@ def check_rival_or_hostile_turf_block(
     lookup_uid = user_id or eff_sess.get("host_user_id")
     player_fids: set[str] = set()
     if lookup_uid:
-        char = db.get_character(int(lookup_uid))
+        char = db.get_character(int(lookup_uid), session_id=session_id)
         jf = str((char or {}).get("joined_faction_id") or "").strip().lower()
         if jf:
             player_fids.add(jf)
@@ -1102,6 +1129,47 @@ def validate_faction_hq_action_access(
 
     is_anom = _sd.is_anomalous_incursions_scenario(scen_key)
     is_club = is_school_club_faction(dict(faction))
+    is_spirit_court = (
+        str(faction.get("category") or "").strip().lower() == "spirit_court"
+        or str(faction.get("hierarchy_template") or "").strip().lower() == "spirit_court"
+        or str(faction.get("faction_id") or "").strip().lower()
+        in ("faction_spirit_kitsune", "faction_spirit_bunian", "faction_spirit_ghoul")
+    )
+
+    if is_spirit_court:
+        from mechanics.combat.spells.spirit_court_perks import resolve_village_key_for_spirit_faction
+        from mechanics.narrative.spirit_court_bounties import is_spirit_court_bounty_board_eligible
+
+        sc_vk = resolve_village_key_for_spirit_faction(faction)
+        if act == "bounty":
+            if not sc_vk or not is_spirit_court_bounty_board_eligible(session_id, sc_vk, rep):
+                return (
+                    False,
+                    f"{fac_name} has sealed its commission board until exile atonement is completed (Standing > -61 required).",
+                    403,
+                )
+            return True, "", 200
+        if act == "rest":
+            if rep < 1 or (sc_vk and not is_spirit_court_bounty_board_eligible(session_id, sc_vk, rep)):
+                return (
+                    False,
+                    f"Threshold Guest standing (1+) with {fac_name} is required for complimentary safe rest.",
+                    403,
+                )
+            return True, "", 200
+        if act == "quartermaster":
+            return (
+                False,
+                f"{fac_name} trades directly through enclave apothecary stalls and Night Market wing artisans.",
+                400,
+            )
+        if act in ("join", "transfer", "leave", "promote", "challenge_leader"):
+            return (
+                False,
+                f"{fac_name} is an autonomous Spirit Court; formal enlistment is not used.",
+                400,
+            )
+        return True, "", 200
 
     if is_anom and is_club:
         if act == "quartermaster":
@@ -1277,6 +1345,16 @@ def get_faction_category_tag(faction: Dict[str, Any] | None, scenario_key: str =
     cat = str(faction.get("category") or "").strip().lower()
     tmpl = str(faction.get("hierarchy_template") or "").strip().lower()
     name_l = str(faction.get("name") or "").strip().lower()
+    if cat == "spirit_court" or tmpl == "spirit_court":
+        return {
+            "key": "spirit_court",
+            "domain": "spirit_world",
+            "is_school_club": False,
+            "is_joinable": False,
+            "label": "Spirit Court",
+            "icon": "⛩️",
+            "color": "cyan",
+        }
     arch = infer_anomalous_faction_archetype(faction)
 
     # 1. School & Campus Categories (High School Drama, Anomalous High School)
@@ -1445,10 +1523,13 @@ def infer_anomalous_faction_archetype(faction: Dict[str, Any]) -> str:
     """Infers which of the 6 fixed Anomalous Incursions archetypes a faction belongs to."""
     if not isinstance(faction, dict):
         return ""
+    cat = str(faction.get("category") or "").strip().lower()
+    hier_check = str(faction.get("hierarchy_template") or "").strip().lower()
+    if cat == "spirit_court" or hier_check == "spirit_court":
+        return ""
     arch = str(faction.get("archetype_key") or "").strip().lower()
     if arch in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
         return arch
-    cat = str(faction.get("category") or "").strip().lower()
     if cat in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
         return cat
     hq = str(faction.get("hq_location_id") or "").lower()
@@ -1610,6 +1691,16 @@ def get_active_perks(
     salary_suspended: bool = False,
 ) -> List[str]:
     """Return list of active perk strings based on the player's rank and reputation score."""
+    is_spirit_court = (
+        str(faction.get("category") or "").strip().lower() == "spirit_court"
+        or str(faction.get("hierarchy_template") or "").strip().lower() == "spirit_court"
+        or str(faction.get("faction_id") or "").strip().lower()
+        in ("faction_spirit_kitsune", "faction_spirit_bunian", "faction_spirit_ghoul")
+    )
+    if is_spirit_court:
+        from mechanics.combat.spells.spirit_court_perks import get_spirit_court_active_perks
+        return get_spirit_court_active_perks(faction, reputation_score)
+
     arch = infer_anomalous_faction_archetype(faction)
     if arch in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
         return get_anomalous_faction_perks_list(arch, max(1, int(player_rank or 1)), salary_suspended=bool(salary_suspended))
@@ -1682,44 +1773,49 @@ class FactionHQView(discord.ui.View):
 
     def build_buttons(self, user_id: int = None):
         self.clear_items()
-        
-        # If user_id is provided, customize view for them (for ephemeral responses)
-        # If not, provide generic buttons and check inside callback
-        btn = discord.ui.Button(label="Apply to Join", style=discord.ButtonStyle.success, emoji="📝")
-        btn.callback = self._on_apply
-        self.add_item(btn)
-        
-        # Member features
+        is_spirit_court = (
+            str(self.faction.get("category") or "").strip().lower() == "spirit_court"
+            or self.faction.get("is_joinable") == 0
+            or self.faction.get("joinable") is False
+        )
+        if not is_spirit_court:
+            btn = discord.ui.Button(label="Apply to Join", style=discord.ButtonStyle.success, emoji="📝")
+            btn.callback = self._on_apply
+            self.add_item(btn)
+
         btn = discord.ui.Button(label="Rest at HQ", style=discord.ButtonStyle.primary, emoji="🏕️")
         btn.callback = self._on_rest
         self.add_item(btn)
-        
-        btn = discord.ui.Button(label="Quartermaster", style=discord.ButtonStyle.success, emoji="🛍️")
-        btn.callback = self._on_quartermaster
-        self.add_item(btn)
-            
+
+        if not is_spirit_court:
+            btn = discord.ui.Button(label="Quartermaster", style=discord.ButtonStyle.success, emoji="🛍️")
+            btn.callback = self._on_quartermaster
+            self.add_item(btn)
+
         btn = discord.ui.Button(label="Bounty Board", style=discord.ButtonStyle.secondary, emoji="📋")
         btn.callback = self._on_bounty
         self.add_item(btn)
-            
-        btn = discord.ui.Button(label="Promotion Trial", style=discord.ButtonStyle.danger, emoji="⚔️")
-        btn.callback = self._on_promotion
-        self.add_item(btn)
+
+        if not is_spirit_court:
+            btn = discord.ui.Button(label="Promotion Trial", style=discord.ButtonStyle.danger, emoji="⚔️")
+            btn.callback = self._on_promotion
+            self.add_item(btn)
 
         try:
             import db
             import scenario_data as _sd_fhq
             sess_fhq = self._initial_session or (db.get_session(self.session_id) if self.session_id else None)
-            if sess_fhq and _sd_fhq.is_anomalous_incursions_scenario(sess_fhq.get("scenario", "")):
+            if not is_spirit_court and sess_fhq and _sd_fhq.is_anomalous_incursions_scenario(sess_fhq.get("scenario", "")):
                 cal_btn = discord.ui.Button(label="Telemetry Calibration", style=discord.ButtonStyle.primary, emoji="🧬")
                 cal_btn.callback = self._on_calibrate
                 self.add_item(cal_btn)
         except Exception:
             pass
 
-        leave = discord.ui.Button(label="Leave HQ", style=discord.ButtonStyle.secondary, emoji="🚪")
-        leave.callback = self._on_leave
-        self.add_item(leave)
+        if not is_spirit_court:
+            leave = discord.ui.Button(label="Leave HQ", style=discord.ButtonStyle.secondary, emoji="🚪")
+            leave.callback = self._on_leave
+            self.add_item(leave)
 
     async def _on_apply(self, interaction: discord.Interaction):
         if not await self.interaction_check(interaction):
@@ -2347,8 +2443,8 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
                 except Exception:
                     pass
 
-            # Bidirectional sync to school_directory if a contact officer isn't in school_directory yet
-            if is_school and m_low not in dir_by_name:
+            # Bidirectional sync to school_directory ONLY for school club/student factions
+            if is_school and is_school_club_faction(f) and m_low not in dir_by_name:
                 b_info = (matched_c.get("basic_info") or {}) if matched_c else {}
                 c_grade = str(b_info.get("grade") or ("Senior" if r_entry.get("rank", 1) >= 3 else "Junior")).strip()
                 c_role_str = str(b_info.get("role") or r_title).strip()
@@ -2403,6 +2499,14 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
     if new_dir_entries:
         try:
             db.save_school_roster(session_id, new_dir_entries)
+        except Exception:
+            pass
+
+    if is_school:
+        try:
+            from mechanics.social.employment_policy import heal_invalid_teen_civilian_employment
+
+            heal_invalid_teen_civilian_employment(session_id, scen_key=scen_key, factions=factions)
         except Exception:
             pass
 
@@ -2852,7 +2956,7 @@ def get_anomalous_faction_state(
         else (db.get_factions(session_id) or [])
     )
     lookup_uid = user_id or session.get("host_user_id")
-    char = db.get_character(lookup_uid) if lookup_uid else None
+    char = db.get_character(lookup_uid, session_id=session_id) if lookup_uid else None
     is_student = is_student_operative(session)
     default_free_title = "Independent Student Operative" if is_student else "Independent Freelancer"
 
@@ -2930,7 +3034,7 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
 
     session = db.get_session(session_id) or {}
     lookup_uid = user_id or session.get("host_user_id")
-    char = db.get_character(lookup_uid) if lookup_uid else None
+    char = db.get_character(lookup_uid, session_id=session_id) if lookup_uid else None
     is_student = is_student_operative(session) or str(state.get("origin_mode") or "").lower() == "student"
     default_free_title = "Independent Student Operative" if is_student else "Independent Freelancer"
 
@@ -3104,7 +3208,7 @@ def join_or_transfer_anomalous_faction(
         try:
             from mechanics.narrative.bounty import parse_anomalous_quest_board_source
             active_qs = db.get_session_quests(session_id, status="Active") or []
-            allowed_keep = {"freelance_app", "story_quest"}
+            allowed_keep = {"freelance_app", "story_quest", "spirit_court"}
             if target_arch and target_arch not in ("freelancer", "student_freelancer"):
                 allowed_keep.add(target_arch)
             for aq in active_qs:
@@ -3263,6 +3367,15 @@ def join_or_transfer_anomalous_faction(
 
     if not matched_fac:
         return {"success": False, "error": f"Faction '{target_faction_or_archetype}' not found."}
+
+    if str(matched_fac.get("category") or "").strip().lower() == "spirit_court":
+        return {
+            "success": False,
+            "error": (
+                f"{matched_fac.get('name', 'Spirit Court')} is an autonomous Spirit Realm Court; "
+                "you earn standing and hospitality there without leaving your human Agency or Club."
+            ),
+        }
 
     if is_school_club_faction(matched_fac):
         if not is_student:

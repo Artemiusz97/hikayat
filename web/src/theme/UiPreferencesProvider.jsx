@@ -13,6 +13,16 @@ export const ACRYLIC_MODES = ['full', 'focused', 'solid'];
 export const READING_MODES = ['scene', 'continuous'];
 export const CLOCK_FORMATS = ['12h', '24h'];
 export const DEFAULT_CLOCK_FORMAT = '24h';
+export const TIME_SKIP_CONTROLS = ['slider', 'dial'];
+export const DEFAULT_TIME_SKIP_CONTROL = 'dial';
+export const PHONE_UI_STYLES = ['classic', 'glass'];
+export const PHONE_CAROUSEL_POOLS = ['all_builtin', 'scenario_and_photos', 'photos_only', 'custom'];
+export const PHONE_WALLPAPER_FOCALS = ['top', 'center', 'bottom'];
+export const PHONE_CLOCK_STYLES = ['modern', 'serif'];
+export const MIN_WALLPAPER_DIM = 0;
+export const MAX_WALLPAPER_DIM = 70;
+export const DEFAULT_WALLPAPER_DIM = 25;
+const MAX_STORED_SESSION_WALLPAPERS = 30;
 export const MIN_ACRYLIC_OPACITY = 5;
 export const MAX_ACRYLIC_OPACITY = 95;
 export const DEFAULT_ACRYLIC_OPACITY = 50;
@@ -33,6 +43,43 @@ const clampTextScale = (value) => {
   return Math.min(MAX_TEXT_SCALE, Math.max(MIN_TEXT_SCALE, Math.round(num)));
 };
 
+const clampWallpaperDim = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return DEFAULT_WALLPAPER_DIM;
+  return Math.min(MAX_WALLPAPER_DIM, Math.max(MIN_WALLPAPER_DIM, Math.round(num)));
+};
+
+const sanitizeSessionWallpapers = (rawMap) => {
+  if (!rawMap || typeof rawMap !== 'object') return {};
+  const entries = Object.entries(rawMap)
+    .filter(
+      ([sid, val]) =>
+        sid &&
+        val &&
+        typeof val === 'object' &&
+        (val.type === 'npc_photo' || val.type === 'scene') &&
+        typeof val.url === 'string' &&
+        val.url.trim()
+    )
+    .slice(-MAX_STORED_SESSION_WALLPAPERS);
+  return Object.fromEntries(entries);
+};
+
+export const DEFAULT_PHONE_PREFS = {
+  uiStyle: 'classic',
+  wallpaperId: 'iphone_default',
+  sessionWallpapers: {},
+  carouselEnabled: false,
+  carouselPool: 'all_builtin',
+  carouselCustomIds: [],
+  includeIntimateInCarousel: false,
+  wallpaperDim: DEFAULT_WALLPAPER_DIM,
+  blurInApps: true,
+  dynamicTimeTint: false,
+  wallpaperFocal: 'center',
+  clockStyle: 'modern',
+};
+
 const DEFAULT_HUD = {
   leftPanel: null, // null | 'utility' | 'map'
   actionBarCollapsed: false,
@@ -49,10 +96,12 @@ const DEFAULT_PREFS = {
   illustratedBackdrops: true,
   readingMode: 'continuous',
   clockFormat: DEFAULT_CLOCK_FORMAT,
+  timeSkipControl: DEFAULT_TIME_SKIP_CONTROL,
   uiFont: THEME_DEFAULT_FONT_ID,
   narrationFont: THEME_DEFAULT_FONT_ID,
   ambientSceneBackdrop: false,
   hud: DEFAULT_HUD,
+  phone: DEFAULT_PHONE_PREFS,
 };
 
 export const readStoredPrefs = () => {
@@ -88,6 +137,9 @@ export const readStoredPrefs = () => {
     const clockFormat = CLOCK_FORMATS.includes(parsed.clockFormat)
       ? parsed.clockFormat
       : DEFAULT_PREFS.clockFormat;
+    const timeSkipControl = TIME_SKIP_CONTROLS.includes(parsed.timeSkipControl)
+      ? parsed.timeSkipControl
+      : DEFAULT_PREFS.timeSkipControl;
     const uiFont =
       typeof parsed.uiFont === 'string' && parsed.uiFont.trim()
         ? parsed.uiFont.trim()
@@ -107,6 +159,41 @@ export const readStoredPrefs = () => {
         ? rawHud.leftPanel
         : null;
 
+    const rawPhone = parsed.phone && typeof parsed.phone === 'object' ? parsed.phone : {};
+    const phone = {
+      uiStyle: PHONE_UI_STYLES.includes(rawPhone.uiStyle)
+        ? rawPhone.uiStyle
+        : DEFAULT_PHONE_PREFS.uiStyle,
+      wallpaperId:
+        typeof rawPhone.wallpaperId === 'string' && rawPhone.wallpaperId.trim()
+          ? rawPhone.wallpaperId.trim()
+          : DEFAULT_PHONE_PREFS.wallpaperId,
+      sessionWallpapers: sanitizeSessionWallpapers(rawPhone.sessionWallpapers),
+      carouselEnabled: Boolean(rawPhone.carouselEnabled),
+      carouselPool: PHONE_CAROUSEL_POOLS.includes(rawPhone.carouselPool)
+        ? rawPhone.carouselPool
+        : DEFAULT_PHONE_PREFS.carouselPool,
+      carouselCustomIds: Array.isArray(rawPhone.carouselCustomIds)
+        ? rawPhone.carouselCustomIds.map((x) => String(x)).filter(Boolean).slice(0, 60)
+        : [],
+      includeIntimateInCarousel: Boolean(rawPhone.includeIntimateInCarousel),
+      wallpaperDim:
+        rawPhone.wallpaperDim === undefined || rawPhone.wallpaperDim === null
+          ? DEFAULT_WALLPAPER_DIM
+          : clampWallpaperDim(rawPhone.wallpaperDim),
+      blurInApps:
+        typeof rawPhone.blurInApps === 'boolean'
+          ? rawPhone.blurInApps
+          : DEFAULT_PHONE_PREFS.blurInApps,
+      dynamicTimeTint: Boolean(rawPhone.dynamicTimeTint),
+      wallpaperFocal: PHONE_WALLPAPER_FOCALS.includes(rawPhone.wallpaperFocal)
+        ? rawPhone.wallpaperFocal
+        : DEFAULT_PHONE_PREFS.wallpaperFocal,
+      clockStyle: PHONE_CLOCK_STYLES.includes(rawPhone.clockStyle)
+        ? rawPhone.clockStyle
+        : DEFAULT_PHONE_PREFS.clockStyle,
+    };
+
     return {
       acrylicMode,
       acrylicOpacity,
@@ -114,6 +201,7 @@ export const readStoredPrefs = () => {
       illustratedBackdrops,
       readingMode,
       clockFormat,
+      timeSkipControl,
       uiFont,
       narrationFont,
       ambientSceneBackdrop,
@@ -125,6 +213,7 @@ export const readStoredPrefs = () => {
         outcomeCollapsed: Boolean(rawHud.outcomeCollapsed),
         epistemicCollapsed: Boolean(rawHud.epistemicCollapsed),
       },
+      phone,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -245,6 +334,13 @@ export const UiPreferencesProvider = ({ children }) => {
     );
   }, []);
 
+  const setTimeSkipControl = useCallback((control) => {
+    if (!TIME_SKIP_CONTROLS.includes(control)) return;
+    setPrefs((prev) =>
+      prev.timeSkipControl === control ? prev : { ...prev, timeSkipControl: control }
+    );
+  }, []);
+
   const setTextScale = useCallback((scale) => {
     const next = clampTextScale(scale);
     setPrefs((prev) =>
@@ -306,6 +402,60 @@ export const UiPreferencesProvider = ({ children }) => {
     }));
   }, []);
 
+  const setPhonePref = useCallback((key, value) => {
+    if (!(key in DEFAULT_PHONE_PREFS)) return;
+    let nextVal = value;
+    if (key === 'uiStyle' && !PHONE_UI_STYLES.includes(value)) return;
+    if (key === 'carouselPool' && !PHONE_CAROUSEL_POOLS.includes(value)) return;
+    if (key === 'wallpaperFocal' && !PHONE_WALLPAPER_FOCALS.includes(value)) return;
+    if (key === 'clockStyle' && !PHONE_CLOCK_STYLES.includes(value)) return;
+    if (key === 'wallpaperDim') nextVal = clampWallpaperDim(value);
+    if (key === 'carouselEnabled' || key === 'includeIntimateInCarousel' || key === 'blurInApps' || key === 'dynamicTimeTint') {
+      nextVal = Boolean(value);
+    }
+    if (key === 'carouselCustomIds') {
+      nextVal = Array.isArray(value) ? value.map(String).filter(Boolean).slice(0, 60) : [];
+    }
+    if (key === 'wallpaperId') {
+      nextVal = typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_PHONE_PREFS.wallpaperId;
+    }
+    setPrefs((prev) => ({
+      ...prev,
+      phone: {
+        ...prev.phone,
+        [key]: nextVal,
+      },
+    }));
+  }, []);
+
+  const setSessionPhoneWallpaper = useCallback((sessionId, wallpaperEntryOrNull) => {
+    if (sessionId == null || sessionId === '') return;
+    const sidKey = String(sessionId);
+    setPrefs((prev) => {
+      const currentMap = { ...(prev.phone?.sessionWallpapers || {}) };
+      if (!wallpaperEntryOrNull || typeof wallpaperEntryOrNull !== 'object' || !wallpaperEntryOrNull.url) {
+        if (!(sidKey in currentMap)) return prev;
+        delete currentMap[sidKey];
+      } else {
+        delete currentMap[sidKey];
+        currentMap[sidKey] = {
+          type: wallpaperEntryOrNull.type === 'scene' ? 'scene' : 'npc_photo',
+          id: wallpaperEntryOrNull.id ?? null,
+          url: String(wallpaperEntryOrNull.url),
+          label: String(wallpaperEntryOrNull.label || ''),
+        };
+      }
+      const trimmed = sanitizeSessionWallpapers(currentMap);
+      return {
+        ...prev,
+        phone: {
+          ...prev.phone,
+          sessionWallpapers: trimmed,
+        },
+      };
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       acrylicMode: prefs.acrylicMode,
@@ -328,12 +478,17 @@ export const UiPreferencesProvider = ({ children }) => {
       setReadingMode,
       clockFormat: prefs.clockFormat,
       setClockFormat,
+      timeSkipControl: prefs.timeSkipControl,
+      setTimeSkipControl,
       ambientSceneBackdrop: prefs.ambientSceneBackdrop,
       setAmbientSceneBackdrop,
       hud: prefs.hud,
       setHudField,
       toggleHudField,
       toggleLeftPanel,
+      phonePrefs: prefs.phone,
+      setPhonePref,
+      setSessionPhoneWallpaper,
     }),
     [
       prefs,
@@ -349,10 +504,13 @@ export const UiPreferencesProvider = ({ children }) => {
       setIllustratedBackdrops,
       setReadingMode,
       setClockFormat,
+      setTimeSkipControl,
       setAmbientSceneBackdrop,
       setHudField,
       toggleHudField,
       toggleLeftPanel,
+      setPhonePref,
+      setSessionPhoneWallpaper,
     ]
   );
 

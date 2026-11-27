@@ -45,6 +45,42 @@ from mechanics.world.world_schedule import (
 _MIN_SLEEP_DOORBELL_AFFINITY = 40
 
 
+def _resolve_sleep_doorbell_threshold(
+    merged: Mapping[str, Any],
+    eff_contact: Mapping[str, Any] | None = None,
+) -> int:
+    """Scales sleep doorbell affinity threshold by Erotic Openness + With-You Comfort."""
+    app: dict[str, Any] = {}
+    for rec in (merged, eff_contact):
+        if isinstance(rec, Mapping):
+            raw_app = parse_dict(rec.get("appearance")) or rec.get("appearance")
+            if isinstance(raw_app, Mapping) and raw_app:
+                app.update(raw_app)
+    raw_op = app.get("erotic_openness") or app.get("openness")
+    if raw_op in (None, ""):
+        return _MIN_SLEEP_DOORBELL_AFFINITY
+
+    from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+    op_tier = normalize_openness_tier(raw_op)
+    if op_tier in ("bold", "shameless"):
+        return 30
+    if op_tier == "prude":
+        score = extract_affinity(merged, eff_contact)
+        rel_track = str((eff_contact or merged).get("relationship_track") or (eff_contact or merged).get("track") or "platonic")
+        sh_cnt = len((eff_contact or {}).get("gameplay_intimate_events") or [])
+        is_host = str((eff_contact or merged).get("disposition") or "").strip().lower() == "hostile"
+        comf = compute_with_you_comfort(
+            op_tier,
+            relationship_score=score,
+            relationship_track=rel_track,
+            shared_intimate_count=sh_cnt,
+            is_hostile=is_host,
+        )
+        return 65 if comf["stage"] == "guarded" else _MIN_SLEEP_DOORBELL_AFFINITY
+    return _MIN_SLEEP_DOORBELL_AFFINITY
+
+
 def resolve_sleep_windows(
     npc: Mapping[str, Any],
     scen_key: str,
@@ -362,7 +398,7 @@ def check_doorbell_etiquette(
             override_reason="commitment_or_crisis",
         )
 
-    if extract_affinity(merged, eff_contact) >= _MIN_SLEEP_DOORBELL_AFFINITY:
+    if extract_affinity(merged, eff_contact) >= _resolve_sleep_doorbell_threshold(merged, eff_contact):
         return _result(
             applicable=True,
             doorbell_status="answered",

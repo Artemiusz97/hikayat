@@ -426,6 +426,11 @@ def preload_presence_context(
         roster_rows = (db.get_world_roster(sid, include_legacy_rosters=False) or []) if sid > 0 else []
         if sid > 0 and heal_stale_civic_hq_staff(sid, scen_key=eff_scen, roster=roster_rows, nodes_by_id=nodes_by_id, contacts=contacts):
             roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
+        if sid > 0:
+            from mechanics.social.employment_policy import heal_invalid_teen_civilian_employment
+
+            if heal_invalid_teen_civilian_employment(sid, scen_key=eff_scen, roster=roster_rows, nodes_by_id=nodes_by_id):
+                roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
     elif sid > 0:
         # Read-only pre-turn stage preview: seed inside a rolled-back SAVEPOINT and defer
         # persistent world_roster inserts until UnitOfWork commit in apply_outcome.

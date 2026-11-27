@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -12,8 +12,6 @@ import {
   Flame,
   History,
   LogOut,
-  Map,
-  MapPin,
   Menu,
   Package,
   ScrollText,
@@ -22,19 +20,13 @@ import {
   Smartphone,
   User,
   Users,
-  WifiOff,
   X,
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { apiCall } from '../api/client';
-import CharacterSheet from '../components/Sidebar/CharacterSheet';
-import InventoryPanel from '../components/Sidebar/InventoryPanel';
-import PartyWidget from '../components/Sidebar/PartyWidget';
-import ContactsPanel from '../components/Sidebar/ContactsPanel';
-import QuestLogPanel from '../components/Sidebar/QuestLogPanel';
-import CodexPanel from '../components/Sidebar/CodexPanel';
+import NpcProfileSideCard from '../components/Sidebar/NpcProfileSideCard';
 import {
   EpistemicWatchStrip,
   LatestOutcomeCard,
@@ -47,30 +39,15 @@ import LanguageSwitcher from '../components/Common/LanguageSwitcher';
 import ThemeSwitcher from '../components/Common/ThemeSwitcher';
 import AcrylicModeSwitcher from '../components/Common/AcrylicModeSwitcher';
 import GameMenu from '../components/Common/GameMenu';
-import ConfirmDialog from '../components/Common/ConfirmDialog';
 import {
   AcrylicPanel,
   CollapsibleSection,
   EASE_OUT,
-  LazyMount,
   MotionButton,
   SPRING_PANEL,
-  isTopEscapeLayer,
-  registerEscapeLayer,
 } from '../components/Common/MotionPrimitives';
 import { copyToClipboard } from '../utils/clipboard';
-
-const PhoneModal = lazy(() => import('../components/Phone/PhoneModal'));
-const MerchantModal = lazy(() => import('../components/Merchant/MerchantModal'));
-const SavesModal = lazy(() => import('../components/Saves/SavesModal'));
-const SettingsModal = lazy(() => import('../components/Settings/SettingsModal'));
-const WorldMapModal = lazy(() => import('../components/Modals/WorldMapModal'));
-const TurnHistoryModal = lazy(() => import('../components/Modals/TurnHistoryModal'));
-const TimeSkipModal = lazy(() => import('../components/Modals/TimeSkipModal'));
-const QuickBeltPopover = lazy(() => import('../components/Modals/QuickBeltPopover'));
-const GiveGiftModal = lazy(() => import('../components/Modals/GiveGiftModal'));
-const ExamineModal = lazy(() => import('../components/Modals/ExamineModal'));
-const EntityContractsModal = lazy(() => import('../components/Modals/EntityContractsModal'));
+import { useEscapeLayer } from '../hooks/useEscapeLayer';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useInventory } from '../hooks/useInventory';
 import { useCodex } from '../hooks/useCodex';
@@ -80,11 +57,11 @@ import { useUiPreferences } from '../theme/UiPreferencesProvider';
 import { formatCleanLocation } from '../utils/locationFormat';
 import { formatCleanDeviceName } from '../utils/consumables';
 import { isAnomalousScenarioKey, isValidSessionId } from '../utils/session';
-import {
-  formatClockTime,
-  getDayOfWeekLabel,
-  getTimeOfDayPhaseInfo,
-} from '../utils/timeFormat';
+import { matchesNpcIdentity, resolveSceneNpcProfile } from '../utils/npcProfile';
+import { isAnomalousNpc, normalizeActorName } from '../utils/sceneTargets';
+import GameTopLeftControls from './GameTopLeftControls';
+import GameLeftDrawerContent from './GameLeftDrawerContent';
+import GameViewModals from './GameViewModals';
 
 const GameView = ({
   user,
@@ -156,8 +133,11 @@ const GameView = ({
   const headerCopyTimerRef = useRef(null);
   const [targetContactName, setTargetContactName] = useState(null);
   const [targetContactPulse, setTargetContactPulse] = useState(0);
+  const [inspectedSceneNpc, setInspectedSceneNpc] = useState(null);
   const [phoneInitialNpc, setPhoneInitialNpc] = useState(null);
   const [isStealthActive, setIsStealthActive] = useState(false);
+  const [stealthError, setStealthError] = useState(null);
+  const stealthPendingRef = useRef(false);
   const [lastSeenChatCount, setLastSeenChatCount] = useState(
     () => partyChatMessages.length
   );
@@ -166,6 +146,14 @@ const GameView = ({
   const codex = useCodex(session?.id, user, session, refreshSession);
   const phone = usePhone(session?.id, user);
   const settings = useSettings(user?.user_id);
+
+  const resolvedSceneNpcProfile = useMemo(
+    () =>
+      inspectedSceneNpc
+        ? resolveSceneNpcProfile(inspectedSceneNpc, session, codex)
+        : null,
+    [inspectedSceneNpc, session, codex]
+  );
 
   const isPartyTabVisible =
     hud.leftPanel === 'utility' && activeUtilityTab === 'party';
@@ -184,41 +172,50 @@ const GameView = ({
     if (headerCopyTimerRef.current) clearTimeout(headerCopyTimerRef.current);
   }, []);
 
-  useEffect(() => {
-    if (isDesktop || hud.leftPanel === null) return undefined;
-    const token = Symbol('mobile-left-drawer-esc');
-    const unregister = registerEscapeLayer(token);
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
-        e.preventDefault();
-        e.stopPropagation();
-        setHudField('leftPanel', null);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      unregister();
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [isDesktop, hud.leftPanel, setHudField]);
+  useEscapeLayer(
+    !isDesktop && hud.leftPanel !== null,
+    () => setHudField('leftPanel', null),
+    'mobile-left-drawer-esc'
+  );
+  useEscapeLayer(
+    !isDesktop && mobileSheet !== null,
+    () => setMobileSheet(null),
+    'mobile-sheet-esc'
+  );
 
   useEffect(() => {
-    if (isDesktop || mobileSheet === null) return undefined;
-    const token = Symbol('mobile-sheet-esc');
-    const unregister = registerEscapeLayer(token);
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
-        e.preventDefault();
-        e.stopPropagation();
-        setMobileSheet(null);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      unregister();
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [isDesktop, mobileSheet]);
+    if (!inspectedSceneNpc) return;
+    const currentList = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
+    const stillPresent = currentList.some(
+      (entry) =>
+        !isAnomalousNpc(entry) &&
+        matchesNpcIdentity(entry, inspectedSceneNpc)
+    );
+    if (!stillPresent) {
+      setInspectedSceneNpc(null);
+    }
+  }, [inspectedSceneNpc, session?.current_npcs]);
+
+  useEffect(() => {
+    setInspectedSceneNpc(null);
+  }, [session?.id]);
+
+  useEffect(() => {
+    if (!isDesktop && mobileSheet !== 'npcs' && inspectedSceneNpc) {
+      setInspectedSceneNpc(null);
+    }
+  }, [isDesktop, mobileSheet, inspectedSceneNpc]);
+
+  useEscapeLayer(
+    isDesktop && Boolean(inspectedSceneNpc),
+    () => setInspectedSceneNpc(null),
+    'npc-profile-side-esc'
+  );
+  useEscapeLayer(
+    !isDesktop && mobileSheet === 'npcs' && Boolean(inspectedSceneNpc),
+    () => setInspectedSceneNpc(null),
+    'mobile-npc-profile-esc'
+  );
 
   const handleConfirmEndSession = async () => {
     if (!endSession || endingSessionBusy) return;
@@ -231,22 +228,47 @@ const GameView = ({
     }
   };
 
-  const handleSelectContact = (name) => {
+  const handleConsumeTargetContact = useCallback(() => {
+    setTargetContactName(null);
+  }, []);
+
+  const handleOpenNpcInRoster = (name, preferredTarget = null) => {
+    setInspectedSceneNpc(null);
     setTargetContactName(name);
-    setTargetContactPulse(Date.now());
+    setTargetContactPulse((prev) => prev + 1);
     const needle = String(name ?? '').trim().toLowerCase();
-    const isPersonalContact =
-      needle &&
-      (codex.contacts || []).some(
-        (c) =>
-          !c.is_dispatch_channel &&
-          (String(c.name ?? '').trim().toLowerCase() === needle ||
-            String(c.id ?? '').trim().toLowerCase() === needle ||
-            String(c.npc_id ?? '').trim().toLowerCase() === needle)
-      );
-    setActiveUtilityTab(isPersonalContact ? 'contacts' : 'codex');
+    const isPersonalOrAcq =
+      preferredTarget === 'contacts' ||
+      preferredTarget === 'acquaintances' ||
+      (preferredTarget !== 'codex' &&
+        needle &&
+        ((codex.contacts || []).some(
+          (c) =>
+            !c.is_dispatch_channel &&
+            (String(c.name ?? '').trim().toLowerCase() === needle ||
+              String(c.id ?? '').trim().toLowerCase() === needle ||
+              String(c.npc_id ?? '').trim().toLowerCase() === needle)
+        ) ||
+          (codex.acquaintances || []).some(
+            (a) =>
+              String(a.name ?? '').trim().toLowerCase() === needle ||
+              String(a.id ?? '').trim().toLowerCase() === needle ||
+              String(a.npc_id ?? '').trim().toLowerCase() === needle ||
+              String(a.npc_key ?? '').trim().toLowerCase() === needle
+          )));
+    setActiveUtilityTab(isPersonalOrAcq ? 'contacts' : 'codex');
     setMobileSheet(null);
     setHudField('leftPanel', 'utility');
+  };
+
+  const handleInspectSceneNpc = (name) => {
+    const cleanTarget = normalizeActorName(name).toLowerCase();
+    if (!cleanTarget) return;
+    setInspectedSceneNpc((prev) =>
+      prev && (normalizeActorName(prev).toLowerCase() === cleanTarget || matchesNpcIdentity({ name: prev }, name))
+        ? null
+        : name
+    );
   };
 
   const handleMessageContact = (npc) => {
@@ -341,65 +363,135 @@ const GameView = ({
     sidebarRefreshRef.current.refreshPhone();
   }, [lastSyncTimestamp]);
 
+  const turnBusy = Boolean(processingTurn || waitingForParty || isStreaming);
+  const stealthActiveRef = useRef(isStealthActive);
+  stealthActiveRef.current = isStealthActive;
+  const stealthPromiseRef = useRef(null);
+  const activeSessionIdRef = useRef(session?.id);
+  activeSessionIdRef.current = session?.id;
+
   useEffect(() => {
     const isHidden = session?.stealth_state?.is_hidden;
-    if (typeof isHidden === 'boolean') {
-      setIsStealthActive(isHidden);
-    }
-  }, [session?.stealth_state?.is_hidden]);
+    const nextHidden = typeof isHidden === 'boolean' ? isHidden : false;
+    stealthActiveRef.current = nextHidden;
+    setIsStealthActive(nextHidden);
+  }, [session?.id, session?.stealth_state?.is_hidden]);
 
   const handleToggleStealth = async () => {
-    const nextState = !isStealthActive;
+    if (stealthPendingRef.current) return stealthPromiseRef.current;
+    const reqSid = session?.id;
+    const prevState = stealthActiveRef.current;
+    const nextState = !prevState;
+    stealthActiveRef.current = nextState;
     setIsStealthActive(nextState);
-    if (isValidSessionId(session?.id) && user?.user_id) {
-      try {
-        const res = await apiCall('/api/adventure/toggle_stealth', {
-          method: 'POST',
-          body: JSON.stringify({
-            session_id: session.id,
-            user_id: user.user_id,
-            active: nextState,
-          }),
-        });
-        if (res?.session && setSession) {
-          setSession((prev) => ({
-            ...res.session,
-            scene_image_url:
-              res.session?.scene_image_url || prev?.scene_image_url || null,
-          }));
+    setStealthError(null);
+    if (isValidSessionId(reqSid) && user?.user_id) {
+      stealthPendingRef.current = true;
+      const syncPromise = (async () => {
+        try {
+          const res = await apiCall('/api/adventure/toggle_stealth', {
+            method: 'POST',
+            body: JSON.stringify({
+              session_id: reqSid,
+              user_id: user.user_id,
+              active: nextState,
+            }),
+          });
+          if (String(activeSessionIdRef.current) !== String(reqSid)) {
+            return;
+          }
+          if (res?.session) {
+            const serverHidden = res.session?.stealth_state?.is_hidden;
+            if (typeof serverHidden === 'boolean') {
+              stealthActiveRef.current = serverHidden;
+              setIsStealthActive(serverHidden);
+            }
+            if (setSession) {
+              setSession((prev) =>
+                prev && String(prev.id) === String(reqSid)
+                  ? {
+                      ...res.session,
+                      scene_image_url:
+                        res.session?.scene_image_url || prev?.scene_image_url || null,
+                    }
+                  : prev
+              );
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to sync stealth stance to server:', err);
+          if (String(activeSessionIdRef.current) === String(reqSid)) {
+            stealthActiveRef.current = prevState;
+            setIsStealthActive(prevState);
+            setStealthError(err?.message || 'Failed to sync stealth stance.');
+          }
+        } finally {
+          stealthPendingRef.current = false;
+          if (stealthPromiseRef.current === syncPromise) {
+            stealthPromiseRef.current = null;
+          }
         }
-      } catch (err) {
-        console.warn('Failed to sync stealth stance to server:', err);
-      }
+      })();
+      stealthPromiseRef.current = syncPromise;
+      return syncPromise;
     }
+    return null;
   };
 
   const handleAction = async (actionData) => {
+    const reqSid = session?.id;
+    if (stealthPromiseRef.current) {
+      try {
+        await stealthPromiseRef.current;
+      } catch {}
+      if (reqSid != null && String(activeSessionIdRef.current) !== String(reqSid)) {
+        return;
+      }
+    }
     const finalAction = { ...actionData };
     const intent = finalAction.intent || '';
     const isVoluntaryDisengage =
       intent === 'rest_sleep' || intent === 'dialogue_init';
 
     if (isVoluntaryDisengage) {
-      setIsStealthActive(false);
       finalAction.is_stealth = false;
-    } else if (isStealthActive && finalAction.is_stealth !== false) {
+    } else if (stealthActiveRef.current && finalAction.is_stealth !== false) {
       finalAction.is_stealth = true;
       finalAction.stance = finalAction.stance || 'stealth';
     }
 
-    const outcome = await submitAction(finalAction);
+    let outcome;
+    try {
+      outcome = await submitAction(finalAction);
+    } catch {
+      return;
+    }
+    if (!outcome) {
+      return;
+    }
+    if (isVoluntaryDisengage) {
+      stealthActiveRef.current = false;
+      setIsStealthActive(false);
+    }
     if (outcome?.status === 'accepted') {
       return;
     }
     const updatedStealth = outcome?.session?.stealth_state || outcome?.stealth_state;
     if (updatedStealth && typeof updatedStealth.is_hidden === 'boolean') {
+      stealthActiveRef.current = updatedStealth.is_hidden;
       setIsStealthActive(updatedStealth.is_hidden);
     }
   };
 
   const handleFastTravel = async (destination) => {
-    if (!destination || processingTurn) return;
+    if (!destination || turnBusy) return;
+    if (typeof destination === 'object' && destination.direct_choice) {
+      await handleAction({
+        intent: 'movement',
+        direct_choice: destination.direct_choice,
+      });
+      return;
+    }
     const cleanDest =
       formatCleanLocation(destination, { includeZone: true, style: 'badge' }) ||
       destination;
@@ -415,7 +507,7 @@ const GameView = ({
   };
 
   const handleCastSpell = async (spell) => {
-    if (!spell?.name || processingTurn) return;
+    if (!spell?.name || turnBusy) return;
     await handleAction({
       custom_action_text: `Cast ${spell.name}`,
       stat: 'INT',
@@ -460,6 +552,11 @@ const GameView = ({
       .length || null;
 
   const isAnomalous = isAnomalousScenarioKey(session?.scenario);
+  useEffect(() => {
+    if (!isAnomalous && activeUtilityTab === 'contracts') {
+      setActiveUtilityTab('hero');
+    }
+  }, [isAnomalous, activeUtilityTab]);
   const contractsBadge = session?.contracts_hud?.has_breach
     ? '!'
     : session?.contracts_hud?.available_count > 0
@@ -523,263 +620,11 @@ const GameView = ({
       : []),
   ];
 
-  const renderUtilityContent = () => {
-    switch (activeUtilityTab) {
-      case 'contracts':
-        return (
-          <Suspense fallback={<div className="p-4 text-xs text-gray-400">{t('common.loading', 'Loading...')}</div>}>
-            <EntityContractsModal
-              mode="drawer"
-              isOpen={true}
-              onClose={() => setHudField('leftPanel', null)}
-              onExpandModal={() => {
-                setHudField('leftPanel', null);
-                setContractsModalOpen(true);
-              }}
-              session={session}
-              user={user}
-              onSessionUpdated={handleSessionLoaded}
-              onContractMutated={() => {
-                refreshCharacter();
-                inventory.refreshInventory();
-                codex.refreshCodex();
-              }}
-            />
-          </Suspense>
-        );
-      case 'inventory':
-        return (
-          <InventoryPanel
-            inventoryHook={inventory}
-            onRefreshCharacter={refreshCharacter}
-            onRefreshCodex={codex.refreshCodex}
-            sessionId={session?.id}
-            session={session}
-            onAction={handleAction}
-            inCombat={inCombat}
-            currentUserId={user?.user_id}
-          />
-        );
-      case 'party':
-        return (
-          <PartyWidget
-            session={session}
-            currentUserId={user?.user_id}
-            characterName={character?.name || user?.display_name}
-            onlineUserIds={onlineUserIds}
-            partyChatMessages={partyChatMessages}
-            onSendPartyChat={sendPartyChat}
-            onSessionUpdated={handleSessionLoaded}
-            onTriggerAction={handleAction}
-          />
-        );
-      case 'contacts':
-        return (
-          <ContactsPanel
-            codexHook={codex}
-            session={session}
-            user={user}
-            onSessionUpdated={handleSessionLoaded}
-            onMessageContact={handleMessageContact}
-            onJumpToCharacterInCodex={(npcName) => {
-              setTargetContactName(npcName);
-              setTargetContactPulse(Date.now());
-              setActiveUtilityTab('codex');
-            }}
-            targetContactName={targetContactName}
-            targetContactPulse={targetContactPulse}
-          />
-        );
-      case 'quests':
-        return (
-          <QuestLogPanel
-            codexHook={codex}
-            onRefreshCharacter={refreshCharacter}
-            character={character}
-            session={session}
-            scenario={session?.scenario || character?.scenario}
-            onOpenWorldMap={(targetLoc) => openWorldMap(targetLoc)}
-          />
-        );
-      case 'codex':
-        return (
-          <CodexPanel
-            codexHook={codex}
-            session={session}
-            user={user}
-            onSessionUpdated={handleSessionLoaded}
-            onRefreshCharacter={refreshCharacter}
-            onOpenMerchant={() => setMerchantModalOpen(true)}
-            onTriggerAction={handleAction}
-            targetContactName={targetContactName}
-            targetContactPulse={targetContactPulse}
-            isStreaming={isStreaming}
-            processingTurn={processingTurn}
-            onJumpToSavedContact={(npcName) => {
-              setTargetContactName(npcName);
-              setTargetContactPulse(Date.now());
-              setActiveUtilityTab('contacts');
-            }}
-          />
-        );
-      case 'hero':
-      default:
-        return (
-          <CharacterSheet
-            character={
-              session?.player_clothing_status && character
-                ? {
-                    ...character,
-                    clothing_status: session.player_clothing_status,
-                  }
-                : character
-            }
-            scenario={session?.scenario || character?.scenario}
-            onAllocateStat={allocateStatPoint}
-            onCastSpell={handleCastSpell}
-            onRefreshCharacter={refreshCharacter}
-            processingTurn={processingTurn}
-          />
-        );
-    }
+  const handleToggleWorldMapDrawer = () => {
+    setWorldMapTargetLocation(null);
+    toggleLeftPanel('map');
   };
 
-  const renderLeftPanelContent = () => {
-    if (hud.leftPanel === 'map') {
-      return (
-        <Suspense fallback={<div className="p-4 text-xs text-gray-400">{t('common.loading', 'Loading...')}</div>}>
-          <WorldMapModal
-            mode="drawer"
-            isOpen={true}
-            onClose={() => setHudField('leftPanel', null)}
-            onExpandModal={() => {
-              setHudField('leftPanel', null);
-              setWorldMapExpandedOpen(true);
-            }}
-            session={session}
-            user={user}
-            onTravel={handleFastTravel}
-            initialTargetLocation={worldMapTargetLocation}
-            processingTurn={processingTurn}
-          />
-        </Suspense>
-      );
-    }
-
-    const activeTabMeta =
-      utilityTabs.find((tb) => tb.id === activeUtilityTab) || utilityTabs[0];
-
-    return (
-      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-        {/* Vertical Icon Rail */}
-        <nav
-          aria-label={t('nav.utility', 'Utilities')}
-          className="w-[3.25rem] shrink-0 border-r border-fantasy-border/30 py-2.5 flex flex-col items-center gap-1.5"
-        >
-          {utilityTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeUtilityTab === tab.id;
-            return (
-              <MotionButton
-                key={tab.id}
-                onClick={() => setActiveUtilityTab(tab.id)}
-                title={tab.label}
-                aria-label={tab.label}
-                aria-current={isActive ? 'page' : undefined}
-                className={`relative w-10 h-10 rounded-xl grid place-items-center transition-colors ${
-                  isActive
-                    ? 'bg-fantasy-accent text-black shadow-sm'
-                    : 'text-gray-300 hover:text-gray-50 hover:bg-gray-500/15'
-                }`}
-              >
-                <Icon size={18} />
-                {tab.badge != null && (
-                  <span
-                    className={`absolute -top-1 -right-1 min-w-[0.95rem] h-[0.95rem] px-1 rounded-full text-[9px] font-bold leading-[0.95rem] text-center ${
-                      tab.badge === '!' || tab.alert
-                        ? 'bg-emerald-400 text-black animate-pulse'
-                        : isActive
-                          ? 'bg-black/80 text-white'
-                          : 'bg-gray-600 text-gray-100'
-                    }`}
-                  >
-                    {tab.badge}
-                  </span>
-                )}
-              </MotionButton>
-            );
-          })}
-        </nav>
-
-        {/* Borderless Utility Content Pane */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-fantasy-border/25 flex items-center justify-between gap-2 shrink-0">
-            <span className="text-xs font-semibold uppercase tracking-wider text-fantasy-accent truncate">
-              {activeTabMeta.label}
-            </span>
-            <MotionButton
-              onClick={() => setHudField('leftPanel', null)}
-              className="hk-icon-btn h-7 min-w-7"
-              aria-label={t('common.close', 'Close')}
-              title={t('common.close', 'Close')}
-            >
-              <X size={15} />
-            </MotionButton>
-          </div>
-          <div
-            className={
-              activeUtilityTab === 'contracts'
-                ? 'hk-utility-pane flex-1 min-h-0 flex flex-col overflow-hidden'
-                : 'hk-utility-pane flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] custom-scrollbar p-3.5 flex flex-col'
-            }
-          >
-            {renderUtilityContent()}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const locationLabel = (() => {
-    const raw = session?.current_location || '';
-    const parts = String(raw)
-      .split(/\s*(?:->|→|➔|>|›|»|\|)\s*/)
-      .filter(Boolean);
-    return parts[parts.length - 1] || session?.scene_title || 'Hikayat';
-  })();
-  const currentDay = Number(session?.current_day || 1);
-  const currentMinute =
-    session?.current_minute !== undefined && session?.current_minute !== null
-      ? Number(session.current_minute)
-      : 480;
-  const turnCount = Number.isFinite(Number(session?.turn_count))
-    ? Math.max(0, Math.floor(Number(session.turn_count)))
-    : Array.isArray(session?.history)
-      ? session.history.filter(
-          (entry) => entry && typeof entry === 'object' && entry.type !== 'scene'
-        ).length
-      : 0;
-  const dayLabel = getDayOfWeekLabel(currentDay, t);
-  const shortDayLabel = getDayOfWeekLabel(currentDay, t, { short: true });
-  const formattedClock = formatClockTime(currentMinute, clockFormat);
-  const timePhase = getTimeOfDayPhaseInfo(currentMinute, t);
-  const TimePhaseIcon = timePhase.Icon;
-  const turnLabel = t('scene.turn_counter', {
-    count: turnCount,
-    defaultValue: `Turn ${turnCount}`,
-  });
-  const shortTurnLabel = t('scene.turn_counter_short', {
-    count: turnCount,
-    defaultValue: `T${turnCount}`,
-  });
-  const dayCountLabel = t('scene.day_counter', {
-    count: currentDay,
-    defaultValue: `Day ${currentDay}`,
-  });
-  const shortDayCountLabel = t('scene.day_counter_short', {
-    count: currentDay,
-    defaultValue: `D${currentDay}`,
-  });
   const inCombat = Boolean(
     session?.is_in_combat ||
       session?.in_combat ||
@@ -893,102 +738,57 @@ const GameView = ({
     fn();
   };
 
-  const renderTopLeftControls = (compact = false) => (
-    <div
-      className={
-        compact
-          ? 'flex items-center gap-1.5 min-w-0 flex-1'
-          : 'flex flex-wrap items-center gap-1.5 min-w-0'
-      }
-    >
-      <MotionButton
-        onClick={() => toggleLeftPanel('utility')}
-        aria-expanded={hud.leftPanel === 'utility'}
-        aria-label={t('nav.utility', 'Utilities')}
-        title={t('nav.utility', 'Utilities')}
-        className={`hk-acrylic-pill w-10 h-10 grid place-items-center shrink-0 relative ${
-          hud.leftPanel === 'utility'
-            ? 'text-fantasy-accent ring-1 ring-fantasy-accent/60'
-            : 'text-gray-100 hover:text-fantasy-accent'
-        }`}
-      >
-        <Compass size={18} />
-        {hasUtilityAlert && (
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-fantasy-accent animate-pulse" />
-        )}
-      </MotionButton>
+  const leftDrawerProps = {
+    leftPanel: hud.leftPanel,
+    utilityTabs,
+    activeUtilityTab,
+    setActiveUtilityTab,
+    setHudField,
+    worldMapTargetLocation,
+    setWorldMapTargetLocation,
+    setWorldMapExpandedOpen,
+    setContractsModalOpen,
+    setMerchantModalOpen,
+    session,
+    user,
+    character,
+    inventory,
+    codex,
+    inCombat,
+    isStreaming,
+    processingTurn: turnBusy,
+    onlineUserIds,
+    partyChatMessages,
+    sendPartyChat,
+    allocateStatPoint,
+    refreshCharacter,
+    handleAction,
+    handleFastTravel,
+    handleCastSpell,
+    handleSessionLoaded,
+    handleMessageContact,
+    openWorldMap,
+    targetContactName,
+    setTargetContactName,
+    targetContactPulse,
+    setTargetContactPulse,
+    handleConsumeTargetContact,
+  };
 
-      <MotionButton
-        onClick={() => toggleLeftPanel('map')}
-        aria-expanded={hud.leftPanel === 'map'}
-        aria-label={t('nav.map', 'World Map')}
-        title={t('nav.map', 'World Map')}
-        className={`hk-acrylic-pill w-10 h-10 grid place-items-center shrink-0 ${
-          hud.leftPanel === 'map'
-            ? 'text-fantasy-accent ring-1 ring-fantasy-accent/60'
-            : 'text-gray-100 hover:text-fantasy-accent'
-        }`}
-      >
-        <Map size={18} />
-      </MotionButton>
-
-      <MotionButton
-        onClick={() => toggleLeftPanel('map')}
-        title={session?.current_location || locationLabel}
-        className={`hk-acrylic-pill min-h-10 h-auto py-1.5 px-3.5 inline-flex items-center gap-2 text-left min-w-0 ${
-          compact ? 'flex-1' : 'max-w-[clamp(10rem,13vw,22rem)]'
-        }`}
-      >
-        <MapPin size={14} className="text-fantasy-accent shrink-0" />
-        <span className="text-xs font-semibold text-gray-100 truncate">
-          {locationLabel}
-        </span>
-      </MotionButton>
-
-      <MotionButton
-        onClick={() => {
-          if (!processingTurn && !inCombat) setTimeSkipModalOpen(true);
-        }}
-        disabled={processingTurn || inCombat}
-        title={
-          inCombat
-            ? `${dayLabel} • ${formattedClock} (${timePhase.label}) • ${dayCountLabel} • ${turnLabel} — ${t('actions.cannot_rest_combat', 'Cannot rest during combat')}`
-            : `${dayLabel} • ${formattedClock} (${timePhase.label}) • ${dayCountLabel} • ${turnLabel} — ${t('actions.open_chronos', 'Open Chronos Dial to advance time and rest')}`
-        }
-        className={`hk-acrylic-pill min-h-10 h-auto py-1.5 ${
-          compact ? 'px-2.5' : 'px-3.5'
-        } inline-flex items-center gap-1.5 shrink-0 disabled:opacity-75`}
-      >
-        <TimePhaseIcon
-          size={14}
-          className={`${timePhase.colorClass} shrink-0`}
-          aria-hidden="true"
-        />
-        <span
-          className={`${
-            compact ? 'text-[11px]' : 'text-xs'
-          } font-semibold text-gray-100 tabular-nums whitespace-nowrap`}
-        >
-          {compact
-            ? `${shortDayLabel} • ${formattedClock} • ${shortDayCountLabel} • ${shortTurnLabel}`
-            : `${dayLabel} • ${formattedClock} • ${dayCountLabel} • ${turnLabel}`}
-        </span>
-      </MotionButton>
-
-      {wsStatus === 'reconnecting' && (
-        <span
-          role="status"
-          aria-live="polite"
-          className="hk-acrylic-pill h-10 px-3 inline-flex items-center gap-1.5 shrink-0 text-xs font-semibold text-amber-300 border border-amber-500/40 bg-amber-950/50"
-        >
-          <WifiOff size={13} className="animate-pulse shrink-0" />
-          <span className={compact ? 'hidden sm:inline' : ''}>
-            {t('status.reconnecting', 'Reconnecting…')}
-          </span>
-        </span>
-      )}
-    </div>
-  );
+  const topLeftControlsProps = {
+    session,
+    leftPanel: hud.leftPanel,
+    clockFormat,
+    wsStatus,
+    processingTurn: turnBusy,
+    inCombat,
+    hasUtilityAlert,
+    onToggleUtility: () => toggleLeftPanel('utility'),
+    onToggleWorldMap: handleToggleWorldMapDrawer,
+    onOpenTimeSkip: () => {
+      if (!turnBusy && !inCombat) setTimeSkipModalOpen(true);
+    },
+  };
 
   const renderHamburgerMenu = () => (
     <GameMenu
@@ -1055,9 +855,23 @@ const GameView = ({
       isStreaming={isStreaming}
       waitingForParty={waitingForParty}
       partyStatus={partyStatus}
-      onSelectContact={handleSelectContact}
-      actionError={actionError}
-      clearActionError={clearActionError}
+      onSelectContact={handleOpenNpcInRoster}
+      actionError={actionError || stealthError}
+      clearActionError={() => {
+        setStealthError(null);
+        if (clearActionError) clearActionError();
+      }}
+      onReloadSession={(loadedSess) => {
+        if (loadedSess && setSession) {
+          setSession(loadedSess);
+        } else if (refreshSession) {
+          refreshSession();
+        }
+        if (refreshCharacter) {
+          refreshCharacter();
+        }
+      }}
+      onExitToDashboard={exitToDashboard}
       collapsed={hud.actionBarCollapsed}
       onToggleCollapse={() => toggleHudField('actionBarCollapsed')}
     />
@@ -1074,13 +888,12 @@ const GameView = ({
       {isDesktop ? (
         /* DESKTOP FLOATING SPATIAL HUD (>= 1280px) */
         <div className="h-full w-full p-3 flex gap-3 min-w-0 overflow-hidden">
-          {/* Left + Center Workspace: Floating Top Controls & Drawer + Full-Height Top-Level Centered Narration + Bottom Action Dock Row */}
           <main className="flex-1 min-w-0 flex flex-col gap-2.5 h-full min-h-0">
             {/* Stage Row: Floating Top-Left Controls & Drawer + Full-Height Centered Narration */}
             <div className="relative flex-1 min-h-0 flex min-w-0 pointer-events-none">
               <div className="pointer-events-none absolute inset-y-0 left-0 z-20 flex flex-col gap-2.5 min-h-0 max-w-full">
                 <div className="shrink-0 pointer-events-auto w-fit max-w-[max(var(--hk-right-rail-w),calc(50vw_-_23rem_-_1.75rem))]">
-                  {renderTopLeftControls()}
+                  <GameTopLeftControls {...topLeftControlsProps} />
                 </div>
 
                 <AnimatePresence>
@@ -1095,7 +908,7 @@ const GameView = ({
                           : 'w-[min(46vw,clamp(26.5rem,30vw,37rem))]'
                       }`}
                     >
-                      {renderLeftPanelContent()}
+                      <GameLeftDrawerContent {...leftDrawerProps} />
                     </AcrylicPanel>
                   )}
                 </AnimatePresence>
@@ -1107,6 +920,31 @@ const GameView = ({
               >
                 {renderNarrationCard({ compactDesktop: true })}
               </section>
+
+              <AnimatePresence>
+                {inspectedSceneNpc && resolvedSceneNpcProfile && (
+                  <AcrylicPanel
+                    key="npc-profile-side-card"
+                    variant="panel"
+                    origin="right"
+                    role="complementary"
+                    aria-label={t('scene.npc_profile_panel', {
+                      name: resolvedSceneNpcProfile.npc?.name || inspectedSceneNpc,
+                      defaultValue: `${resolvedSceneNpcProfile.npc?.name || inspectedSceneNpc} Profile`,
+                    })}
+                    className="pointer-events-auto absolute top-[3.125rem] bottom-0 right-0 z-20 w-[clamp(21rem,24vw,26rem)] max-w-[calc(100%-1rem)] flex flex-col overflow-hidden"
+                  >
+                    <NpcProfileSideCard
+                      profile={resolvedSceneNpcProfile}
+                      session={session}
+                      codexHook={codex}
+                      onClose={() => setInspectedSceneNpc(null)}
+                      onOpenInRoster={handleOpenNpcInRoster}
+                      onInspectLinkedNpc={(linkedName) => setInspectedSceneNpc(linkedName)}
+                    />
+                  </AcrylicPanel>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Bottom Dock Row: Collapsible Special Actions Dock + Dedicated Smartphone + Action Choices */}
@@ -1212,7 +1050,8 @@ const GameView = ({
                 />
                 <PresentNpcsCard
                   session={session}
-                  onSelectContact={handleSelectContact}
+                  onSelectContact={handleInspectSceneNpc}
+                  selectedNpcName={inspectedSceneNpc}
                   onQuickAction={handleAction}
                   collapsed={hud.npcsCollapsed}
                   onToggleCollapse={() => toggleHudField('npcsCollapsed')}
@@ -1239,7 +1078,7 @@ const GameView = ({
         >
           {/* Floating Top Bar */}
           <header className="flex items-center gap-1.5 shrink-0 min-w-0">
-            {renderTopLeftControls(true)}
+            <GameTopLeftControls {...topLeftControlsProps} compact />
             {renderHamburgerMenu()}
           </header>
 
@@ -1346,7 +1185,7 @@ const GameView = ({
                     onClick={(e) => e.stopPropagation()}
                     className="hk-acrylic relative w-[min(30rem,94dvw)] h-full flex overflow-hidden z-10"
                   >
-                    {renderLeftPanelContent()}
+                    <GameLeftDrawerContent {...leftDrawerProps} />
                   </motion.div>
                 </motion.div>
               )}
@@ -1402,14 +1241,30 @@ const GameView = ({
 
                     {mobileSheet === 'npcs' && (
                       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                        <EpistemicWatchStrip session={session} isSheet />
-                        <PresentNpcsCard
-                          session={session}
-                          onSelectContact={handleSelectContact}
-                          onQuickAction={handleAction}
-                          isSheet
-                          className="flex-1"
-                        />
+                        {inspectedSceneNpc && resolvedSceneNpcProfile ? (
+                          <NpcProfileSideCard
+                            isSheet
+                            profile={resolvedSceneNpcProfile}
+                            session={session}
+                            codexHook={codex}
+                            onBack={() => setInspectedSceneNpc(null)}
+                            onClose={() => setMobileSheet(null)}
+                            onOpenInRoster={handleOpenNpcInRoster}
+                            onInspectLinkedNpc={(linkedName) => setInspectedSceneNpc(linkedName)}
+                          />
+                        ) : (
+                          <>
+                            <EpistemicWatchStrip session={session} isSheet />
+                            <PresentNpcsCard
+                              session={session}
+                              onSelectContact={handleInspectSceneNpc}
+                              selectedNpcName={inspectedSceneNpc}
+                              onQuickAction={handleAction}
+                              isSheet
+                              className="flex-1"
+                            />
+                          </>
+                        )}
                       </div>
                     )}
 
@@ -1450,206 +1305,58 @@ const GameView = ({
           document.body
         )}
 
-      {/* Full Turn History Chronicle Modal */}
-      <LazyMount open={historyModalOpen}>
-        <TurnHistoryModal
-          isOpen={historyModalOpen}
-          onClose={() => setHistoryModalOpen(false)}
-          session={session}
-          scenario={session?.scenario || character?.scenario}
-          onRerollImage={rerollImage}
-          rerollingImage={rerollingImage}
-        />
-      </LazyMount>
-
-      {/* Expanded Full-Screen World Atlas Modal */}
-      <LazyMount open={worldMapExpandedOpen}>
-        <WorldMapModal
-          mode="modal"
-          isOpen={worldMapExpandedOpen}
-          onClose={() => {
-            setWorldMapExpandedOpen(false);
-            setWorldMapTargetLocation(null);
-          }}
-          session={session}
-          user={user}
-          onTravel={handleFastTravel}
-          initialTargetLocation={worldMapTargetLocation}
-          processingTurn={processingTurn}
-        />
-      </LazyMount>
-
-      {/* Merchant Emporium Modal */}
-      <LazyMount open={merchantModalOpen}>
-        <MerchantModal
-          isOpen={merchantModalOpen}
-          onClose={() => setMerchantModalOpen(false)}
-          session={session}
-          user={user}
-          onRefreshCodex={codex.refreshCodex}
-          onTransactionComplete={() => {
-            refreshCharacter();
-            inventory.refreshInventory();
-          }}
-        />
-      </LazyMount>
-
-      {/* Smartphone OS Modal */}
-      <LazyMount open={phoneModalOpen}>
-        <PhoneModal
-          isOpen={phoneModalOpen}
-          onClose={() => setPhoneModalOpen(false)}
-          phoneHook={phone}
-          codexHook={codex}
-          session={session}
-          user={user}
-          initialChatNpc={phoneInitialNpc}
-          onClearInitialChatNpc={() => setPhoneInitialNpc(null)}
-          onRefreshInventory={inventory.refreshInventory}
-          onRefreshCodex={codex.refreshCodex}
-          onRefreshCharacter={refreshCharacter}
-        />
-      </LazyMount>
-
-      {/* Save / Load Checkpoints Modal */}
-      <LazyMount open={savesModalOpen}>
-        <SavesModal
-          isOpen={savesModalOpen}
-          onClose={() => setSavesModalOpen(false)}
-          user={user}
-          onSessionLoaded={handleSessionLoaded}
-        />
-      </LazyMount>
-
-      {/* Chronicle Preferences & Streaming Settings Modal */}
-      <LazyMount open={settingsModalOpen}>
-        <SettingsModal
-          isOpen={settingsModalOpen}
-          onClose={() => setSettingsModalOpen(false)}
-          settingsHook={settings}
-          user={user}
-          session={session}
-          onSessionUpdated={handleSessionLoaded}
-          onRefreshCharacter={refreshCharacter}
-          onRefreshCodex={codex.refreshCodex}
-        />
-      </LazyMount>
-
-      {/* Zero-Turn Async Examine / Intel Modal */}
-      <LazyMount open={examineModalOpen}>
-        <ExamineModal
-          isOpen={examineModalOpen}
-          onClose={() => setExamineModalOpen(false)}
-          session={session}
-          user={user}
-          inCombat={inCombat}
-          processing={processingTurn}
-          onTargetUseItem={(target) => {
-            setExamineModalOpen(false);
-            setUseItemInitialTarget(target);
-            setQuickBeltModalOpen(true);
-          }}
-          onTargetGiveGift={(target) => {
-            setExamineModalOpen(false);
-            setGiveGiftInitialTarget(target);
-            setGiveGiftModalOpen(true);
-          }}
-          onPickupItem={(rawName, displayName) => {
-            setExamineModalOpen(false);
-            handleAction({
-              choice_index: null,
-              direct_choice: {
-                label: `Pick up ${displayName || rawName}`,
-                pickup_item_name: rawName,
-                stat: 'FREE',
-                requirement: 0,
-              },
-            });
-          }}
-          onOpenWorldMap={(locName) => {
-            setWorldMapTargetLocation(locName);
-            setWorldMapExpandedOpen(true);
-          }}
-        />
-      </LazyMount>
-
-      {/* Contextual Use Item Modal */}
-      <LazyMount open={quickBeltModalOpen}>
-        <QuickBeltPopover
-          isOpen={quickBeltModalOpen}
-          onClose={() => setQuickBeltModalOpen(false)}
-          items={inventory?.items}
-          inventoryHook={inventory}
-          session={session}
-          character={character}
-          currentUserId={user?.user_id}
-          presentNpcs={session?.current_npcs || []}
-          inCombat={inCombat}
-          isStealthActive={isStealthActive}
-          initialTarget={useItemInitialTarget}
-          onClearInitialTarget={() => setUseItemInitialTarget(null)}
-          onAction={handleAction}
-          onRefreshCharacter={refreshCharacter}
-          processing={processingTurn}
-        />
-      </LazyMount>
-
-      {/* Give Gift / Transfer Item Modal */}
-      <LazyMount open={giveGiftModalOpen}>
-        <GiveGiftModal
-          isOpen={giveGiftModalOpen}
-          onClose={() => setGiveGiftModalOpen(false)}
-          items={inventory?.items}
-          inventoryHook={inventory}
-          session={session}
-          presentNpcs={session?.current_npcs || []}
-          currentUserId={user?.user_id}
-          initialTarget={giveGiftInitialTarget}
-          onClearInitialTarget={() => setGiveGiftInitialTarget(null)}
-          onAction={handleAction}
-          processing={processingTurn}
-        />
-      </LazyMount>
-
-      {/* Entity Contracts & Devil Pacts Modal */}
-      {isAnomalousScenarioKey(session?.scenario) && (
-        <LazyMount open={contractsModalOpen}>
-          <EntityContractsModal
-            isOpen={contractsModalOpen}
-            onClose={() => setContractsModalOpen(false)}
-            session={session}
-            user={user}
-            onSessionUpdated={handleSessionLoaded}
-            onContractMutated={() => {
-              refreshCharacter();
-              inventory.refreshInventory();
-              codex.refreshCodex();
-            }}
-          />
-        </LazyMount>
-      )}
-
-      {/* Chronos Dial Time Skip Modal */}
-      <LazyMount open={timeSkipModalOpen}>
-        <TimeSkipModal
-          isOpen={timeSkipModalOpen}
-          onClose={() => setTimeSkipModalOpen(false)}
-          session={session}
-          phoneHook={phone}
-          onAction={handleAction}
-          processing={processingTurn}
-        />
-      </LazyMount>
-
-      <ConfirmDialog
-        isOpen={endSessionConfirmOpen}
-        onClose={() => setEndSessionConfirmOpen(false)}
-        onConfirm={handleConfirmEndSession}
-        busy={endingSessionBusy}
-        tone="danger"
-        title={t('dashboard.confirm_end_session_title', 'End Adventure Session?')}
-        message={t('dashboard.confirm_end_session', 'End this adventure session?')}
-        confirmLabel={t('dashboard.end', 'End')}
+      <GameViewModals
+        session={session}
+        setSession={setSession}
+        user={user}
+        character={character}
+        inventory={inventory}
+        codex={codex}
+        phone={phone}
+        settings={settings}
+        inCombat={inCombat}
+        isStealthActive={isStealthActive}
+        processingTurn={turnBusy}
+        rerollImage={rerollImage}
+        rerollingImage={rerollingImage}
+        handleFastTravel={handleFastTravel}
+        handleAction={handleAction}
+        handleSessionLoaded={handleSessionLoaded}
+        refreshCharacter={refreshCharacter}
+        historyModalOpen={historyModalOpen}
+        setHistoryModalOpen={setHistoryModalOpen}
+        worldMapExpandedOpen={worldMapExpandedOpen}
+        setWorldMapExpandedOpen={setWorldMapExpandedOpen}
+        worldMapTargetLocation={worldMapTargetLocation}
+        setWorldMapTargetLocation={setWorldMapTargetLocation}
+        merchantModalOpen={merchantModalOpen}
+        setMerchantModalOpen={setMerchantModalOpen}
+        phoneModalOpen={phoneModalOpen}
+        setPhoneModalOpen={setPhoneModalOpen}
+        phoneInitialNpc={phoneInitialNpc}
+        setPhoneInitialNpc={setPhoneInitialNpc}
+        savesModalOpen={savesModalOpen}
+        setSavesModalOpen={setSavesModalOpen}
+        settingsModalOpen={settingsModalOpen}
+        setSettingsModalOpen={setSettingsModalOpen}
+        examineModalOpen={examineModalOpen}
+        setExamineModalOpen={setExamineModalOpen}
+        quickBeltModalOpen={quickBeltModalOpen}
+        setQuickBeltModalOpen={setQuickBeltModalOpen}
+        useItemInitialTarget={useItemInitialTarget}
+        setUseItemInitialTarget={setUseItemInitialTarget}
+        giveGiftModalOpen={giveGiftModalOpen}
+        setGiveGiftModalOpen={setGiveGiftModalOpen}
+        giveGiftInitialTarget={giveGiftInitialTarget}
+        setGiveGiftInitialTarget={setGiveGiftInitialTarget}
+        contractsModalOpen={contractsModalOpen}
+        setContractsModalOpen={setContractsModalOpen}
+        timeSkipModalOpen={timeSkipModalOpen}
+        setTimeSkipModalOpen={setTimeSkipModalOpen}
+        endSessionConfirmOpen={endSessionConfirmOpen}
+        setEndSessionConfirmOpen={setEndSessionConfirmOpen}
+        endingSessionBusy={endingSessionBusy}
+        onConfirmEndSession={handleConfirmEndSession}
       />
     </div>
   );

@@ -12,10 +12,40 @@ from .seeds import _slugify, _is_school_campus_hq, _SCHOOL_CAMPUS_HQ_KEYWORDS
 def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int = 0, char_name: str = "") -> Tuple[str, str, str]:
 
     """Returns the starting (Zone, Primary, Sub) for a scenario from seeds."""
+    from .hierarchy import resolve_session_location_tokens, resolve_default_sublocation
 
     scen_data = get_scenario_seed_data(scenario_key)
-
-    zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
+    realms = list(scen_data.get("realms") or [])
+    zones = []
+    for r in realms:
+        r_rules_hidden = bool(r.get("is_hidden"))
+        if r_rules_hidden:
+            continue
+        r_id_str = str(r.get("id") or "")
+        r_zones = [dict(z_item, _realm_id=r_id_str) for z_item in (r.get("zones") or [])]
+        if r.get("is_primary_realm", True) and r_zones:
+            r_zones = [
+                dict(z_item, _realm_id=r_id_str)
+                for z_item in inject_anomalous_faction_hq_facilities(r_zones, session_id=session_id, scenario_key=scenario_key)
+            ]
+        zones.extend(r_zones)
+        if r.get("primary_locations"):
+            zones.append({
+                "id": r_id_str,
+                "_realm_id": r_id_str,
+                "name": resolve_session_location_tokens(session_id, str(r.get("name") or "Realm"), scenario_key, char_name),
+                "primary_locations": r.get("primary_locations") or [],
+            })
+        if r.get("sub_locations"):
+            r_disp = resolve_session_location_tokens(session_id, str(r.get("name") or "Realm"), scenario_key, char_name)
+            zones.append({
+                "id": r_id_str,
+                "_realm_id": r_id_str,
+                "name": r_disp,
+                "primary_locations": [{"id": r_id_str, "name": r_disp, "sub_locations": r.get("sub_locations") or []}],
+            })
+    if not zones:
+        zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
 
     if zones:
 
@@ -53,7 +83,6 @@ def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int =
                 p_name = get_session_urban_facility_name(session_id, zones[0].get("id", ""), p_id, p_name, scenario_key, char_name)
 
             subs = primaries[0].get("sub_locations") or []
-            from .hierarchy import resolve_session_location_tokens, resolve_default_sublocation
 
             if subs:
 
@@ -78,7 +107,6 @@ def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int =
                 resolve_session_location_tokens(session_id, s_name, scenario_key, char_name)
             )
 
-        from .hierarchy import resolve_session_location_tokens, resolve_default_sublocation
         z_res = resolve_session_location_tokens(session_id, z_name, scenario_key, char_name)
         return (
             z_res,
@@ -980,6 +1008,7 @@ def rollback_hidden_club_discoveries_after_turn(
     with ctx as c:
         rows = c.execute(
             "SELECT node_id, parent_id, state_json FROM world_nodes WHERE session_id = ? "
+            "AND COALESCE(UPPER(node_type), '') != 'REALM' "
             "AND (node_id = 'loc_nsfw_club_facility' OR state_json LIKE '%discovered_turn%' OR state_json LIKE '%unlocked_turn%')",
             (int(session_id),),
         ).fetchall()
@@ -1045,7 +1074,7 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
     """Ensures seed locations exist in SQLite for the session."""
 
-    if not is_location_engine_enabled(scenario_key):
+    if not is_location_engine_enabled(scenario_key) or db.is_in_readonly_uow():
 
         return
 
@@ -1125,8 +1154,58 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
 
     scen_data = get_scenario_seed_data(scenario_key)
+    realms = list(scen_data.get("realms") or [])
+    existing_graph_nodes = db.get_session_world_nodes(session_id) if session_id else []
+    if not existing and existing_graph_nodes and any(str(n.get("node_type") or "").upper() == "REALM" for n in existing_graph_nodes):
+        graph_ids = {str(n.get("node_id") or "") for n in existing_graph_nodes if n.get("node_id")}
+        seed_ids: set[str] = set()
+        for r in realms:
+            if r.get("id"):
+                seed_ids.add(str(r["id"]))
+            for z in (r.get("zones") or []):
+                if z.get("id"):
+                    seed_ids.add(str(z["id"]))
+        for z in (scen_data.get("zones") or []):
+            if z.get("id"):
+                seed_ids.add(str(z["id"]))
+        if not (graph_ids & seed_ids):
+            try:
+                from .realms import ensure_default_realm_wrapper
+                ensure_default_realm_wrapper(session_id, scenario_key)
+            except Exception:
+                pass
+            return
 
-    zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
+    zones = []
+    for r in realms:
+        r_rules_hidden = bool(r.get("is_hidden"))
+        if r_rules_hidden:
+            continue
+        r_id_str = str(r.get("id") or "")
+        r_zones = [dict(z_item, _realm_id=r_id_str) for z_item in (r.get("zones") or [])]
+        if r.get("is_primary_realm", True) and r_zones:
+            r_zones = [
+                dict(z_item, _realm_id=r_id_str)
+                for z_item in inject_anomalous_faction_hq_facilities(r_zones, session_id=session_id, scenario_key=scenario_key)
+            ]
+        zones.extend(r_zones)
+        if r.get("primary_locations"):
+            zones.append({
+                "id": r_id_str,
+                "_realm_id": r_id_str,
+                "name": resolve_session_location_tokens(session_id, str(r.get("name") or "Realm"), scenario_key, char_name),
+                "primary_locations": r.get("primary_locations") or [],
+            })
+        if r.get("sub_locations"):
+            r_disp = resolve_session_location_tokens(session_id, str(r.get("name") or "Realm"), scenario_key, char_name)
+            zones.append({
+                "id": r_id_str,
+                "_realm_id": r_id_str,
+                "name": r_disp,
+                "primary_locations": [{"id": r_id_str, "name": r_disp, "sub_locations": r.get("sub_locations") or []}],
+            })
+    if not zones:
+        zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
 
 
 
@@ -1486,7 +1565,9 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                     "atmosphere": fac_atmosphere,
 
-                    "is_dynamic": 0
+                    "is_dynamic": 0,
+
+                    "preferred_realm_id": str(zone.get("_realm_id") or ""),
 
                 })
 
@@ -1502,7 +1583,9 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
     # Spatial graph is seeded before faction HQ reconciliation below
     try:
         from .graph_seeder import ensure_session_spatial_graph_seeded
+        from .realms import ensure_default_realm_wrapper
         ensure_session_spatial_graph_seeded(session_id, scenario_key, char_name=char_name)
+        ensure_default_realm_wrapper(session_id, scenario_key)
         _reconcile_faction_hq_locations(session_id, scenario_key, school_name)
         _heal_misplaced_school_hq_locations(session_id, scenario_key)
         _heal_agency_residence_and_entrances(session_id, scenario_key)

@@ -41,7 +41,8 @@ _TAPESTRY_SLIDE_HEADERS: Dict[str, Dict[str, str]] = {
     "title": {"en": "Earned Chronicle Title", "pl": "Zdobyty Tytuł Kroniki", "ms": "Gelaran Hikayat", "zh": "史诗称号", "de": "Chronik-Ehrentitel"},
 }
 
-_PLACEHOLDER_ACTOR_RE = re.compile(r"^(?:Envoy|Operative|Agent|Target|Contact|Informant)\s*#?\d+$", re.IGNORECASE)
+PLACEHOLDER_ACTOR_RE = re.compile(r"^(?:Envoy|Operative|Agent|Target|Contact|Informant)\s*#?\d+$", re.IGNORECASE)
+_PLACEHOLDER_ACTOR_RE = PLACEHOLDER_ACTOR_RE
 
 _SCENARIO_BACKUP_NAMES: Dict[str, List[str]] = {
     "fantasy": ["Lady Morgana", "Lord Corvus", "Commander Malakor", "Inquisitor Theron"],

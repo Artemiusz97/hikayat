@@ -1595,6 +1595,7 @@
     "genre_families": ["urban_fantasy"],
     "entity_type": "macro_event",
     "event_subtype": "festival",
+    "is_cross_realm": true,
     "is_nsfw": 0,
     "escalation_chance": 0.0,
     "default_duration_minutes": 4320,
@@ -1637,6 +1638,7 @@
     "genre_families": ["urban_fantasy"],
     "entity_type": "macro_event",
     "event_subtype": "festival",
+    "is_cross_realm": true,
     "is_nsfw": 0,
     "escalation_chance": 0.0,
     "default_duration_minutes": 4320,
@@ -1671,6 +1673,435 @@
         "description": "Leuchtender Silbernebel und goldene Gamelan-Klänge ziehen durch {zone} und lichten während des Festes Malam Bunga Cempaka den uralten Schleier um {venue}.",
         "bounty_title": "Malam Bunga Cempaka erleben",
         "bounty_objective": "Nähere dich {venue} höflich, während sich der silberne Banyan-Nebel teilt."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_twin_moon_fair",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_crossroads"],
+    "default_node_id": "sub_crossroads_bazaar_walk",
+    "default_venue_name": "Lantern Bazaar Walk",
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"price_multiplier": 0.85, "crowd_density": "high", "bazaar_bonus_high_tier_roll": true},
+    "locales": {
+      "en": {
+        "title": "Grand Twin-Moon Night Fair at {venue}",
+        "description": "Double silver moons hang above {zone}, flooding all four Night Market wings with lantern crowds, rare artisan stock, and steep market bargains.",
+        "bounty_title": "Browse the Twin-Moon Night Fair",
+        "bounty_objective": "Visit the Night Market stalls in {zone} to browse rare wares at 15% off while the fair lasts."
+      },
+      "pl": {
+        "title": "Wielki Jarmark Dwóch Księżyców w {venue}",
+        "description": "Podwójne srebrne księżyce rozświetlają {zone}, przyciągając tłumy do wszystkich czterech skrzydeł Nocnego Targu, rzadkie towary i hojne zniżki.",
+        "bounty_title": "Odwiedź Jarmark Dwóch Księżyców",
+        "bounty_objective": "Odwiedź stragany Nocnego Targu w {zone}, aby skorzystać ze zniżek i wyjątkowej oferty."
+      },
+      "ms": {
+        "title": "Pesta Malam Bulan Kembar di {venue}",
+        "description": "Dua bulan perak bersinar di atas {zone}, membanjiri keempat-empat sayap Pasar Malam dengan pengunjung, barangan tukang ghaib, dan diskaun istimewa.",
+        "bounty_title": "Kunjungi Pesta Bulan Kembar",
+        "bounty_objective": "Lawati gerai-gerai Pasar Malam di {zone} untuk merebut potongan harga dan stok jarang ditemui."
+      },
+      "zh": {
+        "title": "{venue}双月夜市大集",
+        "description": "双生银月高悬{zone}上空，四翼鬼市灯火通明、客流如织，各族匠师纷纷放出珍藏罕物并给出诚意折扣。",
+        "bounty_title": "趁双月大集淘换珍品",
+        "bounty_objective": "前往{zone}各翼摊位趁大集八五折之际购置罕见灵物。"
+      },
+      "de": {
+        "title": "Großer Zwillingsmond-Nachtmarkt in {venue}",
+        "description": "Zwei silberne Monde stehen über {zone} und füllen alle vier Flügel des Nachtmarkts mit Festbesuchern, seltenen Kunstwerken und kräftigen Preisnachlässen.",
+        "bounty_title": "Über den Zwillingsmond-Markt schlendern",
+        "bounty_objective": "Besuche die Stände des Nachtmarkts in {zone} und sichere dir seltene Waren mit Festtagsrabatt."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_midnight_curio_auction",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_crossroads"],
+    "default_node_id": "sub_crossroads_curio_arcade",
+    "default_venue_name": "Shadow-Glass Curio & Ossuary Stalls",
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 2880,
+    "modifiers": {"dc_modifiers": {"PER": -1, "CHA": -1}, "guarantee_curio_tier12": true},
+    "locales": {
+      "en": {
+        "title": "Midnight Shadow-Curio Auction at {venue}",
+        "description": "Velvet bidding paddles rise under obsidian lanterns at {venue}, guaranteeing top-tier spirit curios on display while sharp appraisers lower barriers for shrewd hagglers.",
+        "bounty_title": "Inspect the Shadow-Curio Auction",
+        "bounty_objective": "Inspect and haggle over rare relics at the Shadow-Glass Curio stalls in {zone}."
+      },
+      "pl": {
+        "title": "Północna Aukcja Osobliwości w {venue}",
+        "description": "Pod obsydianowymi latarniami w {venue} rozpoczyna się nocna licytacja najrzadszych relikwii, a znawcy łatwiej ustępują bystrym negocjatorom.",
+        "bounty_title": "Weź Udział w Północnej Aukcji",
+        "bounty_objective": "Obejrzyj rzadkie osobliwości i negocjuj ceny w zaułku kuriozów w {zone}."
+      },
+      "ms": {
+        "title": "Lelongan Barang Aneh Tengah Malam di {venue}",
+        "description": "Di bawah tanglung obsidian di {venue}, relik ghaib bertaraf tinggi dibuka untuk bidaan manakala para penilai lebih mudah bertolak ansur dalam tawar-menawar.",
+        "bounty_title": "Sertai Lelongan Tengah Malam",
+        "bounty_objective": "Periksa dan tawar-menawar relik bermutu tinggi di gerai kurio {zone}."
+      },
+      "zh": {
+        "title": "{venue}午夜暗影奇珍拍卖会",
+        "description": "黑曜灯笼下竞价牌林立，{venue}放出高阶一二品灵器与骨雕秘宝，鉴宝师眼力共鸣亦令交涉与辨伪格外顺畅。",
+        "bounty_title": "鉴赏午夜暗影拍品",
+        "bounty_objective": "前往{zone}幽影珍玩廊坊查验高阶稀世藏品并议价。"
+      },
+      "de": {
+        "title": "Mitternachts-Kuriositätenauktion in {venue}",
+        "description": "Unter Obsidianlaternen in {venue} kommen garantierte hochstufige Geisterrelikte unter den Hammer, während gewitztes Feilschen spürbar leichter fällt.",
+        "bounty_title": "Kuriositätenauktion besuchen",
+        "bounty_objective": "Begutachte seltene Relikte an den Schattenglas-Ständen in {zone} und handle klug."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_drifting_lanterns",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_crossroads"],
+    "default_node_id": "sub_crossroads_mist_wharf",
+    "default_venue_name": "Paper-Lantern Mist Wharf",
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"affinity_bonus": 2, "waive_ferryman_toll": true},
+    "locales": {
+      "en": {
+        "title": "Tide of Drifting Lanterns Across {venue}",
+        "description": "Thousands of wish-paper lanterns bob across the mist canals by {venue}, warming hearts across realms and moving the Spirit Ferryman to waive his 50g crossing fee.",
+        "bounty_title": "Sail the Tide of Drifting Lanterns",
+        "bounty_objective": "Share quiet moments beneath the lanterns in {zone} or ask the Spirit Ferryman to unseal the Chinatown tide-gate free of gold."
+      },
+      "pl": {
+        "title": "Przypływ Płynących Lampionów przy {venue}",
+        "description": "Tysiące papierowych lampionów sunie kanałami przy {venue}, ocieplając spotkania i skłaniając Przewoźnika Duchów do zniesienia opłaty za przejście.",
+        "bounty_title": "Odwiedź Przystań Płynących Lampionów",
+        "bounty_objective": "Spędź czas z mieszkańcami w blasku lampionów lub poproś Przewoźnika o otwarcie skrótu bez opłaty."
+      },
+      "ms": {
+        "title": "Pasang Surut Tanglung Hanyut di {venue}",
+        "description": "Ribuan tanglung kertas terapung di terusan berkabus dekat {venue}, melembutkan hati sekalian roh hingga Pendayung Roh mengecualikan bayaran menyeberang.",
+        "bounty_title": "Saksikan Arus Tanglung Hanyut",
+        "bounty_objective": "Luangkan masa bermakna di bawah sinaran tanglung atau minta Pendayung membuka laluan Chinatown tanpa bayaran."
+      },
+      "zh": {
+        "title": "{venue}千灯漂流潮汐夜",
+        "description": "成千上万盏祈愿纸灯随雾河漂过{venue}，灯火暖意令灵界生灵好感倍增，摆渡老鬼亦破例免除五十金币渡口费。",
+        "bounty_title": "共赏浮灯潮汐",
+        "bounty_objective": "在{zone}暖灯下与灵族深谈叙旧，或趁渡费全免之际请摆渡人开启唐人街捷径。"
+      },
+      "de": {
+        "title": "Gezeit der Treibenden Laternen an {venue}",
+        "description": "Tausende Papierlaternen treiben über die Nebelkanäle bei {venue}, stimmen Begegnungen herzlich und lassen den Geisterfährmann sein Weggeld erlassen.",
+        "bounty_title": "Laternenflut erleben",
+        "bounty_objective": "Nutze die herzliche Stimmung in {zone} oder bitte den Fährmann kostenlos um die Öffnung des Chinatown-Wegs."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_kagura_revelry",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_kitsune"],
+    "target_village_key": "kitsune",
+    "default_node_id": "sub_kitsune_inner_plaza",
+    "default_venue_name": "Starlit Fox-Fire Lantern Plaza",
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"sparring_xp_bonus": 15, "court_rep_bonus": 2},
+    "locales": {
+      "en": {
+        "title": "Nine-Tail Kagura Mask Revelry in {zone}",
+        "description": "Taiko drums and masked shrine dances echo across {venue}, inspiring Kitsune blade-instructors to award extra sparring mastery and heightened Court favor.",
+        "bounty_title": "Join the Nine-Tail Kagura Revelry",
+        "bounty_objective": "Spar in the Vermilion Torii Blade-Yard or perform deeds for the Kitsune Court for bonus renown."
+      },
+      "pl": {
+        "title": "Maskarada Kagura Dziewięciu Ogonów w {zone}",
+        "description": "Bębny taiko i tańce w maskach rozbrzmiewają wokół {venue}, przynosząc dodatkowe doświadczenie ze sparingów oraz przychylność Dworu Kitsune.",
+        "bounty_title": "Weź Udział w Święcie Kagura",
+        "bounty_objective": "Przeprowadź sparing na placu Torii lub zdobądź uznanie Dworu Kitsune."
+      },
+      "ms": {
+        "title": "Pesta Topeng Kagura Sembilan Ekor di {zone}",
+        "description": "Palu gendang taiko dan tarian topeng kuil bergema di sekitar {venue}, menggandakan ilmu latihan pedang serta kemurahan reputasi Istana Kitsune.",
+        "bounty_title": "Sertai Perayaan Kagura",
+        "bounty_objective": "Berlatih silat di halaman Torii atau jalankan tugas demi bonus kehormatan Istana Kitsune."
+      },
+      "zh": {
+        "title": "{zone}九尾神乐假面祭",
+        "description": "太鼓与神乐铃声响彻{venue}，狐族剑士兴致高昂，切磋比武可获额外经验与更多狐宫声望嘉奖。",
+        "bounty_title": "赴九尾神乐祭切磋",
+        "bounty_objective": "前往朱红鸟居演武庭切磋技艺或效命狐宫以赢取额外声望。"
+      },
+      "de": {
+        "title": "Neunschweif-Kagura-Maskenfest in {zone}",
+        "description": "Taiko-Trommeln und Schreintänze erfüllen {venue} und belohnen Übungskämpfe sowie Dienste für den Kitsune-Hof mit zusätzlichem Ansehen.",
+        "bounty_title": "Am Kagura-Fest teilnehmen",
+        "bounty_objective": "Übe dich auf dem Torii-Kampfplatz im Sparring oder erfülle Aufträge für den Kitsune-Hof."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_malam_berinai_feast",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_bunian"],
+    "target_village_key": "bunian",
+    "default_node_id": "sub_bunian_inner_plaza",
+    "default_venue_name": "Luminous Banyan Dewan Square",
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"court_rep_bonus": 2, "banquet_rest_multiplier": 1.25},
+    "locales": {
+      "en": {
+        "title": "Malam Berinai & Royal Songket Feast in {zone}",
+        "description": "Saffron rice banquets and gilded songket banners grace {venue}, offering guests deep restorative feasting and extra Bunian Court goodwill.",
+        "bounty_title": "Partake in the Royal Songket Feast",
+        "bounty_objective": "Rest within {zone} to receive the complimentary Royal Songket Banquet restorative blessing and extra Bunian standing."
+      },
+      "pl": {
+        "title": "Uczta Malam Berinai i Złotego Songketu w {zone}",
+        "description": "Szafranowe potrawy i złote sztandary songket zdobią {venue}, oferując gościom głębokie pokrzepienie oraz dodatkową przychylność Dworu Bunian.",
+        "bounty_title": "Ucztuj na Królewskim Bankiecie",
+        "bounty_objective": "Odpocznij w {zone}, aby otrzymać błogosławieństwo królewskiej uczty i bonus reputacji."
+      },
+      "ms": {
+        "title": "Kenduri Malam Berinai & Songket Diraja di {zone}",
+        "description": "Hidangan nasi kunyit dan panji songket keemasan memeriahkan {venue}, mengurniakan rehat berkhasiat penuh keberkatan serta ganjaran reputasi Istana Bunian.",
+        "bounty_title": "Sertai Santapan Songket Diraja",
+        "bounty_objective": "Berehat di dalam {zone} untuk menerima berkat pemulihan kenduri diraja dan tambahan budi istana."
+      },
+      "zh": {
+        "title": "{zone}金丝宋吉皇家夜宴",
+        "description": "金线宋吉华盖与姜黄御宴布满{venue}，宾客在此歇息可获丰盛御宴滋养，并为本族声望赢得额外敬重。",
+        "bounty_title": "入席布尼安御宴",
+        "bounty_objective": "于{zone}内歇息以获赠皇家夜宴滋养祝福与额外声望。"
+      },
+      "de": {
+        "title": "Malam-Berinai- & Songket-Festmahl in {zone}",
+        "description": "Safranreis-Tafeln und golddurchwirkte Songket-Banner schmücken {venue}, stärken Ruhende nachhaltig und mehren die Gunst des Bunian-Hofs.",
+        "bounty_title": "Am Königlichen Bankett teilnehmen",
+        "bounty_objective": "Raste in {zone}, um den Festmahl-Segen und zusätzliches Bunian-Ansehen zu erhalten."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_pale_wake",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_ghoul"],
+    "target_village_key": "ghoul",
+    "default_node_id": "sub_ghoul_inner_plaza",
+    "default_venue_name": "Ashen Cypress Funeral Square",
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"waive_ghoul_entry_toll": true},
+    "locales": {
+      "en": {
+        "title": "Night of the Pale Wake at {venue}",
+        "description": "Tallow remembrance lamps burn along every marble plinth of {zone}; by Blood-Truce hospitality custom, Ash-Pit Sentinels waive the 35g outsider toll for the duration.",
+        "bounty_title": "Walk the Night of the Pale Wake",
+        "bounty_objective": "Enter {venue} and its apothecary without paying the usual outsider gate toll while the Pale Wake endures."
+      },
+      "pl": {
+        "title": "Noc Bladego Czuwania w {venue}",
+        "description": "Świece pamięci płoną przy marmurowych grobowcach w {zone}; na mocy pradawnego rozejmu strażnicy tymczasowo znoszą myto wejściowe 35g.",
+        "bounty_title": "Odwiedź Nekropolię Podczas Czuwania",
+        "bounty_objective": "Wejdź na plac {venue} i do tutejszej apteki bez opłacania myta strażników."
+      },
+      "ms": {
+        "title": "Malam Jaga Pucat di {venue}",
+        "description": "Lampu lemak peringatan menyala di sepanjang makam marmar {zone}; mengikut adat gencatan darah, pengawal mengecualikan tol masuk 35g buat sementara waktu.",
+        "bounty_title": "Hadir ke Malam Jaga Pucat",
+        "bounty_objective": "Masuk ke {venue} dan gedung ubatnya tanpa membayar tol orang luar selagi adat ini berlangsung."
+      },
+      "zh": {
+        "title": "{venue}苍白守夜祭",
+        "description": "{zone}每座大理石碑前都燃起长明脂灯；按古墓血契旧礼，灰坑哨兵在守夜期间破例免收三十五金币外客入城费。",
+        "bounty_title": "免税步入苍白守夜广场",
+        "bounty_objective": "趁守夜礼期间免交哨兵买路费自由进出{venue}与药剂坊。"
+      },
+      "de": {
+        "title": "Nacht der Bleichen Totenwache in {venue}",
+        "description": "Talgkerzen brennen auf den Marmorstelen von {zone}; nach altem Gastrecht erlassen die Wächter des Aschegrabens vorübergehend den 35g-Fremdenzoll.",
+        "bounty_title": "Zur Bleichen Totenwache einkehren",
+        "bounty_objective": "Betritt {venue} und die Apotheke ohne den üblichen Wachzoll, solange die Wache andauert."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_neon_static_surge",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_wilds", "zone_spirit_peaks"],
+    "default_node_id": "sub_wilds_leyline_fracture",
+    "default_venue_name": "Severed Leyline Stone-Fracture",
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "can_spawn_bounty": true,
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"phone_static_interference": true, "spawns_surge_commission": true},
+    "locales": {
+      "en": {
+        "title": "Neon-Static Leyline Surge Across {zone}",
+        "description": "Crackling ultraviolet arcs lash {venue} and Cloud-Fang Crags, scrambling Spirit Relay phones with astral static while Courts post an urgent high-payout stabilization contract.",
+        "bounty_title": "Stabilize the Neon-Static Surge",
+        "bounty_objective": "Accept and complete the urgent Surge stabilization commission in the Spirit Frontier."
+      },
+      "pl": {
+        "title": "Neonowo-Statyczny Przypływ Linii Mocy w {zone}",
+        "description": "Fioletowe wyładowania smagają {venue} i Szczyty Chmurnego Kła, zakłócając Duchowy Przekaźnik i wymuszając pilne zlecenie stabilizacyjne.",
+        "bounty_title": "Opanuj Przypływ Statyczny",
+        "bounty_objective": "Przyjmij i wykonaj pilne zlecenie stabilizacji na Kresach Duchów."
+      },
+      "ms": {
+        "title": "Lonjakan Statik Neon Garis Kuasa di {zone}",
+        "description": "Kilat lembayung menyambar {venue} dan Puncak Taring Awan, mengganggu isyarat Geganti Roh serta membuka komisen kecemasan berbayaran tinggi.",
+        "bounty_title": "Stabilkan Lonjakan Statik",
+        "bounty_objective": "Terima dan selesaikan komisen penstabilan kecemasan di perbatasan Alam Roh."
+      },
+      "zh": {
+        "title": "{zone}霓虹静电灵脉暴走",
+        "description": "紫白灵电狂潮席卷{venue}与云牙绝壁，灵讯中继频频泛起雪花杂音，各族急发高额加急稳脉委托。",
+        "bounty_title": "平息灵脉静电狂潮",
+        "bounty_objective": "接取并完成加急发布的云牙绝壁灵脉校准委托。"
+      },
+      "de": {
+        "title": "Neon-Statik-Leylinienstoß in {zone}",
+        "description": "Knistern­de violette Bögen peitschen über {venue} und die Wolkenzahn-Klippen, stören das Geister-Relay und lösen einen hoch dotierten Eilauftrag aus.",
+        "bounty_title": "Den Statik-Stoß bändigen",
+        "bounty_objective": "Nimm den dringenden Stabilisierungsauftrag für das Grenzland an und schließe ihn ab."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_cold_iron_raid",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_peaks", "zone_spirit_mire", "zone_spirit_wilds"],
+    "default_node_id": "sub_peaks_split_torii",
+    "default_venue_name": "Split Thunder-Torii Pass",
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "can_spawn_bounty": true,
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"spawns_joint_poacher_commissions": true},
+    "locales": {
+      "en": {
+        "title": "Syndicate Cold-Iron Incursion Near {venue}",
+        "description": "Clandestine Syndicate strike teams plant cold-iron snare pylons through {zone} and adjacent frontiers, prompting joint defense commissions across all discovered Spirit Courts.",
+        "bounty_title": "Repel the Cold-Iron Poachers",
+        "bounty_objective": "Take a Spirit Court anti-poacher defense commission and clear Syndicate cold-iron teams from the frontier."
+      },
+      "pl": {
+        "title": "Najazd Zimnego Żelaza Syndykatu koło {venue}",
+        "description": "Oddziały Syndykatu rozstawiają pułapki z zimnego żelaza w {zone}, zmuszając wszystkie Dwory Duchów do wystawienia wspólnych zleceń obronnych.",
+        "bounty_title": "Odeprzuj Kłusowników Syndykatu",
+        "bounty_objective": "Przyjmij wspólne zlecenie obronne Dworów Duchów przeciwko kłusownikom Syndykatu."
+      },
+      "ms": {
+        "title": "Serbuan Besi Sejuk Sindiket di {venue}",
+        "description": "Skuad pemburu Sindiket memasang jerat besi sejuk di {zone}, mendorong semua Istana Roh menawarkan komisen pertahanan bersama.",
+        "bounty_title": "Patahkan Serbuan Besi Sejuk",
+        "bounty_objective": "Ambil komisen pertahanan bersama Istana Roh dan usir penceroboh Sindiket."
+      },
+      "zh": {
+        "title": "{venue}辛迪加寒铁偷猎突袭",
+        "description": "秘密辛迪加武装携寒铁镇灵桩潜入{zone}一带，各座显露的灵族宫廷罕见联手发布联合防卫赏金。",
+        "bounty_title": "击退寒铁偷猎团",
+        "bounty_objective": "在灵族宫廷榜接取联合防卫委托，清除边境辛迪加偷猎小队。"
+      },
+      "de": {
+        "title": "Kalteisen-Überfall des Syndikats bei {venue}",
+        "description": "Einsatztrupps des Syndikats errichten Kalteisen-Pylone in {zone}, woraufhin die Geisterhöfe gemeinsame Verteidigungsaufträge ausrufen.",
+        "bounty_title": "Kalteisen-Wilderer zurückschlagen",
+        "bounty_objective": "Übernimm einen gemeinsamen Verteidigungsauftrag der Geisterhöfe gegen das Syndikat."
+      }
+    }
+  },
+  {
+    "template_key": "evt_spirit_feral_ghul_hunt",
+    "genre_families": ["urban_fantasy", "veiled_spirit_realm"],
+    "realm_scope": "realm_veiled_spirit_world",
+    "allowed_zone_ids": ["zone_spirit_boneyard", "zone_spirit_mire"],
+    "default_node_id": "sub_boneyard_barrow_moor",
+    "default_venue_name": "Moonless Barrow Moor",
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "can_spawn_bounty": true,
+    "is_cross_realm": false,
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"feral_loot_tier_bonus": 1, "feral_cull_rep_bonus": 5},
+    "locales": {
+      "en": {
+        "title": "Feral Al-Ghūl Pack Hunt Across {zone}",
+        "description": "Lawless feral packs prowl the ash ridges of {venue} and Lotus Mire; culling them yields higher-tier spirit trophies and extra Ossuary Court standing.",
+        "bounty_title": "Cull the Feral Barrow Packs",
+        "bounty_objective": "Hunt feral packs in the Ashen Barrowlands or Sunken Lotus Mire to claim boosted spoils and Court renown."
+      },
+      "pl": {
+        "title": "Polowanie na Zdziczałą Watahę Al-Ghūl w {zone}",
+        "description": "Zdziczałe watahy grasują po wrzosowiskach {venue} i Bagnie Lotosu, oferując cenniejsze łupy oraz premię reputacji za ich poskromienie.",
+        "bounty_title": "Poskrom Zdziczałą Watahę",
+        "bounty_objective": "Zaproluj w {zone} na zdziczałe bestie, by zdobyć wyższe łupy i uznanie."
+      },
+      "ms": {
+        "title": "Pemburuan Kawanan Al-Ghūl Liar di {zone}",
+        "description": "Kawanan liar berkeliaran di permatang {venue} dan Paya Teratai; menumpaskan mereka memberi rampasan bermutu tinggi serta reputasi tambahan.",
+        "bounty_title": "Tumpaskan Kawanan Liar",
+        "bounty_objective": "Buru kawanan Al-Ghūl liar di Tanah Kubur Abu atau Paya Teratai untuk ganjaran berganda."
+      },
+      "zh": {
+        "title": "{zone}野化食尸犬群围猎",
+        "description": "失控的野化群兽游荡于{venue}与沉莲泽外围，清理它们可掉落更高品阶的战利品并赢得额外清剿声望。",
+        "bounty_title": "清剿灰冢野化兽群",
+        "bounty_objective": "在灰烬坟茔或沉莲瘴泽讨伐野化兽群以赢取高阶战利品与额外宫廷声望。"
+      },
+      "de": {
+        "title": "Jagd auf verwilderte Al-Ghūl-Rudel in {zone}",
+        "description": "Verwilderte Rudel streifen über {venue} und das Lotus-Moor; wer sie stellt, erhält höherwertige Beute und zusätzliches Hof-Ansehen.",
+        "bounty_title": "Verwilderte Grabhügel-Rudel jagen",
+        "bounty_objective": "Erlege verwilderte Rudel im Aschfahlen Grabhügelland oder Versunkenen Lotus-Moor."
       }
     }
   }

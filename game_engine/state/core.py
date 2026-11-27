@@ -957,7 +957,11 @@ def apply_outcome(
             t_uids = list(t_op.get("party_uids") or party_uids)
             try:
                 with db.savepoint(uow_conn, "sp_apply_time_op"):
-                    from mechanics.system.time_engine import apply_sleep_rest, apply_nap_rest, advance_time
+                    from mechanics.system.time_engine import (
+                        apply_nap_rest,
+                        apply_sleep_rest,
+                        advance_time,
+                    )
                     def _merge_time_fields_from_db(include_npcs: bool = False):
                         fresh_s = db.get_session(session_id)
                         if isinstance(fresh_s, dict) and isinstance(session, dict):
@@ -967,6 +971,7 @@ def apply_outcome(
                             if include_npcs and "current_npcs" in fresh_s:
                                 session["current_npcs"] = fresh_s["current_npcs"]
 
+                    pre_clk_day, pre_clk_min, _ = db.get_session_time(session_id)
                     if op_kind == "sleep":
                         sl_info = apply_sleep_rest(
                             session_id,
@@ -974,12 +979,21 @@ def apply_outcome(
                             scen_key=str(t_op.get("scen_key") or (session.get("scenario", "fantasy") if session else "fantasy")),
                             recovery_ratio=float(t_op.get("recovery_ratio", 1.0)),
                             surface_label=str(t_op.get("surface_label") or "Bed"),
+                            freeze_clock=bool(t_op.get("freeze_clock")),
+                            override_clock_minutes=t_op.get("override_clock_minutes"),
                         )
                         outcome["_sleep_info"] = sl_info
-                        if isinstance(sl_info.get("morning_npcs"), list):
+                        has_morning_npcs = isinstance(sl_info.get("morning_npcs"), list)
+                        if has_morning_npcs:
                             outcome["npcs_present"] = sl_info["morning_npcs"]
-                        _merge_time_fields_from_db(include_npcs=True)
-                        party = [(db.get_character(c["user_id"]) or c, inv) for c, inv in party]
+                        _merge_time_fields_from_db(include_npcs=has_morning_npcs)
+                        party = [
+                            (
+                                (db.get_character_by_id(c["id"]) if c.get("id") else db.get_character(c["user_id"], session_id=session_id)) or c,
+                                inv,
+                            )
+                            for c, inv in party
+                        ]
                     elif op_kind == "nap":
                         np_info = apply_nap_rest(
                             session_id,
@@ -987,10 +1001,18 @@ def apply_outcome(
                             nap_minutes=int(t_op.get("nap_minutes", 120) or 120),
                             recovery_ratio=float(t_op.get("recovery_ratio", 1.0)),
                             surface_label=str(t_op.get("surface_label") or "Bed"),
+                            freeze_clock=bool(t_op.get("freeze_clock")),
+                            clock_minutes=t_op.get("clock_minutes"),
                         )
                         outcome["_sleep_info"] = np_info
                         _merge_time_fields_from_db(include_npcs=False)
-                        party = [(db.get_character(c["user_id"]) or c, inv) for c, inv in party]
+                        party = [
+                            (
+                                (db.get_character_by_id(c["id"]) if c.get("id") else db.get_character(c["user_id"], session_id=session_id)) or c,
+                                inv,
+                            )
+                            for c, inv in party
+                        ]
                     elif op_kind == "advance":
                         tm_info = advance_time(
                             session_id,
@@ -1051,6 +1073,78 @@ def apply_outcome(
                     save_cast_state(session, outcome["_staged_cast_state"], persist_db=True)
             except Exception as _cs_e:
                 log.warning("Failed committing staged cast_state: %s", _cs_e)
+        if isinstance(outcome, dict) and session_id:
+            _has_loc_stage = bool(
+                outcome.get("location")
+                or outcome.get("current_node_id")
+                or "focal_point" in outcome
+                or "_staged_waiting_outside_companions" in outcome
+                or "_staged_previous_node_id" in outcome
+            )
+            _staged_r_ops = outcome.get("_staged_realm_ops") if isinstance(outcome.get("_staged_realm_ops"), dict) else {}
+            if _has_loc_stage or _staged_r_ops:
+                try:
+                    with db.savepoint(uow_conn, "sp_apply_realm_ops"):
+                        realm_sess_upd: dict[str, Any] = {}
+                        if "focal_point" in outcome:
+                            realm_sess_upd["focal_point"] = outcome["focal_point"] or ""
+                        if outcome.get("location"):
+                            realm_sess_upd["current_location"] = outcome["location"]
+                        if outcome.get("current_node_id"):
+                            realm_sess_upd["current_node_id"] = outcome["current_node_id"]
+                        _r_extra_upd: dict[str, Any] = {}
+                        if "_staged_previous_node_id" in outcome:
+                            _r_extra_upd["previous_node_id"] = outcome["_staged_previous_node_id"]
+                        if "_staged_waiting_outside_companions" in outcome:
+                            _r_extra_upd["waiting_outside_companions"] = list(
+                                outcome.get("_staged_waiting_outside_companions") or []
+                            )
+                        if _r_extra_upd:
+                            realm_sess_upd["extra"] = _r_extra_upd
+                        if realm_sess_upd:
+                            db.update_session(int(session_id), **realm_sess_upd)
+
+                        if _staged_r_ops:
+                            from mechanics.world.locations.realms import (
+                                discover_realm,
+                                execute_recall_starship,
+                                execute_starship_jump,
+                            )
+                            _def_turn = resolve_target_turn(ctx, session, outcome) or 1
+                            disc_op = _staged_r_ops.get("discover_realm_id")
+                            if isinstance(disc_op, dict) and disc_op.get("realm_id"):
+                                discover_realm(
+                                    int(session_id),
+                                    str(disc_op["realm_id"]),
+                                    turn_number=int(disc_op.get("turn_number") or _def_turn),
+                                    conn=uow_conn,
+                                )
+                            jmp_op = _staged_r_ops.get("starship_jump")
+                            if isinstance(jmp_op, dict) and jmp_op.get("vessel_realm_id") and jmp_op.get("target_realm_id"):
+                                execute_starship_jump(
+                                    int(session_id),
+                                    str(jmp_op["vessel_realm_id"]),
+                                    str(jmp_op["target_realm_id"]),
+                                    turn_number=int(jmp_op.get("turn_number") or _def_turn),
+                                    persist_db=True,
+                                    conn=uow_conn,
+                                )
+                            rc_op = _staged_r_ops.get("recall_starship")
+                            if isinstance(rc_op, dict) and rc_op.get("vessel_realm_id") and rc_op.get("current_node_id"):
+                                execute_recall_starship(
+                                    int(session_id),
+                                    str(rc_op["vessel_realm_id"]),
+                                    str(rc_op["current_node_id"]),
+                                    turn_number=int(rc_op.get("turn_number") or _def_turn),
+                                    persist_db=True,
+                                    conn=uow_conn,
+                                )
+                        session = db.get_session(session_id) or session
+                except (NameError, UnboundLocalError, ImportError, TypeError):
+                    raise
+                except Exception as _rlm_err:
+                    log.warning("Failed committing staged realm ops: %s", _rlm_err)
+
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_folklore_ops"), dict) and session_id:
             try:
                 with db.savepoint(uow_conn, "sp_apply_folklore_ops"):
@@ -1080,8 +1174,63 @@ def apply_outcome(
                         outcome["focal_point"] = None
                         outcome["nearby_enemies"] = []
                     session = db.get_session(session_id) or session
+            except (NameError, UnboundLocalError, ImportError, TypeError):
+                raise
             except Exception as _fk_c_err:
                 log.warning("Failed committing staged folklore ops: %s", _fk_c_err)
+
+        if isinstance(outcome, dict) and isinstance(outcome.get("_staged_post_combat_ops"), dict) and session_id:
+            try:
+                with db.savepoint(uow_conn, "sp_apply_post_combat_ops"):
+                    _pc_ops = outcome["_staged_post_combat_ops"]
+                    if _pc_ops.get("collapse_realm_id"):
+                        from mechanics.world.locations.realms import collapse_dynamic_realm
+                        collapse_dynamic_realm(int(session_id), str(_pc_ops["collapse_realm_id"]), conn=uow_conn)
+                    if isinstance(_pc_ops.get("collapse_anomalous_site"), dict):
+                        from mechanics.world.anomalous_sites import collapse_anomalous_site_on_extraction
+                        _cas = _pc_ops["collapse_anomalous_site"]
+                        collapse_anomalous_site_on_extraction(
+                            int(session_id),
+                            str(_cas.get("node_id") or ""),
+                            str(_cas.get("location") or ""),
+                            int(_cas.get("day") or 1),
+                            int(_cas.get("turn") or 1),
+                        )
+                    for _se_uid, _se_list in (_pc_ops.get("status_effects_by_uid") or {}).items():
+                        db.set_status_effects(int(_se_uid), list(_se_list))
+                    if "party_npcs" in _pc_ops:
+                        db.set_session_party_npcs(session_id, list(_pc_ops["party_npcs"] or []))
+                    if _pc_ops.get("rescue_time_delta") is not None:
+                        _r_td = max(0, int(_pc_ops["rescue_time_delta"] or 0))
+                        _rc_day, _rc_min, _rc_awake = db.get_session_time(int(session_id))
+                        _tot_rmin = int(_rc_min) + _r_td
+                        _new_rday = int(_rc_day) + (_tot_rmin // 1440)
+                        _new_rmin = _tot_rmin % 1440
+                        db.update_session_time(int(session_id), _new_rday, _new_rmin, _rc_awake)
+                        outcome["current_day"] = _new_rday
+                        outcome["current_minute"] = _new_rmin
+                        if isinstance(session, dict):
+                            session["current_day"] = _new_rday
+                            session["current_minute"] = _new_rmin
+                    if _pc_ops.get("rescue_node_id") and _pc_ops.get("rescue_location"):
+                        rescue_upd: dict[str, Any] = {
+                            "current_node_id": str(_pc_ops["rescue_node_id"]),
+                            "current_location": str(_pc_ops["rescue_location"]),
+                            "nearby_enemies": [],
+                        }
+                        if _pc_ops.get("clear_focal_point"):
+                            rescue_upd["focal_point"] = ""
+                            if isinstance(session, dict):
+                                session["focal_point"] = ""
+                        if _pc_ops.get("clear_waiting_outside_companions"):
+                            rescue_upd["extra"] = {"waiting_outside_companions": []}
+                            if isinstance(session, dict):
+                                session["waiting_outside_companions"] = []
+                        db.update_session(int(session_id), **rescue_upd)
+            except (NameError, UnboundLocalError, ImportError, TypeError):
+                raise
+            except Exception as _pc_c_err:
+                log.warning("Failed committing staged post_combat ops: %s", _pc_c_err)
 
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_roster_ops"), dict) and session_id:
             try:
@@ -1242,7 +1391,7 @@ def apply_outcome(
                     u_int = int(uid_val)
                     ch = _recovery_chars_by_uid.get(u_int)
                     if ch is None:
-                        ch = db.get_character(u_int)
+                        ch = db.get_character(u_int, session_id=session_id)
                         if isinstance(ch, dict):
                             _recovery_chars_by_uid[u_int] = ch
                     return ch

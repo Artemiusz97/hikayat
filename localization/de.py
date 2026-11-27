@@ -254,3 +254,94 @@ CROWD_DENSITY_LABELS = {
     "crowd_label": "Menschenmenge",
     "nearby_bystanders": "Passanten in der Nähe"
 }
+
+STATURE_LABELS = {
+    "miniature": "Winzig",
+    "short": "Klein",
+    "below_average": "Unterdurchschnittlich",
+    "average": "Durchschnittlich",
+    "tall": "Groß",
+    "towering": "Hünenhaft",
+}
+
+PHYSIQUE_LABELS = {
+    "slim": "Schlank",
+    "average": "Durchschnittlich",
+    "athletic": "Athletisch",
+    "muscular": "Muskulös",
+    "voluptuous": "Üppig",
+    "stocky": "Stämmig",
+    "chubby": "Mollig",
+}
+
+ASSET_TEXTURE_LABELS = {
+    "perky": "Straff",
+    "firm": "Fest",
+    "supple": "Geschmeidig",
+    "teardrop": "Tropfenförmig",
+    "plush": "Üppig-weich",
+    "pillowy": "Kissenweich",
+    "bouncy": "Schwungvoll",
+    "delicate": "Zart",
+    "sensitive": "Empfindsam",
+    "veined": "Aderig",
+    "smooth": "Glatt",
+    "thick": "Kräftig",
+    "heavy": "Schwer",
+    "curved": "Geschwungen",
+    "tapered": "Verjüngt",
+}
+
+SPECIES_SURFACE_LABELS = {
+    "furred": "Flaumiges Fell",
+    "scaled": "Mikroschuppen",
+    "feathered": "Daunengefieder",
+    "aquatic": "Schimmernde Haut",
+    "fever_warm": "Fieberwarme Haut",
+    "porcelain_silky": "Porzellanseidene Haut",
+    "bio_synthetic": "Biosynthetische Haut",
+}
+
+REAR_SIZE_LABELS = {
+    "flat": "Flach",
+    "small": "Kompakt",
+    "average": "Wohlgeformt",
+    "large": "Üppig",
+    "huge": "Prall",
+}
+
+REAR_TEXTURE_LABELS = {
+    "firm": "Fest",
+    "taut": "Straff",
+    "supple": "Geschmeidig",
+    "rounded": "Rundlich",
+    "plush": "Üppig-weich",
+    "jiggly": "Wippend",
+}
+
+BODY_PREFERENCE_LABELS = {
+    "smaller_bb": "Kleinere Brüste",
+    "bigger_bb": "Größere Brüste",
+    "smaller_ass": "Kleineres Gesäß",
+    "bigger_ass": "Größeres Gesäß",
+    "taller_partner": "Größere Partner",
+    "shorter_partner": "Kleinere Partner",
+}
+
+SPIRIT_COURT_LABELS = {
+    "badge_human_world": "🏙️ Menschenwelt",
+    "badge_veiled_realm": "⛩️ Verschleiertes Reich",
+    "sworn_ally_active_header": "Geschworener Verbündeter — Hofpakt 90+",
+    "sworn_ally_summon_ready": "3-Runden-Kampfbeschwörung aktiv",
+    "sworn_ally_stat_bonus": "Passive Status-Aura",
+    "autonomous_spirit_court_badge": "Autonomer Geisterhof",
+    "spirit_court_non_joinable_note": "Unabhängiger Geisterhof — Ansehen wird durch Taten, Sparring & Aufträge verdient.",
+    "ghoul_track_dark_crime": "Dunkler Auftrag (Schnelles Ansehen)",
+    "ghoul_track_grey_neutral": "Grau-Neutral (Ohne Nebeneffekt)",
+    "night_market_wing_selector": "Einen Nachtmarkt-Flügelstand wählen...",
+    "spirit_relay_neon_static_note": "⚡ Neon-Statik-Leylinienstoß: Das Geister-Relay knistert vor astraler Störung.",
+    "spirit_relay_ghoul_channel": "🦴 Gebeinhaus-Knochenrelay aktiv",
+    "pale_wake_toll_waived": "🕯️ Nacht der Bleichen Totenwache — Eintrittszoll erlassen",
+    "lantern_tide_ferry_waived": "🏮 Gezeit der Treibenden Laternen — Fährmannszoll erlassen",
+    "event_crisis_commission_badge": "Dringende Reichskrise",
+}

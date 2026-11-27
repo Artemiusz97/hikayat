@@ -2,8 +2,9 @@ from __future__ import annotations
 import db
 import logging
 import json
+import sqlite3
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 import character_data as cd
 from .core import *
 from .core import _delete_session_records
@@ -14,7 +15,8 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
                      gender: str = "Male", scenario: str = "fantasy",
                      race: str = "human", race_description: str = "", appearance: dict = None,
                      attribute: str | None = None, combat_archetype: str | None = None,
-                     ability_medium: str | None = None) -> dict:
+                     ability_medium: str | None = None,
+                     innate_spells: list[str] | None = None) -> dict:
     if stats is None:
         stats = {s: cd.BASE_STAT_VALUE for s in cd.STATS}
     existing = get_user_characters(user_id)
@@ -56,6 +58,14 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
         norm_app["student_grade"] = app_dict["student_grade"]
     app_json = json.dumps(norm_app)
 
+    resolved_innate_spells: list[str] | None = list(innate_spells) if innate_spells is not None else None
+    if resolved_innate_spells is None and is_anom and attr_val and arch_val and med_val:
+        try:
+            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+            resolved_innate_spells = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
+        except Exception as e:
+            log.warning("Failed resolving innate 3-axis spells in create_character for user %s: %s", user_id, e)
+
     with UnitOfWork() as conn:
         char_count = conn.execute(
             "SELECT COUNT(*) FROM characters WHERE user_id=?",
@@ -75,14 +85,23 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
              hp, hp, mp, mp, pending_stat_points, gold, app_json, attr_val, arch_val, med_val, time.time()),
         )
         char_id = cur.lastrowid
-    if is_anom and attr_val and arch_val and med_val:
-        try:
-            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
-            innate = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
-            db.set_skill_progress(user_id, {"innate_spells": innate, "equipped_granted_spells": [], "empowered_granted_spells": []})
-            db.set_learned_spells(user_id, innate)
-        except Exception as e:
-            log.warning("Failed seeding innate 3-axis spells in create_character for user %s: %s", user_id, e)
+        if resolved_innate_spells is not None:
+            db.call_with_supported_kwargs(
+                db.set_skill_progress,
+                user_id,
+                {
+                    "innate_spells": resolved_innate_spells,
+                    "equipped_granted_spells": [],
+                    "empowered_granted_spells": [],
+                },
+                character_id=char_id,
+            )
+            db.call_with_supported_kwargs(
+                db.set_learned_spells,
+                user_id,
+                resolved_innate_spells,
+                character_id=char_id,
+            )
     return get_character_by_id(char_id)
 
 def apply_adventure_loadout(
@@ -97,11 +116,14 @@ def apply_adventure_loadout(
     attribute: str | None = None,
     combat_archetype: str | None = None,
     ability_medium: str | None = None,
+    *,
+    character_id: int | None = None,
+    session_id: int | None = None,
 ) -> dict:
     """Applies a scenario-specific class, weapon, and generated starting equipment
-    to the active character at adventure start. Clears previous temporary equipment
+    to the target character at adventure start. Clears previous temporary equipment
     so the character gets a fresh scenario-tailored loadout."""
-    char = db.get_character(user_id)
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char:
         raise ValueError("No active character found for user.")
     char_id = char["id"]
@@ -119,7 +141,9 @@ def apply_adventure_loadout(
     eff_arch = (str(combat_archetype).strip().lower() if combat_archetype else char.get("combat_archetype")) if is_anomalous else None
     eff_med = (str(ability_medium).strip().lower() if ability_medium else char.get("ability_medium")) if is_anomalous else None
 
-    with get_conn() as conn:
+    from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
+
+    with UnitOfWork() as conn:
         # Clear existing inventory/equipment for this character
         conn.execute(
             "DELETE FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
@@ -134,194 +158,193 @@ def apply_adventure_loadout(
             (scenario, char_class, class_description, cd.STARTING_GOLD, eff_attr, eff_arch, eff_med, char_id)
         )
 
-    from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
-
-    # 0. Seed 5 Fixed Innate Special Abilities for Anomalous Incursions before equipping gear
-    if is_anomalous:
-        try:
+        # 0. Seed 5 Fixed Innate Special Abilities for Anomalous Incursions before equipping gear
+        if is_anomalous:
             innate_spells: list[str] = []
-            if eff_attr and eff_arch and eff_med:
-                try:
-                    from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
-                    innate_spells = list(build_awakened_kit_ids(eff_attr, eff_arch, eff_med))
-                except ImportError:
-                    innate_spells = []
-            if not innate_spells:
-                from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
-                innate_spells = list(get_anomalous_starting_innate_abilities(char_class, scenario, class_description))
-            fresh_char = db.get_character(user_id) or char
+            try:
+                if eff_attr and eff_arch and eff_med:
+                    try:
+                        from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+                        innate_spells = list(build_awakened_kit_ids(eff_attr, eff_arch, eff_med))
+                    except ImportError:
+                        innate_spells = []
+                if not innate_spells:
+                    from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
+                    innate_spells = list(get_anomalous_starting_innate_abilities(char_class, scenario, class_description))
+            except Exception as e:
+                log.warning(f"Failed resolving innate anomalous spells for user {user_id}: {e}")
+            fresh_char = get_character_by_id(char_id) or char
             progress = db.get_skill_progress(fresh_char)
             progress["innate_spells"] = list(innate_spells)
             progress["equipped_granted_spells"] = []
             progress["empowered_granted_spells"] = []
-            db.set_skill_progress(user_id, progress)
-            db.set_learned_spells(user_id, list(innate_spells))
-        except Exception as e:
-            log.warning(f"Failed seeding innate anomalous spells for user {user_id}: {e}")
+            db.set_skill_progress(user_id, progress, char=fresh_char, character_id=char_id, session_id=session_id)
+            db.set_learned_spells(user_id, list(innate_spells), char=fresh_char, character_id=char_id, session_id=session_id)
 
-    # 1. Starting items / carried items
-    if starting_items:
-        for raw_entry in starting_items:
-            if isinstance(raw_entry, dict):
-                item_name = sanitize_character_name(str(raw_entry.get("name") or ""), max_len=80, fallback="")
-                item_type = sanitize_character_name(str(raw_entry.get("item_type") or "Potion"), max_len=40, fallback="Potion")
-                raw_eff = str(raw_entry.get("effect") or raw_entry.get("description") or "")
-                effect = raw_eff if raw_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_eff, max_len=500)
+        # 1. Starting items / carried items
+        if starting_items:
+            for raw_entry in starting_items:
+                if isinstance(raw_entry, dict):
+                    item_name = sanitize_character_name(str(raw_entry.get("name") or ""), max_len=80, fallback="")
+                    item_type = sanitize_character_name(str(raw_entry.get("item_type") or "Potion"), max_len=40, fallback="Potion")
+                    raw_eff = str(raw_entry.get("effect") or raw_entry.get("description") or "")
+                    effect = raw_eff if raw_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_eff, max_len=500)
+                    try:
+                        slot_cost = max(1, min(3, int(raw_entry.get("slot_cost", 1) or 1)))
+                    except (TypeError, ValueError):
+                        slot_cost = 1
+                elif isinstance(raw_entry, (tuple, list)) and len(raw_entry) >= 4:
+                    item_name = sanitize_character_name(str(raw_entry[0] or ""), max_len=80, fallback="")
+                    item_type = sanitize_character_name(str(raw_entry[1] or "Potion"), max_len=40, fallback="Potion")
+                    raw_eff = str(raw_entry[2] or "")
+                    effect = raw_eff if raw_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_eff, max_len=500)
+                    try:
+                        slot_cost = max(1, min(3, int(raw_entry[3] or 1)))
+                    except (TypeError, ValueError):
+                        slot_cost = 1
+                else:
+                    continue
+                if not item_name or item_type in ("Weapon", "Armor", "Shield"):
+                    continue
+                item_id = db.add_item(user_id, item_name, item_type, effect, slot_cost, character_id=char_id, session_id=session_id)
+                default_slot = cd.DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE.get(item_type)
+                if default_slot and item_id:
+                    try:
+                        db.equip_item(user_id, item_id, default_slot, character_id=char_id, session_id=session_id)
+                    except ValueError as equip_err:
+                        log.warning("Starter item %r could not be equipped to %s for user %s: %s", item_name, default_slot, user_id, equip_err)
+
+        # 2. Starting armor / clothing / accessories from gear_map
+        equipped_weapon = False
+        if gear_map:
+            from mechanics.combat.items.clothing import can_equip_item_in_scenario
+            for slot, entry in gear_map.items():
+                if not entry:
+                    continue
+
+                # In non-combat scenarios, omit weapon, shield, and armor
+                if is_non_combat and slot in ("Weapon", "Shield", "Armor"):
+                    continue
+
+                # Preserve serialized procedural Weapon from preview if present; otherwise let weapon_name take priority
+                has_serialized_weapon = (
+                    slot == "Weapon"
+                    and isinstance(entry, dict)
+                    and str(entry.get("effect") or "").startswith(("[GEAR_JSON]", "[ITEM_JSON]"))
+                )
+                if slot == "Weapon" and weapon_name and not has_serialized_weapon:
+                    continue
+
+                if isinstance(entry, dict):
+                    # Generated item from new equipment generation system
+                    gear_name = sanitize_character_name(str(entry.get("name") or ""), max_len=80, fallback="")
+                    if not gear_name:
+                        continue
+                    if slot == "Weapon":
+                        default_type = "Weapon"
+                    elif slot == "Shield":
+                        default_type = "Shield"
+                    elif slot in ("Top", "Bottom"):
+                        default_type = "Clothing"
+                    elif slot == "Armor":
+                        default_type = "Armor"
+                    elif slot == "Head":
+                        default_type = "Headwear"
+                    elif slot == "Gloves":
+                        default_type = "Gloves"
+                    elif slot == "Shoes":
+                        default_type = "Shoes"
+                    elif slot.startswith("Accessory"):
+                        default_type = "Accessory"
+                    else:
+                        default_type = "Armor"
+                    gear_type = sanitize_character_name(str(entry.get("item_type") or default_type), max_len=40, fallback=default_type)
+                    raw_gear_eff = str(entry.get("effect") or "")
+                    gear_effect = raw_gear_eff if raw_gear_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_gear_eff, max_len=500)
+                    try:
+                        gear_slot_cost = max(1, min(3, int(entry.get("slot_cost", 1) or 1)))
+                    except (TypeError, ValueError):
+                        gear_slot_cost = 1
+                    cand_dict = dict(entry)
+                    cand_dict["name"] = gear_name
+                    cand_dict.setdefault("item_type", gear_type)
+                    cand_dict.setdefault("effect", gear_effect)
+                    if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
+                        continue
+                    gear_id = db.add_item(user_id, gear_name, gear_type, gear_effect, gear_slot_cost, character_id=char_id, session_id=session_id)
+                    if gear_id:
+                        try:
+                            db.equip_item(user_id, gear_id, slot, character_id=char_id, session_id=session_id)
+                            if slot == "Weapon":
+                                equipped_weapon = True
+                        except ValueError:
+                            db.remove_item(user_id, gear_id, character_id=char_id, session_id=session_id)
+                    continue
+                elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
+                    if slot == "Weapon":
+                        continue
+                    gear_name = sanitize_character_name(str(entry[0] or ""), max_len=80, fallback="")
+                    if not gear_name:
+                        continue
+                    raw_gear_eff = str(entry[1] or "")
+                    gear_effect = raw_gear_eff if raw_gear_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_gear_eff, max_len=500)
+                    try:
+                        gear_slot_cost = max(1, min(3, int(entry[2]) if len(entry) > 2 else 1))
+                    except (TypeError, ValueError):
+                        gear_slot_cost = 1
+                    if slot == "Shield":
+                        default_type = "Shield"
+                    elif slot in ("Top", "Bottom"):
+                        default_type = "Clothing"
+                    elif slot == "Armor":
+                        default_type = "Armor"
+                    elif slot == "Head":
+                        default_type = "Headwear"
+                    elif slot == "Gloves":
+                        default_type = "Gloves"
+                    elif slot == "Shoes":
+                        default_type = "Shoes"
+                    elif slot.startswith("Accessory"):
+                        default_type = "Accessory"
+                    else:
+                        default_type = "Armor"
+                    cand_dict = {
+                        "name": gear_name,
+                        "item_type": default_type,
+                        "effect": gear_effect,
+                        "slot_cost": gear_slot_cost,
+                    }
+                    if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
+                        continue
+                    gear_id = db.add_item(user_id, gear_name, default_type, gear_effect, gear_slot_cost, character_id=char_id, session_id=session_id)
+                    if gear_id:
+                        try:
+                            db.equip_item(user_id, gear_id, slot, character_id=char_id, session_id=session_id)
+                        except ValueError:
+                            db.remove_item(user_id, gear_id, character_id=char_id, session_id=session_id)
+                    continue
+
+        # 3. Starting weapon (utilizing new weapon generation system)
+        if not is_non_combat and not equipped_weapon:
+            target_w_name = weapon_name or f"{char_class or 'Adventurer'} Starter Weapon"
+            w_item = gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=target_w_name)
+            weapon_id = db.add_item(user_id, w_item["name"], "Weapon", w_item["effect"], w_item.get("slot_cost", 1), character_id=char_id, session_id=session_id)
+            if weapon_id:
                 try:
-                    slot_cost = max(1, min(3, int(raw_entry.get("slot_cost", 1) or 1)))
-                except (TypeError, ValueError):
-                    slot_cost = 1
-            elif isinstance(raw_entry, (tuple, list)) and len(raw_entry) >= 4:
-                item_name = sanitize_character_name(str(raw_entry[0] or ""), max_len=80, fallback="")
-                item_type = sanitize_character_name(str(raw_entry[1] or "Potion"), max_len=40, fallback="Potion")
-                raw_eff = str(raw_entry[2] or "")
-                effect = raw_eff if raw_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_eff, max_len=500)
-                try:
-                    slot_cost = max(1, min(3, int(raw_entry[3] or 1)))
-                except (TypeError, ValueError):
-                    slot_cost = 1
-            else:
-                continue
-            if not item_name or item_type in ("Weapon", "Armor", "Shield"):
-                continue
-            item_id = db.add_item(user_id, item_name, item_type, effect, slot_cost)
-            default_slot = cd.DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE.get(item_type)
-            if default_slot and item_id:
-                try:
-                    db.equip_item(user_id, item_id, default_slot)
+                    db.equip_item(user_id, weapon_id, "Weapon", character_id=char_id, session_id=session_id)
                 except ValueError as equip_err:
-                    log.warning("Starter item %r could not be equipped to %s for user %s: %s", item_name, default_slot, user_id, equip_err)
+                    log.warning("Starter weapon %r could not be equipped for user %s: %s", w_item.get("name"), user_id, equip_err)
 
-    # 2. Starting armor / clothing / accessories from gear_map
-    equipped_weapon = False
-    if gear_map:
-        from mechanics.combat.items.clothing import can_equip_item_in_scenario
-        for slot, entry in gear_map.items():
-            if not entry:
-                continue
-
-            # In non-combat scenarios, omit weapon, shield, and armor
-            if is_non_combat and slot in ("Weapon", "Shield", "Armor"):
-                continue
-
-            # Preserve serialized procedural Weapon from preview if present; otherwise let weapon_name take priority
-            has_serialized_weapon = (
-                slot == "Weapon"
-                and isinstance(entry, dict)
-                and str(entry.get("effect") or "").startswith(("[GEAR_JSON]", "[ITEM_JSON]"))
-            )
-            if slot == "Weapon" and weapon_name and not has_serialized_weapon:
-                continue
-
-            if isinstance(entry, dict):
-                # Generated item from new equipment generation system
-                gear_name = sanitize_character_name(str(entry.get("name") or ""), max_len=80, fallback="")
-                if not gear_name:
-                    continue
-                if slot == "Weapon":
-                    default_type = "Weapon"
-                elif slot == "Shield":
-                    default_type = "Shield"
-                elif slot in ("Top", "Bottom"):
-                    default_type = "Clothing"
-                elif slot == "Armor":
-                    default_type = "Armor"
-                elif slot == "Head":
-                    default_type = "Headwear"
-                elif slot == "Gloves":
-                    default_type = "Gloves"
-                elif slot == "Shoes":
-                    default_type = "Shoes"
-                elif slot.startswith("Accessory"):
-                    default_type = "Accessory"
-                else:
-                    default_type = "Armor"
-                gear_type = sanitize_character_name(str(entry.get("item_type") or default_type), max_len=40, fallback=default_type)
-                raw_gear_eff = str(entry.get("effect") or "")
-                gear_effect = raw_gear_eff if raw_gear_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_gear_eff, max_len=500)
-                try:
-                    gear_slot_cost = max(1, min(3, int(entry.get("slot_cost", 1) or 1)))
-                except (TypeError, ValueError):
-                    gear_slot_cost = 1
-                cand_dict = dict(entry)
-                cand_dict["name"] = gear_name
-                cand_dict.setdefault("item_type", gear_type)
-                cand_dict.setdefault("effect", gear_effect)
-                if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
-                    continue
-                gear_id = db.add_item(user_id, gear_name, gear_type, gear_effect, gear_slot_cost)
-                if gear_id:
-                    try:
-                        db.equip_item(user_id, gear_id, slot)
-                        if slot == "Weapon":
-                            equipped_weapon = True
-                    except ValueError:
-                        db.remove_item(user_id, gear_id)
-                continue
-            elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
-                if slot == "Weapon":
-                    continue
-                gear_name = sanitize_character_name(str(entry[0] or ""), max_len=80, fallback="")
-                if not gear_name:
-                    continue
-                raw_gear_eff = str(entry[1] or "")
-                gear_effect = raw_gear_eff if raw_gear_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_gear_eff, max_len=500)
-                try:
-                    gear_slot_cost = max(1, min(3, int(entry[2]) if len(entry) > 2 else 1))
-                except (TypeError, ValueError):
-                    gear_slot_cost = 1
-                if slot == "Shield":
-                    default_type = "Shield"
-                elif slot in ("Top", "Bottom"):
-                    default_type = "Clothing"
-                elif slot == "Armor":
-                    default_type = "Armor"
-                elif slot == "Head":
-                    default_type = "Headwear"
-                elif slot == "Gloves":
-                    default_type = "Gloves"
-                elif slot == "Shoes":
-                    default_type = "Shoes"
-                elif slot.startswith("Accessory"):
-                    default_type = "Accessory"
-                else:
-                    default_type = "Armor"
-                cand_dict = {
-                    "name": gear_name,
-                    "item_type": default_type,
-                    "effect": gear_effect,
-                    "slot_cost": gear_slot_cost,
-                }
-                if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
-                    continue
-                gear_id = db.add_item(user_id, gear_name, default_type, gear_effect, gear_slot_cost)
-                if gear_id:
-                    try:
-                        db.equip_item(user_id, gear_id, slot)
-                    except ValueError:
-                        db.remove_item(user_id, gear_id)
-                continue
-
-
-    # 3. Starting weapon (utilizing new weapon generation system)
-    if not is_non_combat and not equipped_weapon and (weapon_name or not equipped_weapon):
-        target_w_name = weapon_name or f"{char_class or 'Adventurer'} Starter Weapon"
-        w_item = gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=target_w_name)
-        weapon_id = db.add_item(user_id, w_item["name"], "Weapon", w_item["effect"], w_item.get("slot_cost", 1))
-        if weapon_id:
+        if is_anomalous:
             try:
-                db.equip_item(user_id, weapon_id, "Weapon")
-            except ValueError as equip_err:
-                log.warning("Starter weapon %r could not be equipped for user %s: %s", w_item.get("name"), user_id, equip_err)
+                from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+                sync_equipped_anomalous_spells(user_id, character_id=char_id, session_id=session_id)
+            except sqlite3.Error:
+                raise
+            except Exception as e:
+                log.warning(f"Failed syncing anomalous spells after loadout for user {user_id}: {e}")
 
-    if is_anomalous:
-        try:
-            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-            sync_equipped_anomalous_spells(user_id)
-        except Exception as e:
-            log.warning(f"Failed syncing anomalous spells after loadout for user {user_id}: {e}")
-
-    return db.get_character(user_id)
+        return get_character_by_id(char_id)
 
 def _apply_debug_stat_override(
     char: dict | None,
@@ -329,6 +352,8 @@ def _apply_debug_stat_override(
     settings: dict | None = None,
     session_id: int | None = None,
     active_pacts: list[dict] | None = None,
+    active_grudges: list[dict] | None = None,
+    pact_modifier_fn: Callable[..., dict] | None = None,
 ) -> dict | None:
     if not char:
         return char
@@ -365,6 +390,44 @@ def _apply_debug_stat_override(
         is_m = any(kw in str(char.get("gender", "")).lower() for kw in ("male", "man", "boy")) and "female" not in str(char.get("gender", "")).lower()
         default_app = {"penis_size": "Average"} if is_m else {"breast_size": "Modest B-Cup"}
         app_dict = normalize_appearance(default_app, gender=char.get("gender", ""), race=char.get("race", "human"), scen_key=char.get("scenario", "fantasy"))
+    else:
+        from mechanics.social.persona import (
+            classify_asset_size_tier,
+            fuse_asset_size_and_texture,
+            heal_asset_texture_for_context,
+            heal_character_rear_appearance,
+            heal_physique_for_context,
+            normalize_asset_texture,
+            normalize_stature_tier,
+        )
+        if app_dict.get("stature"):
+            app_dict["stature"] = normalize_stature_tier(str(app_dict["stature"]))
+        if app_dict.get("physique"):
+            norm_p = heal_physique_for_context(
+                str(app_dict["physique"]),
+                gender=str(char.get("gender", "")),
+                stature=str(app_dict.get("stature") or "average"),
+                race=str(char.get("race", "human")),
+            )
+            if norm_p:
+                app_dict["physique"] = norm_p
+        is_m = any(kw in str(char.get("gender", "")).lower() for kw in ("male", "man", "boy")) and "female" not in str(char.get("gender", "")).lower()
+        eff_g = "male" if is_m else "female"
+        sz_key = "penis_size" if is_m else "breast_size"
+        raw_sz = str(app_dict.get(sz_key) or "")
+        sz_tier = classify_asset_size_tier(raw_sz, eff_g) if raw_sz else "average"
+        old_tex = str(app_dict.get("asset_texture") or "")
+        healed_tex = ""
+        if old_tex:
+            healed_tex = heal_asset_texture_for_context(old_tex, gender=eff_g, size_tier=sz_tier)
+            if healed_tex:
+                app_dict["asset_texture"] = healed_tex
+        if raw_sz and ((healed_tex and old_tex != healed_tex) or " & " in raw_sz):
+            tex_for_fuse = healed_tex or normalize_asset_texture(raw_sz, gender=eff_g, size_tier=sz_tier)
+            if tex_for_fuse:
+                app_dict[sz_key] = fuse_asset_size_and_texture(raw_sz, tex_for_fuse, gender=eff_g)
+
+        heal_character_rear_appearance(app_dict, race=str(char.get("race") or ""))
     char["appearance"] = app_dict
 
     # Preserve unmodified SQLite base stats & max_hp before Pact or Debug projection
@@ -397,12 +460,16 @@ def _apply_debug_stat_override(
                     else db.get_player_active_pacts(int(eff_sid), int(user_id), character_id=char.get("id"))
                 )
                 grudges = (
-                    db.get_session_active_grudges(int(eff_sid), holder_id=int(user_id))
-                    if eff_sid else []
+                    active_grudges
+                    if active_grudges is not None
+                    else (db.get_session_active_grudges(int(eff_sid), holder_id=int(user_id)) if eff_sid else [])
                 )
                 if pacts or grudges:
-                    from mechanics.pacts.appraisal import apply_active_pact_modifiers
-                    char = apply_active_pact_modifiers(char, pacts, active_grudges=grudges)
+                    mod_fn = pact_modifier_fn
+                    if mod_fn is None:
+                        from mechanics.pacts.appraisal import apply_active_pact_modifiers
+                        mod_fn = apply_active_pact_modifiers
+                    char = mod_fn(char, pacts, active_grudges=grudges)
             except Exception:
                 pass
     return char
@@ -415,12 +482,38 @@ def update_character_appearance(character_id: int, appearance_dict: dict) -> dic
     char = get_character_by_id(character_id)
     if not char:
         return None
-    from mechanics.social.persona import normalize_appearance
+    from mechanics.social.persona import (
+        normalize_appearance,
+        strip_asset_texture_from_size,
+        strip_rear_texture_from_size,
+    )
     existing_app = dict(char.get("appearance") or {})
     char_gen = char.get("gender", "male")
     is_char_male = any(kw in str(char_gen).lower() for kw in ("male", "man", "boy")) and "female" not in str(char_gen).lower()
     for k, v in (appearance_dict or {}).items():
-        if v is not None:
+        if v is None:
+            continue
+        if k in ("stature", "physique", "rear_size") and str(v).strip().lower() in ("", "auto", "__auto__"):
+            existing_app.pop(k, None)
+            if k == "stature":
+                existing_app.pop("height", None)
+        elif k == "asset_texture" and str(v).strip().lower() in ("", "auto", "__auto__"):
+            existing_app.pop("asset_texture", None)
+            if existing_app.get("breast_size"):
+                stripped_b = strip_asset_texture_from_size(str(existing_app["breast_size"]), gender="female")
+                if stripped_b:
+                    existing_app["breast_size"] = stripped_b
+            if existing_app.get("penis_size"):
+                stripped_p = strip_asset_texture_from_size(str(existing_app["penis_size"]), gender="male")
+                if stripped_p:
+                    existing_app["penis_size"] = stripped_p
+        elif k == "rear_texture" and str(v).strip().lower() in ("", "auto", "__auto__"):
+            existing_app.pop("rear_texture", None)
+            if existing_app.get("rear_size"):
+                stripped_r = strip_rear_texture_from_size(str(existing_app["rear_size"]))
+                if stripped_r:
+                    existing_app["rear_size"] = stripped_r
+        else:
             existing_app[k] = v
     if is_char_male:
         existing_app.pop("breast_size", None)
@@ -585,7 +678,64 @@ def get_user_characters(user_id: int) -> list[dict]:
     user_id = resolve_canonical_user_id(user_id)
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY id ASC", (user_id,)).fetchall()
-        return [_apply_debug_stat_override(dict(r)) for r in rows]
+        if not rows:
+            return []
+        s_row = conn.execute("SELECT * FROM user_settings WHERE user_id=?", (user_id,)).fetchone()
+        settings = dict(s_row) if s_row else {}
+        sids = sorted({int(r["active_session_id"]) for r in rows if r["active_session_id"]})
+        pacts_by_sid: dict[int, list[dict]] = {}
+        grudges_by_sid: dict[int, list[dict]] = {}
+        if sids and settings.get("debug_stat_mode", "off") not in ("max", "min"):
+            from .contracts import _ensure_contracts_v52_tables, _hydrate_contract_row
+            _ensure_contracts_v52_tables(conn)
+            sids_json = json.dumps(sids)
+            uid_str = str(int(user_id))
+            p_rows = conn.execute(
+                """SELECT * FROM session_entity_contracts
+                   WHERE session_id IN (SELECT value FROM json_each(?))
+                     AND holder_type = 'player'
+                     AND holder_id = ?
+                     AND status = 'active'
+                   ORDER BY id ASC""",
+                (sids_json, uid_str),
+            ).fetchall()
+            for pr in p_rows:
+                hd = _hydrate_contract_row(pr)
+                pacts_by_sid.setdefault(int(hd["session_id"]), []).append(hd)
+            g_rows = conn.execute(
+                """SELECT * FROM session_contract_grudges
+                   WHERE session_id IN (SELECT value FROM json_each(?))
+                     AND holder_id = ?
+                     AND status = 'active'""",
+                (sids_json, uid_str),
+            ).fetchall()
+            for gr in g_rows:
+                gd = dict(gr)
+                grudges_by_sid.setdefault(int(gd["session_id"]), []).append(gd)
+    out: list[dict] = []
+    for r in rows:
+        rd = dict(r)
+        r_sid = int(rd["active_session_id"]) if rd.get("active_session_id") else None
+        cid = rd.get("id")
+        char_pacts = (
+            [
+                p
+                for p in pacts_by_sid.get(r_sid, [])
+                if p.get("character_id") in (None, 0, cid)
+            ]
+            if r_sid is not None
+            else []
+        )
+        out.append(
+            _apply_debug_stat_override(
+                rd,
+                settings=settings,
+                session_id=r_sid,
+                active_pacts=char_pacts,
+                active_grudges=grudges_by_sid.get(r_sid, []) if r_sid is not None else [],
+            )
+        )
+    return out
 
 def switch_character(user_id: int, character_id_or_name) -> dict | None:
     chars = get_user_characters(user_id)
@@ -809,10 +959,18 @@ def delete_character(user_id: int, character_id: int = None) -> bool:
             conn.execute("DELETE FROM session_members WHERE user_id=?", (user_id,))
         return True
 
-def update_character_fields(user_id: int, **fields):
+def update_character_fields(
+    user_id: int,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+    **fields,
+):
     if not fields:
         return
-    char = db.get_character(user_id)
+    char = get_character_by_id(character_id) if character_id else None
+    if not char:
+        char = db.get_character(user_id, session_id=session_id)
     if not char:
         return
     from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore
@@ -841,14 +999,15 @@ def apply_hp_mp_delta(
     temp_hp_delta: int = 0,
     *,
     character_id: int | None = None,
+    session_id: int | None = None,
 ):
     char = None
     if character_id:
         with get_conn() as conn:
             row = conn.execute("SELECT * FROM characters WHERE id=?", (int(character_id),)).fetchone()
-            char = _apply_debug_stat_override(dict(row)) if row else None
+            char = _apply_debug_stat_override(dict(row), session_id=session_id) if row else None
     if not char:
-        char = db.get_character(user_id)
+        char = db.get_character(user_id, session_id=session_id)
     if not char:
         return None
     
@@ -879,29 +1038,51 @@ def apply_hp_mp_delta(
         
     new_mp = max(0, min(char.get("max_mp", 50), char.get("mp", 0) + mp_delta))
     new_gold = max(0, char.get("gold", 0) + gold_delta)
-    if character_id:
+    if character_id or session_id is not None:
         with get_conn() as conn:
             conn.execute(
                 "UPDATE characters SET hp=?, temp_hp=?, mp=?, gold=? WHERE id=?",
                 (new_hp, new_temp_hp, new_mp, new_gold, int(char["id"])),
             )
             updated_row = conn.execute("SELECT * FROM characters WHERE id=?", (int(char["id"]),)).fetchone()
-            return _apply_debug_stat_override(dict(updated_row)) if updated_row else None
+            return _apply_debug_stat_override(dict(updated_row), session_id=session_id) if updated_row else None
     db.update_character_fields(user_id, hp=new_hp, temp_hp=new_temp_hp, mp=new_mp, gold=new_gold)
     return db.get_character(user_id)
 
-def apply_turn_regen(user_id: int):
+def apply_turn_regen(user_id: int, *, session_id: int | None = None, character_id: int | None = None):
     """Passive HP/MP regen tied to Endurance, applied once per resolved turn."""
-    char = db.get_character(user_id)
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char or char.get("hp", 0) <= 0:
         return
-    db.apply_hp_mp_delta(user_id, hp_delta=cd.hp_regen(char["end_"]), mp_delta=cd.mp_regen(char["end_"]))
+    db.apply_hp_mp_delta(
+        user_id,
+        hp_delta=cd.hp_regen(char["end_"]),
+        mp_delta=cd.mp_regen(char["end_"]),
+        character_id=char.get("id"),
+        session_id=session_id,
+    )
 
-def set_status_effects(user_id: int, effects: list):
-    db.update_character_fields(user_id, status_effects=json.dumps(effects, default=str))
+def set_status_effects(
+    user_id: int,
+    effects: list,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+):
+    db.update_character_fields(
+        user_id,
+        session_id=session_id,
+        character_id=character_id,
+        status_effects=json.dumps(effects, default=str),
+    )
 
-def get_status_effects(user_id: int) -> list:
-    char = db.get_character(user_id)
+def get_status_effects(
+    user_id: int,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+) -> list:
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char:
         return []
     raw = char.get("status_effects")
@@ -912,63 +1093,97 @@ def get_status_effects(user_id: int) -> list:
             return []
     return raw if isinstance(raw, list) else []
 
-def remove_status_effect(user_id: int, effect_name: str):
-    effects = get_status_effects(user_id)
+def remove_status_effect(
+    user_id: int,
+    effect_name: str,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+):
+    effects = get_status_effects(user_id, session_id=session_id, character_id=character_id)
     target = str(effect_name).strip().lower()
     new_effects = [e for e in effects if (e.get("name", "").lower() if isinstance(e, dict) else str(e).lower()) != target]
-    set_status_effects(user_id, new_effects)
+    set_status_effects(user_id, new_effects, session_id=session_id, character_id=character_id)
 
-def add_status_effect(user_id: int, effect: str | dict):
-    effects = get_status_effects(user_id)
+def add_status_effect(
+    user_id: int,
+    effect: str | dict,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+):
+    effects = get_status_effects(user_id, session_id=session_id, character_id=character_id)
     eff_str = effect if isinstance(effect, str) else effect.get("name", str(effect))
     if not any((e if isinstance(e, str) else e.get("name", "")) == eff_str for e in effects):
         effects.append(effect)
-        set_status_effects(user_id, effects)
+        set_status_effects(user_id, effects, session_id=session_id, character_id=character_id)
 
 get_active_character = get_character
 
-def heal_full(user_id: int):
-    char = db.get_character(user_id)
+def heal_full(user_id: int, *, session_id: int | None = None, character_id: int | None = None):
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if char:
-        db.update_character_fields(user_id, hp=char["max_hp"], mp=char["max_mp"])
+        db.update_character_fields(
+            user_id,
+            session_id=session_id,
+            character_id=char.get("id"),
+            hp=char["max_hp"],
+            mp=char["max_mp"],
+        )
 
-def set_hp_to_one(user_id: int):
-    char = db.get_character(user_id)
+def set_hp_to_one(user_id: int, *, session_id: int | None = None, character_id: int | None = None):
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if char:
-        db.update_character_fields(user_id, hp=1)
+        db.update_character_fields(user_id, session_id=session_id, character_id=char.get("id"), hp=1)
 
-def bump_stat(user_id: int, stat: str, amount: int = 1):
+def bump_stat(
+    user_id: int,
+    stat: str,
+    amount: int = 1,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+):
     """Increase a stat and recompute any derived values that depend on it
     (max HP/MP from END, inventory capacity is computed live from STR so
     nothing to store there). Clamps to cd.MAX_STAT_VALUE -- this is the one
     function that ever writes a stat column, so enforcing the cap here
     guarantees no code path can push a stat past it."""
-    char = db.get_character(user_id)
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char:
         return
+    target_cid = char["id"]
     col = STAT_COLUMN[stat]
     base_val = int((char.get("_base_stats") or {}).get(stat, char[col]))
     new_value = min(cd.MAX_STAT_VALUE, base_val + amount)
     if new_value == base_val:
         return
-    db.update_character_fields(user_id, **{col: new_value})
+    db.update_character_fields(user_id, session_id=session_id, character_id=target_cid, **{col: new_value})
 
     if stat == "END":
         old_base_max_hp = int(char.get("_base_max_hp") or char["max_hp"])
         old_max_mp = char["max_mp"]
         new_base_max_hp, new_max_mp = cd.derive_hp(new_value), cd.derive_mp(new_value)
         hp_gain, mp_gain = new_base_max_hp - old_base_max_hp, new_max_mp - old_max_mp
-        eff_char = db.get_character(user_id)
+        eff_char = get_character_by_id(target_cid) or db.get_character(user_id, session_id=session_id)
         eff_cap_hp = int(eff_char["max_hp"]) if eff_char else new_base_max_hp
         db.update_character_fields(
             user_id,
+            session_id=session_id,
+            character_id=target_cid,
             max_hp=new_base_max_hp,
             max_mp=new_max_mp,
             hp=min(eff_cap_hp, max(0, char["hp"] + hp_gain)),
             mp=min(new_max_mp, char["mp"] + mp_gain),
         )
 
-def spend_stat_point(user_id: int, stat: str) -> str:
+def spend_stat_point(
+    user_id: int,
+    stat: str,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+) -> str:
     """Spend one pending stat point on `stat`. This -- fed exclusively by
     level-ups via db.add_xp() -- is the ONLY sanctioned way stat points are
     earned and spent; there is no other passive/alternative source.
@@ -978,21 +1193,33 @@ def spend_stat_point(user_id: int, stat: str) -> str:
       "capped"    -- stat is already at cd.MAX_STAT_VALUE; point NOT spent
                      (kept pending so the player can choose a different stat)
     """
-    char = db.get_character(user_id)
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char or char["pending_stat_points"] <= 0:
         return "no_points"
+    target_cid = char["id"]
     col = STAT_COLUMN[stat]
     base_val = int((char.get("_base_stats") or {}).get(stat, char[col]))
     if base_val >= cd.MAX_STAT_VALUE:
         return "capped"
-    bump_stat(user_id, stat, 1)
-    db.update_character_fields(user_id, pending_stat_points=char["pending_stat_points"] - 1)
+    bump_stat(user_id, stat, 1, session_id=session_id, character_id=target_cid)
+    db.update_character_fields(
+        user_id,
+        session_id=session_id,
+        character_id=target_cid,
+        pending_stat_points=char["pending_stat_points"] - 1,
+    )
     return "ok"
 
-def add_xp(user_id: int, amount: int):
+def add_xp(
+    user_id: int,
+    amount: int,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+):
     """Adds XP (scaled by INT) and hands out level-up stat points, capped at
     MAX_LEVEL. Returns the list of new levels reached (empty if none)."""
-    char = db.get_character(user_id)
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char:
         return []
     if char["level"] >= cd.MAX_LEVEL:
@@ -1015,12 +1242,25 @@ def add_xp(user_id: int, amount: int):
     if level >= cd.MAX_LEVEL:
         xp = 0  # no XP grinding needed/shown past the cap
 
-    db.update_character_fields(user_id, xp=xp, level=level, pending_stat_points=pending)
+    db.update_character_fields(
+        user_id,
+        session_id=session_id,
+        character_id=char["id"],
+        xp=xp,
+        level=level,
+        pending_stat_points=pending,
+    )
     return levels_gained
 
 
-def update_character_stats(user_id: int, stats: dict):
-    char = db.get_character(user_id)
+def update_character_stats(
+    user_id: int,
+    stats: dict,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+):
+    char = (get_character_by_id(character_id) if character_id else None) or db.get_character(user_id, session_id=session_id)
     if not char:
         return
     base_stats = char.get("_base_stats") or {}
@@ -1041,6 +1281,8 @@ def update_character_stats(user_id: int, stats: dict):
     
     db.update_character_fields(
         user_id,
+        session_id=session_id,
+        character_id=char["id"],
         str_=str_val,
         per_=per_val,
         end_=end_val,
@@ -1147,9 +1389,14 @@ def delete_character_by_id(user_id: int, character_id: int) -> bool:
     return delete_character(user_id, character_id)
 
 
-def get_character_3axis(user_id: int) -> dict[str, Optional[str]]:
-    """Returns the active character's 3-axis awakened resonance fields (all None for non-anomalous characters)."""
-    char = get_character(user_id)
+def get_character_3axis(
+    user_id: int,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
+) -> dict[str, Optional[str]]:
+    """Returns the character's 3-axis awakened resonance fields (all None for non-anomalous characters)."""
+    char = (get_character_by_id(character_id) if character_id else None) or get_character(user_id, session_id=session_id)
     if not char:
         return {"attribute": None, "combat_archetype": None, "ability_medium": None}
     return {
@@ -1164,9 +1411,12 @@ def set_character_3axis(
     attribute: Optional[str] = None,
     combat_archetype: Optional[str] = None,
     ability_medium: Optional[str] = None,
+    *,
+    session_id: int | None = None,
+    character_id: int | None = None,
 ) -> bool:
-    """Updates the active character's 3-axis awakened resonance columns."""
-    char = get_character(user_id)
+    """Updates the character's 3-axis awakened resonance columns."""
+    char = (get_character_by_id(character_id) if character_id else None) or get_character(user_id, session_id=session_id)
     if not char:
         return False
     attr_val = str(attribute).strip().lower() if attribute else None
@@ -1183,13 +1433,19 @@ def set_character_3axis(
         try:
             from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
             from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-            refreshed = get_character(user_id)
+            refreshed = get_character_by_id(char["id"]) or get_character(user_id, session_id=session_id)
             prog = db.get_skill_progress(refreshed)
             innate = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
             prog["innate_spells"] = innate
-            db.set_skill_progress(user_id, prog)
-            db.set_learned_spells(user_id, innate + [s for s in (prog.get("equipped_granted_spells") or []) if s not in innate])
-            sync_equipped_anomalous_spells(user_id)
+            db.set_skill_progress(user_id, prog, char=refreshed, character_id=char["id"], session_id=session_id)
+            db.set_learned_spells(
+                user_id,
+                innate + [s for s in (prog.get("equipped_granted_spells") or []) if s not in innate],
+                char=refreshed,
+                character_id=char["id"],
+                session_id=session_id,
+            )
+            sync_equipped_anomalous_spells(user_id, char=refreshed, character_id=char["id"], session_id=session_id)
         except Exception as e:
             log.warning("Failed re-syncing innate 3-axis spells in set_character_3axis for user %s: %s", user_id, e)
     return True
@@ -1242,74 +1498,122 @@ def batch_load_party_characters(
     """Batch-load missing party member characters with debug overrides and parsed status effects."""
     if not missing_uids:
         return {}
-    loaded: dict[int, dict[str, Any]] = {}
-    req_to_canon = {int(u): int(db.resolve_canonical_user_id(int(u))) for u in missing_uids}
-    canon_uids = list(dict.fromkeys(req_to_canon.values()))
-    uids_json = json.dumps(canon_uids)
-    try:
-        with get_conn() as conn:
-            sess_char_id = -1
-            if session_id is not None:
-                s_row = conn.execute(
-                    "SELECT character_id FROM sessions WHERE id = ?",
-                    (int(session_id),),
-                ).fetchone()
-                if s_row and s_row["character_id"] is not None:
-                    sess_char_id = int(s_row["character_id"])
-            eff_sid = int(session_id) if session_id else -1
-            rows = conn.execute(
-                """SELECT * FROM characters
-                   WHERE user_id IN (SELECT value FROM json_each(?))
-                     AND (
-                         id = ?
-                         OR (? > 0 AND active_session_id = ?)
-                         OR is_active = 1
-                     )
-                   ORDER BY
-                       CASE
-                           WHEN id = ? THEN 0
-                           WHEN (? > 0 AND active_session_id = ?) THEN 1
-                           WHEN is_active = 1 THEN 2
-                           ELSE 3
-                       END ASC,
-                       is_active DESC,
-                       id DESC""",
-                (uids_json, sess_char_id, eff_sid, eff_sid, sess_char_id, eff_sid, eff_sid),
-            ).fetchall()
-            s_rows = conn.execute(
-                "SELECT * FROM user_settings WHERE user_id IN (SELECT value FROM json_each(?))",
-                (uids_json,),
-            ).fetchall()
-            pacts_by_uid: dict[str, list[dict]] = {}
-            if session_id is not None:
-                from .contracts import get_session_pacts_batch
-                pacts_by_uid = get_session_pacts_batch(int(session_id), holder_type="player", conn=conn)
-        settings_by_uid = {
-            int(sr["user_id"]): dict(sr)
-            for sr in s_rows
-            if sr and sr["user_id"] is not None
-        }
-        best_by_canon: dict[int, Any] = {}
-        for r in rows:
-            cu = int(r["user_id"])
-            if cu not in best_by_canon:
-                best_by_canon[cu] = r
-        for req_uid, canon_uid in req_to_canon.items():
-            chosen = best_by_canon.get(canon_uid)
-            if chosen is not None:
-                raw_eff = chosen["status_effects"] if "status_effects" in chosen.keys() else None
-                hydrated = _apply_debug_stat_override(
-                    dict(chosen),
-                    settings=settings_by_uid.get(canon_uid, {}),
-                    session_id=session_id,
-                    active_pacts=pacts_by_uid.get(str(canon_uid), []) if session_id is not None else None,
-                )
-                if hydrated is not None:
-                    hydrated["status_effects"] = _coerce_status_effects_list(raw_eff)
-                    loaded[req_uid] = hydrated
-        return loaded
-    except Exception as exc:
-        log.debug("Batch party character preload fallback: %s", exc)
+    raw_uids: list[int] = []
+    for u in missing_uids:
+        if u:
+            try:
+                raw_uids.append(int(u))
+            except (TypeError, ValueError):
+                continue
+    if not raw_uids:
         return {}
+    loaded: dict[int, dict[str, Any]] = {}
+    unique_raw_uids = list(dict.fromkeys(raw_uids))
+    raw_uids_json = json.dumps(unique_raw_uids)
+
+    with get_conn() as conn:
+        exact_char_uids = {
+            int(r["user_id"])
+            for r in conn.execute(
+                "SELECT DISTINCT user_id FROM characters WHERE user_id IN (SELECT value FROM json_each(?))",
+                (raw_uids_json,),
+            ).fetchall()
+        }
+        unresolved = [u for u in unique_raw_uids if u not in exact_char_uids]
+        exact_discord_uids: set[int] = set()
+        if unresolved:
+            exact_discord_uids = {
+                int(r["user_id"])
+                for r in conn.execute(
+                    "SELECT user_id FROM discord_users WHERE user_id IN (SELECT value FROM json_each(?))",
+                    (json.dumps(unresolved),),
+                ).fetchall()
+            }
+
+        req_to_canon: dict[int, int] = {}
+        for u in unique_raw_uids:
+            if u in exact_char_uids or u in exact_discord_uids:
+                req_to_canon[u] = u
+                continue
+            resolved = u
+            if u > 10**16:
+                near_row = conn.execute(
+                    "SELECT user_id FROM characters WHERE user_id BETWEEN ? AND ? LIMIT 1",
+                    (u - 128, u + 128),
+                ).fetchone()
+                if near_row:
+                    resolved = int(near_row["user_id"])
+                else:
+                    near_du = conn.execute(
+                        "SELECT user_id FROM discord_users WHERE user_id BETWEEN ? AND ? LIMIT 1",
+                        (u - 128, u + 128),
+                    ).fetchone()
+                    if near_du:
+                        resolved = int(near_du["user_id"])
+            req_to_canon[u] = resolved
+
+        canon_uids = list(dict.fromkeys(req_to_canon.values()))
+        uids_json = json.dumps(canon_uids)
+
+        sess_char_id = -1
+        if session_id is not None:
+            s_row = conn.execute(
+                "SELECT character_id FROM sessions WHERE id = ?",
+                (int(session_id),),
+            ).fetchone()
+            if s_row and s_row["character_id"] is not None:
+                sess_char_id = int(s_row["character_id"])
+        eff_sid = int(session_id) if session_id else -1
+        rows = conn.execute(
+            """SELECT * FROM characters
+               WHERE user_id IN (SELECT value FROM json_each(?))
+               ORDER BY
+                   CASE
+                       WHEN id = ? THEN 0
+                       WHEN (? > 0 AND active_session_id = ?) THEN 1
+                       WHEN is_active = 1 THEN 2
+                       ELSE 3
+                   END ASC,
+                   is_active DESC,
+                   id DESC""",
+            (uids_json, sess_char_id, eff_sid, eff_sid),
+        ).fetchall()
+        s_rows = conn.execute(
+            "SELECT * FROM user_settings WHERE user_id IN (SELECT value FROM json_each(?))",
+            (uids_json,),
+        ).fetchall()
+        pacts_by_uid: dict[str, list[dict]] = {}
+        grudges_by_uid: dict[str, list[dict]] = {}
+        if session_id is not None:
+            from .contracts import get_session_active_grudges, get_session_pacts_batch
+            pacts_by_uid = get_session_pacts_batch(int(session_id), holder_type="player", conn=conn)
+            for gr in get_session_active_grudges(int(session_id), conn=conn):
+                grudges_by_uid.setdefault(str(gr.get("holder_id") or ""), []).append(gr)
+
+    settings_by_uid = {
+        int(sr["user_id"]): dict(sr)
+        for sr in s_rows
+        if sr and sr["user_id"] is not None
+    }
+    best_by_canon: dict[int, Any] = {}
+    for r in rows:
+        cu = int(r["user_id"])
+        if cu not in best_by_canon:
+            best_by_canon[cu] = r
+    for req_uid, canon_uid in req_to_canon.items():
+        chosen = best_by_canon.get(canon_uid)
+        if chosen is not None:
+            raw_eff = chosen["status_effects"] if "status_effects" in chosen.keys() else None
+            hydrated = _apply_debug_stat_override(
+                dict(chosen),
+                settings=settings_by_uid.get(canon_uid, {}),
+                session_id=session_id,
+                active_pacts=pacts_by_uid.get(str(canon_uid), []) if session_id is not None else None,
+                active_grudges=grudges_by_uid.get(str(canon_uid), []) if session_id is not None else None,
+            )
+            if hydrated is not None:
+                hydrated["status_effects"] = _coerce_status_effects_list(raw_eff)
+                loaded[req_uid] = hydrated
+    return loaded
 
 

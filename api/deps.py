@@ -16,6 +16,28 @@ from services.crash_capture import to_json_safe as _crash_to_json_safe
 logger = logging.getLogger("hikayat-server")
 
 
+async def ensure_realm_comms_available(
+    session_id: int,
+    node_id: str | None = None,
+    *,
+    session: dict[str, Any] | None = None,
+    allow_spirit_relay: bool = False,
+) -> dict[str, Any]:
+    """Enforces realm comms_isolated gating for remote Phone/Realty/Bounty/E-Shop REST actions."""
+    from mechanics.world.locations.realms import check_realm_comms_available
+
+    eff_nid = node_id if node_id is not None else (
+        (session or {}).get("current_node_id") if isinstance(session, dict) else None
+    )
+    comms = await adb(check_realm_comms_available, int(session_id), eff_nid)
+    if not comms.get("available") and not (allow_spirit_relay and comms.get("supports_spirit_relay")):
+        raise HTTPException(
+            status_code=403,
+            detail=str(comms.get("reason") or "No signal — isolated realm."),
+        )
+    return comms
+
+
 class ConnectionManager:
     """WebSocket Connection Manager for Multiplayer Lobbies & Live Streaming."""
 
@@ -163,11 +185,14 @@ def require_active_session(session: Optional[Dict[str, Any]]) -> None:
         raise HTTPException(status_code=400, detail="This adventure session is no longer active.")
 
 
-def _serializable_action(action: dict) -> dict:
+def serializable_action(action: dict) -> dict:
     """Returns a deep copy of the action dict safe for json.dumps (no raw dataclass objects at any depth)."""
     if not isinstance(action, dict):
         return {}
     return _to_json_safe(action)
+
+
+_serializable_action = serializable_action
 
 
 def enrich_choices_with_odds(
@@ -190,7 +215,8 @@ def enrich_choices_with_odds(
     if user_settings is None and user_id:
         user_settings = db.get_settings(user_id)
     if char is None and user_id:
-        char = db.get_character(user_id, settings=user_settings)
+        sess_id = session.get("id") if isinstance(session, dict) else None
+        char = db.get_character(user_id, session_id=sess_id, settings=user_settings)
     if user_settings is None:
         user_settings = db.get_settings(char["user_id"]) if char else {}
     check_mode = (user_settings or {}).get("debug_check_mode", "off")
@@ -387,9 +413,13 @@ class CharacterCreateRequest(BaseModel):
     agi: int = Field(1, ge=1, le=10)
     luk: int = Field(1, ge=1, le=10)
     appearance: Optional[dict] = None
+    stature: Optional[str] = None
+    physique: Optional[str] = None
     breast_size: Optional[str] = None
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
+    rear_size: Optional[str] = None
+    rear_texture: Optional[str] = None
     starting_faction: Optional[str] = None
     origin_mode: Optional[str] = None
     student_grade: Optional[str] = None
@@ -402,9 +432,13 @@ class CharacterAppearanceUpdateRequest(BaseModel):
     user_id: int
     character_id: Optional[int] = None
     appearance: Optional[dict] = None
+    stature: Optional[str] = None
+    physique: Optional[str] = None
     breast_size: Optional[str] = None
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
+    rear_size: Optional[str] = None
+    rear_texture: Optional[str] = None
 
 
 
@@ -443,16 +477,19 @@ class EquipRequest(BaseModel):
     user_id: int
     item_id: int
     slot: str
+    session_id: Optional[int] = None
 
 
 class UnequipRequest(BaseModel):
     user_id: int
     slot: str
+    session_id: Optional[int] = None
 
 
 class ItemDropRequest(BaseModel):
     user_id: int
     item_id: int
+    session_id: Optional[int] = None
 
 
 class ItemUseRequest(BaseModel):
@@ -491,9 +528,13 @@ class StartAdventureRequest(BaseModel):
     int_val: Optional[int] = Field(None, ge=1, le=10, alias="int")
     agi: Optional[int] = Field(None, ge=1, le=10)
     luk: Optional[int] = Field(None, ge=1, le=10)
+    stature: Optional[str] = None
+    physique: Optional[str] = None
     breast_size: Optional[str] = None
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
+    rear_size: Optional[str] = None
+    rear_texture: Optional[str] = None
     starting_faction: Optional[str] = None
     origin_mode: Optional[str] = None
     student_grade: Optional[str] = None
@@ -579,6 +620,7 @@ class MerchantBuyRequest(BaseModel):
     item_name: str
     is_phone_shop: Optional[bool] = False
     merchant_type: Optional[str] = None
+    store_mode: Optional[str] = None
 
 
 class MerchantSellRequest(BaseModel):
@@ -685,6 +727,7 @@ class BountyGenerateRequest(BaseModel):
     user_id: Optional[int] = None
     force_refresh: bool = False
     faction_id: Optional[str] = None
+    board_scope: Optional[str] = None
 
 
 class BountyActionRequest(BaseModel):
@@ -716,6 +759,11 @@ class QuestTurnInRequest(BaseModel):
 class EpilogueChoiceRequest(BaseModel):
     user_id: Optional[int] = None
     choice_id: str = "endless"  # "archive" | "endless"
+
+
+class PhoneMediaGenerateRequest(BaseModel):
+    user_id: int
+    force_regenerate: bool = False
 
 
 

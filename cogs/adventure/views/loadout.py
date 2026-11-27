@@ -15,7 +15,24 @@ from character_data import (
 )
 from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
-from mechanics.social.persona import normalize_appearance
+from mechanics.social.persona import (
+    FEMALE_ASSET_TEXTURES,
+    FEMALE_TIER_INCOMPATIBLE_TEXTURES,
+    MALE_ASSET_TEXTURES,
+    MALE_TIER_INCOMPATIBLE_TEXTURES,
+    REAR_ASSET_TEXTURES,
+    REAR_TIER_INCOMPATIBLE_TEXTURES,
+    classify_asset_size_tier,
+    classify_rear_size_tier,
+    get_species_surface_profile,
+    heal_rear_texture_for_context,
+    is_feral_rear_excluded,
+    is_male_gender,
+    normalize_asset_texture,
+    normalize_rear_texture,
+    roll_dynamic_asset_texture,
+    roll_dynamic_rear_texture,
+)
 
 class StatPointView(discord.ui.View):
     """Shown when a character has unspent stat points from leveling up.
@@ -741,44 +758,9 @@ class LoadoutWeaponSelectView(discord.ui.View):
                 embed=embed, view=view
             )
 
-FEMALE_TEXTURE_OPTIONS = [
-    {"value": "Perky & High-Set", "label": "Perky & High-Set"},
-    {"value": "Pillowy Soft & Yielding", "label": "Pillowy Soft & Yielding"},
-    {"value": "Firm & Toned", "label": "Firm & Toned"},
-    {"value": "Smooth & Supple", "label": "Smooth & Supple"},
-    {"value": "Heavy & Plush", "label": "Heavy & Plush"},
-    {"value": "Bouncy & Sensitive", "label": "Bouncy & Sensitive"},
-    {"value": "Tender & Delicate", "label": "Tender & Delicate"},
-    {"value": "Shapely Teardrop", "label": "Shapely Teardrop"},
-    {"value": "Compact & Dense", "label": "Compact & Dense"},
-    {"value": "Sensitive & Responsive", "label": "Sensitive & Responsive"},
-    {"value": "Warm & Supple", "label": "Warm & Supple"},
-    {"value": "Soft & Downy Chest Fur", "label": "Soft & Downy Chest Fur (Beastfolk)"},
-    {"value": "Silky Fur-Rimmed", "label": "Silky Fur-Rimmed (Beastfolk)"},
-    {"value": "Velvety Underbelly Down", "label": "Velvety Underbelly Down (Beastfolk)"},
-    {"value": "Fluffy Plush-Accented", "label": "Fluffy Plush-Accented (Beastfolk)"},
-    {"value": "Silky Warm with Smooth Micro-Scales", "label": "Silky Warm with Smooth Micro-Scales (Scaly)"},
-    {"value": "Supple with Shimmering Scale Borders", "label": "Supple with Shimmering Scale Borders (Draconic)"},
-    {"value": "Sleek & Supple Drake-Contour", "label": "Sleek & Supple Drake-Contour (Scaly)"},
-    {"value": "Downy Feather-Lined", "label": "Downy Feather-Lined (Avian)"},
-    {"value": "Light & Buoyant", "label": "Light & Buoyant (Avian)"},
-    {"value": "Velvety Plumage Accents", "label": "Velvety Plumage Accents (Avian)"},
-    {"value": "Glistening & Ultra-Smooth", "label": "Glistening & Ultra-Smooth (Aquatic)"},
-]
+FEMALE_TEXTURE_OPTIONS = [{"value": t, "label": t} for t in FEMALE_ASSET_TEXTURES]
 
-MALE_TEXTURE_OPTIONS = [
-    {"value": "Veined & Firm", "label": "Veined & Firm"},
-    {"value": "Smooth & Heavy", "label": "Smooth & Heavy"},
-    {"value": "Toned & Athletic", "label": "Toned & Athletic"},
-    {"value": "Warm & Pulsing", "label": "Warm & Pulsing"},
-    {"value": "Slender & Ultra-Sensitive", "label": "Slender & Ultra-Sensitive"},
-    {"value": "Dense & Formidable", "label": "Dense & Formidable"},
-    {"value": "Balanced & Firm", "label": "Balanced & Firm"},
-    {"value": "Soft Fur-Ringed Base", "label": "Soft Fur-Ringed Base (Beastfolk)"},
-    {"value": "Silky Fur-Dusted & Resilient", "label": "Silky Fur-Dusted & Resilient (Beastfolk)"},
-    {"value": "Sleek Scaled Base & Firm", "label": "Sleek Scaled Base & Firm (Scaly/Draconic)"},
-    {"value": "Sturdy Draconic Build", "label": "Sturdy Draconic Build (Scaly/Draconic)"},
-]
+MALE_TEXTURE_OPTIONS = [{"value": t, "label": t} for t in MALE_ASSET_TEXTURES]
 
 MALE_SIZE_OPTIONS = [
     {"value": "small", "label": "Petite / Modest (Compact)"},
@@ -793,6 +775,16 @@ FEMALE_SIZE_OPTIONS = [
     {"value": "average", "label": "Proportional (C-Cup)"},
     {"value": "large", "label": "Voluptuous / Full (D-DD Cup)"},
     {"value": "huge", "label": "Bountiful / Massive (E+ Cup)"},
+]
+
+REAR_TEXTURE_OPTIONS = [{"value": t, "label": t} for t in REAR_ASSET_TEXTURES]
+
+REAR_SIZE_OPTIONS = [
+    {"value": "flat", "label": "Flat (Sleek / Minimal)"},
+    {"value": "small", "label": "Compact (Trim / Petite)"},
+    {"value": "average", "label": "Shapely (Balanced / Natural)"},
+    {"value": "large", "label": "Plump (Curvy / Full)"},
+    {"value": "huge", "label": "Bountiful (Wide / Voluptuous)"},
 ]
 
 
@@ -834,7 +826,8 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         is_nsfw = self._is_nsfw()
         char = db.get_character(self.user_id) or {}
         gender = char.get("gender", "Male")
-        is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+        is_male = is_male_gender(gender)
+        feral_rear_excluded = is_feral_rear_excluded(str(char.get("race", "")))
 
         if is_nsfw:
             roll_btn = discord.ui.Button(label="Roll Feature", style=discord.ButtonStyle.secondary, emoji="🎲", row=0)
@@ -850,12 +843,13 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
             # Row 1: Size dropdown
             if is_male:
                 cur_size = char.get("penis_size") or app.get("penis_size", "average")
+                cur_size_tier = classify_asset_size_tier(str(cur_size), "male")
                 size_options = []
                 for opt in MALE_SIZE_OPTIONS:
                     size_options.append(discord.SelectOption(
                         label=opt["label"][:100],
                         value=opt["value"],
-                        default=(opt["value"].lower() == str(cur_size).lower())
+                        default=(opt["value"].lower() == cur_size_tier.lower() or opt["value"].lower() == str(cur_size).lower())
                     ))
                 size_select = discord.ui.Select(
                     placeholder="Select Penis Size Tier...",
@@ -865,8 +859,11 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                 size_select.callback = self._on_size_select
                 self.add_item(size_select)
 
-                # Row 2: Male Texture dropdown
-                cur_tex = char.get("asset_texture") or app.get("asset_texture", "")
+                # Row 2: Male Texture dropdown (size-filtered)
+                raw_tex = char.get("asset_texture") or app.get("asset_texture", "")
+                cur_tex = normalize_asset_texture(str(raw_tex), gender="male", size_tier=cur_size_tier) if raw_tex else ""
+                incompat = MALE_TIER_INCOMPATIBLE_TEXTURES.get(cur_size_tier, set())
+                allowed_tex = [opt for opt in MALE_TEXTURE_OPTIONS if opt["value"] not in incompat] or MALE_TEXTURE_OPTIONS
                 tex_options = [
                     discord.SelectOption(
                         label="Auto-Assign from Race & Build (Dynamic Roll)",
@@ -874,7 +871,7 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                         default=(not cur_tex or cur_tex == "auto")
                     )
                 ]
-                for opt in MALE_TEXTURE_OPTIONS[:24]:
+                for opt in allowed_tex[:24]:
                     tex_options.append(discord.SelectOption(
                         label=opt["label"][:100],
                         value=opt["value"],
@@ -889,12 +886,13 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                 self.add_item(tex_select)
             else:
                 cur_size = char.get("breast_size") or app.get("breast_size", "average")
+                cur_size_tier = classify_asset_size_tier(str(cur_size), "female")
                 size_options = []
                 for opt in FEMALE_SIZE_OPTIONS:
                     size_options.append(discord.SelectOption(
                         label=opt["label"][:100],
                         value=opt["value"],
-                        default=(opt["value"].lower() == str(cur_size).lower())
+                        default=(opt["value"].lower() == cur_size_tier.lower() or opt["value"].lower() == str(cur_size).lower())
                     ))
                 size_select = discord.ui.Select(
                     placeholder="Select Breast Size Tier...",
@@ -904,8 +902,11 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                 size_select.callback = self._on_size_select
                 self.add_item(size_select)
 
-                # Row 2: Female Texture dropdown
-                cur_tex = char.get("asset_texture") or app.get("asset_texture", "")
+                # Row 2: Female Texture dropdown (size-filtered)
+                raw_tex = char.get("asset_texture") or app.get("asset_texture", "")
+                cur_tex = normalize_asset_texture(str(raw_tex), gender="female", size_tier=cur_size_tier) if raw_tex else ""
+                incompat = FEMALE_TIER_INCOMPATIBLE_TEXTURES.get(cur_size_tier, set())
+                allowed_tex = [opt for opt in FEMALE_TEXTURE_OPTIONS if opt["value"] not in incompat] or FEMALE_TEXTURE_OPTIONS
                 tex_options = [
                     discord.SelectOption(
                         label="Auto-Assign from Race & Build (Dynamic Roll)",
@@ -913,7 +914,7 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                         default=(not cur_tex or cur_tex == "auto")
                     )
                 ]
-                for opt in FEMALE_TEXTURE_OPTIONS[:24]:
+                for opt in allowed_tex[:24]:
                     tex_options.append(discord.SelectOption(
                         label=opt["label"][:100],
                         value=opt["value"],
@@ -926,6 +927,52 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                 )
                 tex_select.callback = self._on_texture_select
                 self.add_item(tex_select)
+
+            # Row 3–4: Rear / Ass dropdowns (All Genders, non-feral)
+            if not feral_rear_excluded:
+                cur_rear_raw = char.get("rear_size") or app.get("rear_size", "average")
+                cur_rear_tier = classify_rear_size_tier(str(cur_rear_raw))
+                rear_size_options = [
+                    discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"].lower() == cur_rear_tier.lower() or opt["value"].lower() == str(cur_rear_raw).lower()),
+                    )
+                    for opt in REAR_SIZE_OPTIONS
+                ]
+                rear_size_select = discord.ui.Select(
+                    placeholder="Select Rear / Ass Size Tier...",
+                    options=rear_size_options,
+                    row=3,
+                )
+                rear_size_select.callback = self._on_rear_size_select
+                self.add_item(rear_size_select)
+
+                raw_rtex = char.get("rear_texture") or app.get("rear_texture", "")
+                cur_rtex = normalize_rear_texture(str(raw_rtex), size_tier=cur_rear_tier) if raw_rtex else ""
+                r_incompat = REAR_TIER_INCOMPATIBLE_TEXTURES.get(cur_rear_tier, set())
+                allowed_rtex = [opt for opt in REAR_TEXTURE_OPTIONS if opt["value"] not in r_incompat] or REAR_TEXTURE_OPTIONS
+                rtex_options = [
+                    discord.SelectOption(
+                        label="Auto-Assign from Race & Build (Dynamic Roll)",
+                        value="auto",
+                        default=(not cur_rtex or cur_rtex == "auto"),
+                    )
+                ] + [
+                    discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"] == cur_rtex),
+                    )
+                    for opt in allowed_rtex[:24]
+                ]
+                rtex_select = discord.ui.Select(
+                    placeholder="Select Rear Tactile Texture...",
+                    options=rtex_options,
+                    row=4,
+                )
+                rtex_select.callback = self._on_rear_texture_select
+                self.add_item(rtex_select)
 
     async def _on_regenerate_clicked(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -943,11 +990,34 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
             return
         char = await adb(db.get_character, self.user_id)
         if char:
+            app = char.get("appearance") or {}
             gender = char.get("gender", "Male")
-            is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
-            pool = MALE_TEXTURE_OPTIONS if is_male else FEMALE_TEXTURE_OPTIONS
-            chosen = random.choice(pool)["value"]
-            await adb(db.update_character_appearance, char["id"], {"asset_texture": chosen})
+            is_male = is_male_gender(gender)
+            raw_sz = char.get("penis_size") or app.get("penis_size", "average") if is_male else char.get("breast_size") or app.get("breast_size", "average")
+            cur_tier = classify_asset_size_tier(str(raw_sz), "male" if is_male else "female")
+            chosen = roll_dynamic_asset_texture(
+                seed=random.randint(1, 10**9),
+                gender="male" if is_male else "female",
+                race=char.get("race", "human"),
+                physique=str(app.get("physique") or ""),
+                size_tier=cur_tier,
+            )
+            roll_payload = {"asset_texture": chosen}
+            if not is_feral_rear_excluded(str(char.get("race", ""))):
+                raw_rear = char.get("rear_size") or app.get("rear_size", "average")
+                rear_tier = classify_rear_size_tier(str(raw_rear))
+                chosen_rear = roll_dynamic_rear_texture(
+                    seed=random.randint(1, 10**9),
+                    race=char.get("race", "human"),
+                    physique=str(app.get("physique") or ""),
+                    size_tier=rear_tier,
+                )
+                roll_payload["rear_texture"] = chosen_rear
+            await adb(
+                db.update_character_appearance,
+                char["id"],
+                roll_payload,
+            )
             self._char = await adb(db.get_character, self.user_id)
         self._build_components()
         embed = self.build_embed()
@@ -961,7 +1031,7 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         char = await adb(db.get_character, self.user_id)
         if char:
             gender = char.get("gender", "Male")
-            is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+            is_male = is_male_gender(gender)
             payload = {"penis_size": val} if is_male else {"breast_size": val}
             await adb(db.update_character_appearance, char["id"], payload)
             self._char = await adb(db.get_character, self.user_id)
@@ -976,16 +1046,42 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         val = interaction.data["values"][0]
         char = await adb(db.get_character, self.user_id)
         if char:
-            gender = char.get("gender", "Male")
-            if val == "auto":
-                app = normalize_appearance(
-                    {},
-                    gender=gender,
-                    race=char.get("race", "human"),
-                    scen_key=self.session_config.get("scenario", "fantasy")
-                )
-                val = app.get("asset_texture", "")
-            await adb(db.update_character_appearance, char["id"], {"asset_texture": val})
+            payload = {"asset_texture": "" if val == "auto" else val}
+            await adb(db.update_character_appearance, char["id"], payload)
+            self._char = await adb(db.get_character, self.user_id)
+        self._build_components()
+        embed = self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_rear_size_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        val = interaction.data["values"][0]
+        char = await adb(db.get_character, self.user_id)
+        if char:
+            app = char.get("appearance") or {}
+            payload = {"rear_size": val}
+            cur_rtex = char.get("rear_texture") or app.get("rear_texture")
+            if cur_rtex:
+                healed = heal_rear_texture_for_context(cur_rtex, size_tier=val)
+                if healed:
+                    payload["rear_texture"] = healed
+            await adb(db.update_character_appearance, char["id"], payload)
+            self._char = await adb(db.get_character, self.user_id)
+        self._build_components()
+        embed = self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_rear_texture_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        val = interaction.data["values"][0]
+        char = await adb(db.get_character, self.user_id)
+        if char:
+            payload = {"rear_texture": "" if val == "auto" else val}
+            await adb(db.update_character_appearance, char["id"], payload)
             self._char = await adb(db.get_character, self.user_id)
         self._build_components()
         embed = self.build_embed()
@@ -1135,9 +1231,19 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
     def build_embed(self) -> discord.Embed:
         char = getattr(self, "_char", None) or db.get_character(self.user_id)
         equipment = getattr(self, "_equipment", None) or db.get_equipment(self.user_id)
-        embed = build_character_sheet_embed(char, equipment, title_prefix="⚔️ Adventure Loadout: ")
+        embed = build_character_sheet_embed(
+            char,
+            equipment,
+            title_prefix="⚔️ Adventure Loadout: ",
+            is_nsfw=self._is_nsfw(),
+        )
         if self._is_nsfw():
-            embed.set_footer(text="🔞 NSFW Mode Active — Customize intimate anatomy & tactile texture below, then Begin Adventure!")
+            surf = get_species_surface_profile(
+                str((char or {}).get("race", "human")),
+                str(((char or {}).get("appearance") or {}).get("skin_type") or ""),
+            )
+            surf_note = f" | Species Surface: {surf['label']}" if surf.get("label") else ""
+            embed.set_footer(text=f"🔞 NSFW Mode Active — Customize intimate anatomy & tactile texture below{surf_note}, then Begin Adventure!")
         else:
             embed.set_footer(text="Click 'Regenerate Equipment' to re-roll starting gear, or 'Begin Adventure' to start!")
         return embed

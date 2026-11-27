@@ -239,3 +239,94 @@ CROWD_DENSITY_LABELS = {
     "crowd_label": "Crowd",
     "nearby_bystanders": "Nearby Bystanders"
 }
+
+STATURE_LABELS = {
+    "miniature": "Miniature",
+    "short": "Short",
+    "below_average": "Below Average",
+    "average": "Average",
+    "tall": "Tall",
+    "towering": "Towering",
+}
+
+PHYSIQUE_LABELS = {
+    "slim": "Slim",
+    "average": "Average",
+    "athletic": "Athletic",
+    "muscular": "Muscular",
+    "voluptuous": "Voluptuous",
+    "stocky": "Stocky",
+    "chubby": "Chubby",
+}
+
+ASSET_TEXTURE_LABELS = {
+    "perky": "Perky",
+    "firm": "Firm",
+    "supple": "Supple",
+    "teardrop": "Teardrop",
+    "plush": "Plush",
+    "pillowy": "Pillowy",
+    "bouncy": "Bouncy",
+    "delicate": "Delicate",
+    "sensitive": "Sensitive",
+    "veined": "Veined",
+    "smooth": "Smooth",
+    "thick": "Thick",
+    "heavy": "Heavy",
+    "curved": "Curved",
+    "tapered": "Tapered",
+}
+
+SPECIES_SURFACE_LABELS = {
+    "furred": "Downy Fur",
+    "scaled": "Micro-Scales",
+    "feathered": "Downy Plumage",
+    "aquatic": "Glistening Skin",
+    "fever_warm": "Fever-Warm Skin",
+    "porcelain_silky": "Porcelain-Silky Skin",
+    "bio_synthetic": "Bio-Synthetic Skin",
+}
+
+REAR_SIZE_LABELS = {
+    "flat": "Flat",
+    "small": "Compact",
+    "average": "Shapely",
+    "large": "Plump",
+    "huge": "Bountiful",
+}
+
+REAR_TEXTURE_LABELS = {
+    "firm": "Firm",
+    "taut": "Taut",
+    "supple": "Supple",
+    "rounded": "Rounded",
+    "plush": "Plush",
+    "jiggly": "Jiggly",
+}
+
+BODY_PREFERENCE_LABELS = {
+    "smaller_bb": "Smaller Breasts",
+    "bigger_bb": "Bigger Breasts",
+    "smaller_ass": "Smaller Rear",
+    "bigger_ass": "Bigger Rear",
+    "taller_partner": "Taller Partners",
+    "shorter_partner": "Shorter Partners",
+}
+
+SPIRIT_COURT_LABELS = {
+    "badge_human_world": "🏙️ Human World",
+    "badge_veiled_realm": "⛩️ Veiled Realm",
+    "sworn_ally_active_header": "Sworn Ally — 90+ Court Pact",
+    "sworn_ally_summon_ready": "3-Turn Combat Summon Active",
+    "sworn_ally_stat_bonus": "Passive Stat Aura",
+    "autonomous_spirit_court_badge": "Autonomous Spirit Court",
+    "spirit_court_non_joinable_note": "Independent Spirit Court — earn standing through deeds, sparring & commissions.",
+    "ghoul_track_dark_crime": "Dark Crime (Fast Rep)",
+    "ghoul_track_grey_neutral": "Grey-Neutral (Zero Splash)",
+    "night_market_wing_selector": "Select a Night Market Wing Stall...",
+    "spirit_relay_neon_static_note": "⚡ Neon-Static Leyline Surge: Spirit Relay signals crackle with astral static.",
+    "spirit_relay_ghoul_channel": "🦴 Ossuary Bone-Relay Active",
+    "pale_wake_toll_waived": "🕯️ Night of the Pale Wake — Ossuary entry toll waived",
+    "lantern_tide_ferry_waived": "🏮 Tide of Drifting Lanterns — Ferryman crossing fee waived",
+    "event_crisis_commission_badge": "Urgent Realm Crisis",
+}

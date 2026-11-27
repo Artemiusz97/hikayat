@@ -16,9 +16,52 @@ HAIR_STYLES = {"straight", "wavy", "curly", "braided", "ponytail", "messy", "afr
 STATURE_TIERS = ("miniature", "short", "below_average", "average", "tall", "towering")
 STATURES = {"miniature", "short", "below_average", "average", "tall", "towering", "gigantic", "dwarf", "petite", "diminutive"}
 
+PHYSIQUE_TIERS = (
+    "Slim",
+    "Average",
+    "Athletic",
+    "Muscular",
+    "Voluptuous",
+    "Stocky",
+    "Chubby",
+)
+PHYSIQUES = set(PHYSIQUE_TIERS)
+
+STATURE_INCOMPATIBLE_PHYSIQUES: dict[str, set[str]] = {}
+
+GENDER_INCOMPATIBLE_PHYSIQUES = {
+    "male": {"Voluptuous"},
+    "female": {"Muscular"},
+}
+
 BREAST_SIZES = {"flat", "small", "medium", "large", "huge", "hyper"}
 
 PENIS_SIZES = {"tiny", "small", "average", "large", "huge"}
+
+_MALE_GENDER_TOKENS = frozenset({
+    "male", "man", "boy", "lord", "he", "him", "his", "m", "masculine", "guy", "sir", "mr",
+})
+_FEMALE_GENDER_TOKENS = frozenset({
+    "female", "woman", "girl", "lady", "she", "her", "hers", "f", "fem", "feminine", "ms", "mrs", "miss",
+})
+
+
+def is_male_gender(gender: Any) -> bool:
+    """Return True only when whole-word tokens indicate male and not female."""
+    raw = str(gender or "").strip().lower()
+    if not raw:
+        return False
+    tokens = set(re.findall(r"[a-z]+", raw))
+    return bool(tokens & _MALE_GENDER_TOKENS) and not bool(tokens & _FEMALE_GENDER_TOKENS)
+
+
+def is_female_gender(gender: Any) -> bool:
+    """Return True only when whole-word tokens indicate female and not male."""
+    raw = str(gender or "").strip().lower()
+    if not raw:
+        return False
+    tokens = set(re.findall(r"[a-z]+", raw))
+    return bool(tokens & _FEMALE_GENDER_TOKENS) and not bool(tokens & _MALE_GENDER_TOKENS)
 
 SCHEMA_GARBAGE_PATTERNS = (
     "new_traits", "new_turn_ons", "new_sensitive_spots", "new_demeanor",
@@ -1193,24 +1236,103 @@ def roll_hair_color_and_dye(
         return natural_color, False, natural_color
 
 PHYSIQUE_FEMALE_TEMPLATES = [
-    "Soft & Curved",
-    "Toned & Athletic",
-    "Hourglass & Slender",
-    "Petite & Soft",
-    "Full-Figured & Voluptuous",
-    "Thick & Curvy",
-    "Soft & Overweight"
+    "Slim",
+    "Average",
+    "Athletic",
+    "Voluptuous",
+    "Stocky",
+    "Chubby",
 ]
 
 PHYSIQUE_MALE_TEMPLATES = [
-    "Average & Proportionate",
-    "Broad Shoulders & Lean",
-    "Toned & Athletic",
-    "Muscular & Powerful",
-    "Slender & Lanky",
-    "Stocky & Thick",
-    "Heavy & Overweight"
+    "Slim",
+    "Average",
+    "Athletic",
+    "Muscular",
+    "Stocky",
+    "Chubby",
 ]
+
+PHYSIQUE_LEGACY_MAP = {
+    "petite & soft": "Slim",
+    "hourglass & slender": "Slim",
+    "slender & lanky": "Slim",
+    "slender": "Slim",
+    "petite": "Slim",
+    "average & proportionate": "Average",
+    "toned & athletic": "Athletic",
+    "broad shoulders & lean": "Athletic",
+    "muscular & powerful": "Muscular",
+    "muscular & tall": "Muscular",
+    "soft & curved": "Voluptuous",
+    "curvy": "Voluptuous",
+    "full-figured & voluptuous": "Voluptuous",
+    "thick & curvy": "Voluptuous",
+    "stocky & thick": "Stocky",
+    "soft & overweight": "Chubby",
+    "heavy & overweight": "Chubby",
+}
+
+_PHYSIQUE_CANONICAL_LOWER = {tier.lower(): tier for tier in PHYSIQUE_TIERS}
+
+_PHYSIQUE_SYNONYM_RULES = (
+    ("Chubby", ("chubby", "overweight", "plump", "heavy", "plus-size", "plus size", "full-bodied", "full bodied")),
+    ("Stocky", ("stocky", "burly", "sturdy", "barrel-chested", "barrel chested")),
+    ("Voluptuous", ("voluptuous", "full-figured", "full figured", "busty", "stacked", "thick", "bountiful", "curvy", "curved", "hourglass", "shapely", "soft curves")),
+    ("Muscular", ("muscular", "ripped", "brawny", "jacked", "powerful")),
+    ("Athletic", ("athletic", "toned", "fit", "sculpted", "wiry", "broad shoulders", "broad-shouldered")),
+    ("Slim", ("slim", "slender", "petite", "dainty", "delicate", "slight", "frail", "thin", "lithe", "lean", "lanky", "willowy")),
+    ("Average", ("average", "proportionate", "balanced", "medium", "normal")),
+)
+
+
+def normalize_physique(physique_str: Any) -> str:
+    """Normalizes any physique string, legacy 'X & Y' template, or synonym into one of the 7 canonical tiers."""
+    if not physique_str or not isinstance(physique_str, str):
+        return ""
+    if is_schema_noise(physique_str):
+        return ""
+    raw_clean = re.sub(r"\s+", " ", physique_str.strip()).lower()
+    if raw_clean in ("", "unknown", "none", "n/a", "null", "undefined"):
+        return ""
+
+    if raw_clean in PHYSIQUE_LEGACY_MAP:
+        return PHYSIQUE_LEGACY_MAP[raw_clean]
+    if raw_clean in _PHYSIQUE_CANONICAL_LOWER:
+        return _PHYSIQUE_CANONICAL_LOWER[raw_clean]
+
+    for canon, keywords in _PHYSIQUE_SYNONYM_RULES:
+        for kw in keywords:
+            if re.search(rf"\b{re.escape(kw)}\b", raw_clean):
+                return canon
+
+    return ""
+
+
+def heal_physique_for_context(
+    physique: str,
+    gender: str = "",
+    stature: str = "average",
+    race: str = "",
+) -> str:
+    """Deterministically heals a normalized physique when gender or race makes it contradictory."""
+    norm = normalize_physique(physique)
+    if not norm:
+        return ""
+
+    g = str(gender or "").strip().lower()
+    is_male = is_male_gender(g)
+    is_female = is_female_gender(g)
+
+    if is_male and norm == "Voluptuous":
+        norm = "Average"
+    elif is_female and norm == "Muscular":
+        norm = "Athletic"
+
+    if "bunian" in str(race or "").lower() and norm in ("Stocky", "Chubby"):
+        norm = "Slim"
+
+    return norm
 
 UNDERGARMENT_COLOR_PALETTES = [
     "Black", "White", "Baby Pink", "Crimson", "Midnight Navy",
@@ -1314,15 +1436,27 @@ def generate_procedural_undergarments(
         hash_val = int(hashlib.md5(raw_seed).hexdigest(), 16) if seed_str else 0
 
     raw_g = str(gender or "").strip().lower()
-    is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+    is_male = is_male_gender(raw_g)
     is_female = not is_male
 
-    open_l = str(openness or "moderate").lower()
+    from .intimacy.logic import normalize_openness_tier
+
+    raw_open = str(openness or "").strip()
     traits_l = " ".join(str(t).lower() for t in (traits or []))
     dyn_l = str(dynamic or "").lower()
 
-    is_prude = "prude" in open_l or "modest" in open_l or "innocent" in open_l or "shy" in traits_l
-    is_bold = "bold" in open_l or "shameless" in open_l or "lewd" in open_l or "hedonistic" in open_l or "uninhibited" in open_l or any(k in dyn_l for k in ("hedonist", "insatiable", "high-drive", "dominant", "voracious")) or any(k in traits_l for k in ("shameless", "bold", "seductive", "exhibitionist", "teasing"))
+    if raw_open:
+        open_tier = normalize_openness_tier(raw_open)
+        is_prude = open_tier == "prude"
+        is_bold = open_tier in ("bold", "shameless") or any(
+            k in dyn_l for k in ("hedonist", "insatiable", "high-drive", "dominant", "voracious")
+        )
+    else:
+        open_l = ""
+        is_prude = "innocent" in traits_l or "shy" in traits_l
+        is_bold = any(k in dyn_l for k in ("hedonist", "insatiable", "high-drive", "dominant", "voracious")) or any(
+            k in traits_l for k in ("shameless", "bold", "seductive", "exhibitionist", "teasing")
+        )
 
     color = UNDERGARMENT_COLOR_PALETTES[hash_val % len(UNDERGARMENT_COLOR_PALETTES)]
 
@@ -1566,6 +1700,7 @@ IMMUTABLE_PHYSICAL_APPEARANCE_KEYS = {
     "skin_color", "skin", "skin_type", "coat_type",
     "distinctive_features", "features", "marks",
     "breast_size", "penis_size",
+    "rear_size", "rear_texture",
     "predetermined_intercourse",
     "intimate_demeanor", "intimate_dynamic",
     "erotic_openness", "openness",
@@ -1581,7 +1716,13 @@ def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", 
     h_len = (app_dict.get("hair_length") or "").lower()
     h_style = (app_dict.get("hair_style") or "").lower()
     stature = (app_dict.get("stature") or "").lower().replace("_", " ")
-    physique = (app_dict.get("physique") or "").strip()
+    raw_phys = (app_dict.get("physique") or "").strip()
+    gen_for_phys = str(gender or app_dict.get("gender") or "")
+    physique = (
+        heal_physique_for_context(raw_phys, gender=gen_for_phys, stature=stature)
+        or normalize_physique(raw_phys)
+        or raw_phys
+    )
     skin = (app_dict.get("skin_color") or "").title()
     coat = (app_dict.get("coat_color") or "").title()
     features = (app_dict.get("distinctive_features") or "").strip()

@@ -286,6 +286,7 @@ def get_location_sleep_context(
             prop_rest_mult = 1.0
 
     sanctuary_bed_unlocked = False
+    spirit_lodging_res: dict[str, Any] | None = None
     if session_id:
         try:
             from mechanics.world.locations.folklore_veil import get_folklore_sanctuary_rest_multiplier
@@ -301,6 +302,22 @@ def get_location_sleep_context(
                 if sanc_mult > 1.0:
                     prop_rest_mult = max(prop_rest_mult, float(sanc_mult))
                     sanctuary_bed_unlocked = True
+            elif sanc_nid == "sub_crossroads_inn_chambers":
+                spirit_lodging_res = {
+                    "surface": "bed",
+                    "can_sleep": True,
+                    "recovery_ratio": round(1.0 * prop_rest_mult, 3),
+                    "surface_label": "Spirit Inn Chambers",
+                    "reason": "Clean tatami & cotton bedding at the Two-Moons River Tea-Pavilion Inn Chambers (100% rest recovery).",
+                }
+            elif sanc_nid in ("sub_kitsune_autumn_rotenburo", "sub_kitsune_bamboo_bath", "sub_bunian_waterfall_grotto"):
+                spirit_lodging_res = {
+                    "surface": "couch",
+                    "can_sleep": True,
+                    "recovery_ratio": round(max(1.15, prop_rest_mult), 3),
+                    "surface_label": "Spirit Spring / Onsen Respite",
+                    "reason": "Warm mineral waters and drifting incense restore vitality deeply (115% restorative spirit soak).",
+                }
         except Exception:
             pass
     if sanctuary_bed_unlocked:
@@ -311,6 +328,8 @@ def get_location_sleep_context(
             "surface_label": "Sacred Sanctuary Pavilion",
             "reason": "Welcomed inside the Sovereign/Royal Folklore Pavilion (150% sacred rest recovery).",
         }
+    if spirit_lodging_res is not None:
+        return spirit_lodging_res
 
     # If the active leaf sub-location explicitly provides a couch and lacks a dedicated bed,
     # prioritize the local room's couch over facility-wide building nouns (e.g. "studio", "dorm")
@@ -731,7 +750,7 @@ def advance_time(
     if day_rolled and party_uids:
         for uid in party_uids:
             try:
-                db.increment_days_adventured(uid, delta=days_elapsed)
+                db.increment_days_adventured(uid, delta=days_elapsed, session_id=session_id)
             except Exception as e:
                 log.warning("Failed to increment days_adventured for user %s: %s", uid, e)
 
@@ -799,16 +818,18 @@ def apply_sleep_rest(
     scen_key: str = "",
     recovery_ratio: float = 1.0,
     surface_label: str = "Bed",
+    freeze_clock: bool = False,
+    override_clock_minutes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Executes a full night's sleep.
-    - Advances clock to wake_minute (07:00 AM / 420 mins for High School, 07:30 AM / 450 mins for others).
-    - Advances current_day += 1.
-    - Increments character days_adventured += 1.
+    - Advances clock to wake_minute (07:00 AM / 420 mins for High School, 07:30 AM / 450 mins for others),
+      unless freeze_clock=True (stasis) or override_clock_minutes is provided (scaled realm time).
+    - Skips external world day-rollover side effects when freeze_clock=True or clock does not cross a day.
     - Restores character HP/MP according to recovery_ratio (100% for Bed/Camp, 50% for Sofa/Couch).
     - Clears all fatigue, knockout/triage recovery, and intimate refractory/arousal status effects.
     - Restores canonical morning outfits and resets refractory state while preserving pockets_emptied.
-    - Re-syncs room NPCs to morning schedule (retaining romantic partners who slept over in private rooms).
+    - Re-syncs room NPCs to morning schedule (when a normal/overnight sleep rolls the world).
     - Resets consecutive_days_awake to 0.
     """
     curr_day, curr_min, _ = db.get_session_time(session_id)
@@ -818,11 +839,23 @@ def apply_sleep_rest(
         from mechanics.world.world_schedule import get_scenario_wake_minute
         wake_minute = get_scenario_wake_minute(eff_scen)
 
-    # If sleeping before midnight (e.g. 22:00) or past morning wake-up (e.g. 08:00 AM),
-    # sleep until next morning -> Day + 1.
-    # If sleeping in early morning hours before wake-up (e.g. 02:00 AM), wake at morning same day.
-    new_day = curr_day + 1 if curr_min >= int(wake_minute) else curr_day
-    new_minute = int(wake_minute)
+    if freeze_clock:
+        new_day = int(curr_day)
+        new_minute = int(curr_min)
+    elif override_clock_minutes is not None:
+        ov_m = max(0, int(override_clock_minutes))
+        new_day = int(curr_day) + ((int(curr_min) + ov_m) // 1440)
+        new_minute = (int(curr_min) + ov_m) % 1440
+    else:
+        # If sleeping before midnight (e.g. 22:00) or past morning wake-up (e.g. 08:00 AM),
+        # sleep until next morning -> Day + 1.
+        # If sleeping in early morning hours before wake-up (e.g. 02:00 AM), wake at morning same day.
+        new_day = curr_day + 1 if curr_min >= int(wake_minute) else curr_day
+        new_minute = int(wake_minute)
+
+    clock_advanced = (not freeze_clock) and (new_day != curr_day or new_minute != curr_min)
+    day_rolled_over = (not freeze_clock) and (new_day > curr_day)
+    is_normal_overnight = (not freeze_clock) and (override_clock_minutes is None)
 
     db.update_session_time(
         session_id=session_id,
@@ -831,18 +864,20 @@ def apply_sleep_rest(
         consecutive_days_awake=0
     )
 
-    try:
-        from mechanics.system.commitments_engine import audit_and_expire_commitments
-        audit_and_expire_commitments(session_id, new_day, new_minute)
-    except Exception as e:
-        log.warning("Failed processing commitments audit/expiration on sleep for session %s: %s", session_id, e)
+    if clock_advanced:
+        try:
+            from mechanics.system.commitments_engine import audit_and_expire_commitments
+            audit_and_expire_commitments(session_id, new_day, new_minute)
+        except Exception as e:
+            log.warning("Failed processing commitments audit/expiration on sleep for session %s: %s", session_id, e)
 
-    try:
-        db.clear_temporary_companions(session_id)
-    except Exception:
-        pass
+    if not freeze_clock:
+        try:
+            db.clear_temporary_companions(session_id)
+        except Exception:
+            pass
 
-    if new_day > curr_day:
+    if day_rolled_over:
         try:
             from mechanics.world.anomalous_events import process_anomalous_daily_rollover
             process_anomalous_daily_rollover(session_id, new_day, party_uids=party_uids)
@@ -854,46 +889,58 @@ def apply_sleep_rest(
         except Exception as e:
             log.warning("Failed daily bounty replenishment on sleep for session %s: %s", session_id, e)
 
-    try:
-        from mechanics.world.world_events.engine import advance_world_pulse
-        sleep_delta = max(480, ((new_day - curr_day) * 1440) + (new_minute - curr_min))
-        advance_world_pulse(
-            session_id=session_id,
-            delta_minutes=sleep_delta,
-            current_day=new_day,
-            current_minute=new_minute,
-            is_sleep_skip=True,
-        )
-    except Exception as e:
-        log.warning("Failed advancing world pulse on sleep for session %s: %s", session_id, e)
+    if clock_advanced:
+        try:
+            from mechanics.world.world_events.engine import advance_world_pulse
+            raw_sleep_delta = ((new_day - curr_day) * 1440) + (new_minute - curr_min)
+            sleep_delta = max(1, raw_sleep_delta) if override_clock_minutes is not None else max(480, raw_sleep_delta)
+            advance_world_pulse(
+                session_id=session_id,
+                delta_minutes=sleep_delta,
+                current_day=new_day,
+                current_minute=new_minute,
+                is_sleep_skip=True,
+            )
+        except Exception as e:
+            log.warning("Failed advancing world pulse on sleep for session %s: %s", session_id, e)
 
     sleep_clock_tick = None
-    try:
-        from mechanics.narrative.threat_clock import tick_threat_clock
-        sleep_clock_tick = tick_threat_clock(
-            session_id,
-            new_day,
-            new_minute,
-            turn_number=db.get_effective_session_turn(session_id),
-        )
-    except Exception as e:
-        log.warning("Failed ticking Threat Clock on sleep for session %s: %s", session_id, e)
+    if clock_advanced:
+        try:
+            from mechanics.narrative.threat_clock import tick_threat_clock
+            sleep_clock_tick = tick_threat_clock(
+                session_id,
+                new_day,
+                new_minute,
+                turn_number=db.get_effective_session_turn(session_id),
+            )
+        except Exception as e:
+            log.warning("Failed ticking Threat Clock on sleep for session %s: %s", session_id, e)
 
-    # Restock all merchant catalogues upon sleeping / morning wake-up
-    try:
-        if session and "merchant" in session:
-            merchant = session["merchant"]
-            if isinstance(merchant, dict):
-                merchant["catalogues"] = {}
-                merchant["stock"] = []
-                db.save_merchant_state(session_id, merchant)
-    except Exception as e:
-        log.error("Failed to clear merchant catalogues on sleep for session %s: %s", session_id, e)
+    # Restock all merchant catalogues upon sleeping / morning wake-up (when world advances a day/normal night)
+    if day_rolled_over or is_normal_overnight:
+        try:
+            if session and "merchant" in session:
+                merchant = session["merchant"]
+                if isinstance(merchant, dict):
+                    merchant["catalogues"] = {}
+                    merchant["stock"] = []
+                    db.save_merchant_state(session_id, merchant)
+        except Exception as e:
+            log.error("Failed to clear merchant catalogues on sleep for session %s: %s", session_id, e)
 
     fatigue_effects_cleared = []
+    banquet_bonus = {"active": False, "rest_multiplier": 1.0, "buff_name": ""}
+    try:
+        from mechanics.world.world_events.spirit_realm_events import get_bunian_banquet_rest_bonus
+        banquet_bonus = get_bunian_banquet_rest_bonus(session_id, str((session or {}).get("current_node_id") or ""))
+    except Exception:
+        pass
+    eff_recovery_ratio = max(float(recovery_ratio), float(banquet_bonus.get("rest_multiplier") or 1.0)) if banquet_bonus.get("active") else float(recovery_ratio)
+
     for uid in party_uids:
         try:
-            char = db.get_character(uid)
+            char = db.get_character(uid, session_id=session_id)
             if not char:
                 continue
             
@@ -902,12 +949,13 @@ def apply_sleep_rest(
             max_mp = char.get("max_mp", 50)
             curr_hp = char.get("hp", max_hp)
             curr_mp = char.get("mp", max_mp)
-            new_hp = min(max_hp, int(curr_hp + max_hp * recovery_ratio)) if recovery_ratio < 1.0 else max_hp
-            new_mp = min(max_mp, int(curr_mp + max_mp * recovery_ratio)) if recovery_ratio < 1.0 else max_mp
-            db.update_character_fields(uid, hp=new_hp, mp=new_mp)
+            new_hp = min(max_hp, int(curr_hp + max_hp * eff_recovery_ratio)) if eff_recovery_ratio < 1.0 else max_hp
+            new_mp = min(max_mp, int(curr_mp + max_mp * eff_recovery_ratio)) if eff_recovery_ratio < 1.0 else max_mp
+            db.update_character_fields(uid, session_id=session_id, character_id=char.get("id"), hp=new_hp, mp=new_mp)
 
-            # 2. Increment days adventured
-            db.increment_days_adventured(uid, delta=1)
+            # 2. Increment days adventured only when an external day rolls over or normal overnight sleep
+            if day_rolled_over or is_normal_overnight:
+                db.increment_days_adventured(uid, delta=1, session_id=session_id, character_id=char.get("id"))
 
             # 3. Clear fatigue, knockout/triage recovery, and intimate status effects (D17)
             raw_status = char.get("status_effects") or "[]"
@@ -943,8 +991,13 @@ def apply_sleep_rest(
                 else:
                     filtered_status.append(s_str)
 
-            if len(filtered_status) != len(status_list):
-                db.set_status_effects(uid, filtered_status)
+            if banquet_bonus.get("active") and banquet_bonus.get("buff_name"):
+                b_tag = str(banquet_bonus["buff_name"])
+                if b_tag not in filtered_status:
+                    filtered_status.append(b_tag)
+
+            if len(filtered_status) != len(status_list) or banquet_bonus.get("active"):
+                db.set_status_effects(uid, filtered_status, session_id=session_id, character_id=char.get("id"))
 
         except Exception as e:
             log.error("Failed to apply sleep rest to user %s: %s", uid, e, exc_info=True)
@@ -966,9 +1019,9 @@ def apply_sleep_rest(
                 exc["refractory_partners"] = {}
             from mechanics.social.physical_state import restore_equipped_outfit
             party_for_outfit = [
-                (c_obj, db.get_inventory(u_id))
+                (c_obj, db.get_inventory(u_id, char=c_obj, session_id=session_id))
                 for u_id in party_uids
-                if u_id and (c_obj := db.get_character(u_id))
+                if u_id and (c_obj := db.get_character(u_id, session_id=session_id))
             ]
             phys_st = restore_equipped_outfit(phys_st, party_for_outfit, scen_key=eff_scen, session_id=session_id)
             phys_st["pockets_emptied"] = preserved_pockets
@@ -977,104 +1030,107 @@ def apply_sleep_rest(
         log.warning("Failed overnight physical/outfit reset for session %s: %s", session_id, e)
 
     # 5. Morning NPC schedule re-sync (retaining romantic sleepover partners in private rooms) (D17)
-    morning_npcs: List[Dict[str, Any]] = []
-    try:
-        fresh_sess = db.get_session(session_id) or session or {}
-        curr_loc = str(fresh_sess.get("current_location") or "").strip()
-        curr_nid = str(fresh_sess.get("current_node_id") or "").strip()
-        prev_npcs = list(fresh_sess.get("current_npcs") or [])
-        if curr_loc:
-            from mechanics.world.npc_schedule import get_npc_scheduled_location
-            from mechanics.world.waypoints import check_location_matches_waypoint
+    morning_npcs: Optional[List[Dict[str, Any]]] = None
+    if day_rolled_over or is_normal_overnight:
+        morning_npcs = []
+        try:
+            fresh_sess = db.get_session(session_id) or session or {}
+            curr_loc = str(fresh_sess.get("current_location") or "").strip()
+            curr_nid = str(fresh_sess.get("current_node_id") or "").strip()
+            prev_npcs = list(fresh_sess.get("current_npcs") or [])
+            if curr_loc:
+                from mechanics.world.npc_schedule import get_npc_scheduled_location
+                from mechanics.world.waypoints import check_location_matches_waypoint
 
-            is_private_room = any(
-                kw in curr_loc.lower()
-                for kw in ("bedroom", "quarters", "suite", "dorm", "cabin", "inn room", "apartment", "home", "house")
-            ) or ("bed" in str(surface_label or "").lower())
-            if curr_nid:
-                w_node = db.get_world_node(session_id, curr_nid)
-                if w_node and str(w_node.get("privacy_level") or w_node.get("privacy") or "").lower() == "private":
-                    is_private_room = True
+                is_private_room = any(
+                    kw in curr_loc.lower()
+                    for kw in ("bedroom", "quarters", "suite", "dorm", "cabin", "inn room", "apartment", "home", "house")
+                ) or ("bed" in str(surface_label or "").lower())
+                if curr_nid:
+                    w_node = db.get_world_node(session_id, curr_nid)
+                    if w_node and str(w_node.get("privacy_level") or w_node.get("privacy") or "").lower() == "private":
+                        is_private_room = True
 
-            contacts = db.get_contacts(session_id) or []
-            contact_by_name = {
-                str(c.get("name") or "").strip().lower(): c
-                for c in contacts
-                if isinstance(c, dict) and c.get("name")
-            }
-            seen_names: set[str] = set()
+                contacts = db.get_contacts(session_id) or []
+                contact_by_name = {
+                    str(c.get("name") or "").strip().lower(): c
+                    for c in contacts
+                    if isinstance(c, dict) and c.get("name")
+                }
+                seen_names: set[str] = set()
 
-            for n in prev_npcs:
-                n_dict = dict(n) if isinstance(n, dict) else {"name": str(n)}
-                nm = str(n_dict.get("name") or "").strip()
-                if not nm:
-                    continue
-                nm_low = nm.lower()
-                c_row = contact_by_name.get(nm_low)
-                is_perm_comp = bool(n_dict.get("is_companion") and not n_dict.get("is_temporary"))
-                is_romantic_sleepover = bool(
-                    is_private_room
-                    and c_row
-                    and str(c_row.get("track") or "").lower() == "romantic"
-                )
-                sched_loc = get_npc_scheduled_location(
-                    c_row or n_dict,
-                    current_minute=new_minute,
-                    scen_key=eff_scen,
-                    session_id=session_id,
-                    current_day=new_day,
-                )
-                is_sched_here = bool(
-                    sched_loc
-                    and (
+                for n in prev_npcs:
+                    n_dict = dict(n) if isinstance(n, dict) else {"name": str(n)}
+                    nm = str(n_dict.get("name") or "").strip()
+                    if not nm:
+                        continue
+                    nm_low = nm.lower()
+                    c_row = contact_by_name.get(nm_low)
+                    is_perm_comp = bool(n_dict.get("is_companion") and not n_dict.get("is_temporary"))
+                    is_romantic_sleepover = bool(
+                        is_private_room
+                        and c_row
+                        and str(c_row.get("track") or "").lower() == "romantic"
+                    )
+                    sched_loc = get_npc_scheduled_location(
+                        c_row or n_dict,
+                        current_minute=new_minute,
+                        scen_key=eff_scen,
+                        session_id=session_id,
+                        current_day=new_day,
+                    )
+                    is_sched_here = bool(
+                        sched_loc
+                        and (
+                            check_location_matches_waypoint(curr_loc, sched_loc)
+                            or check_location_matches_waypoint(sched_loc, curr_loc)
+                        )
+                    )
+                    if is_perm_comp or is_romantic_sleepover or is_sched_here:
+                        seen_names.add(nm_low)
+                        morning_npcs.append(n_dict)
+
+                for c_row in contacts:
+                    nm = str(c_row.get("name") or "").strip()
+                    if not nm or nm.lower() in seen_names:
+                        continue
+                    if str(c_row.get("status") or "").lower() in ("dead", "deceased"):
+                        continue
+                    sched_loc = get_npc_scheduled_location(
+                        c_row,
+                        current_minute=new_minute,
+                        scen_key=eff_scen,
+                        session_id=session_id,
+                        current_day=new_day,
+                    )
+                    if sched_loc and (
                         check_location_matches_waypoint(curr_loc, sched_loc)
                         or check_location_matches_waypoint(sched_loc, curr_loc)
-                    )
-                )
-                if is_perm_comp or is_romantic_sleepover or is_sched_here:
-                    seen_names.add(nm_low)
-                    morning_npcs.append(n_dict)
+                    ):
+                        seen_names.add(nm.lower())
+                        morning_npcs.append({
+                            "name": nm,
+                            "role": c_row.get("role") or "Resident",
+                            "status_effects": ["Present"],
+                        })
 
-            for c_row in contacts:
-                nm = str(c_row.get("name") or "").strip()
-                if not nm or nm.lower() in seen_names:
-                    continue
-                if str(c_row.get("status") or "").lower() in ("dead", "deceased"):
-                    continue
-                sched_loc = get_npc_scheduled_location(
-                    c_row,
-                    current_minute=new_minute,
-                    scen_key=eff_scen,
-                    session_id=session_id,
-                    current_day=new_day,
-                )
-                if sched_loc and (
-                    check_location_matches_waypoint(curr_loc, sched_loc)
-                    or check_location_matches_waypoint(sched_loc, curr_loc)
-                ):
-                    seen_names.add(nm.lower())
-                    morning_npcs.append({
-                        "name": nm,
-                        "role": c_row.get("role") or "Resident",
-                        "status_effects": ["Present"],
-                    })
-
-            db.update_session(session_id, current_npcs=morning_npcs)
-    except Exception as e:
-        log.warning("Failed morning NPC schedule re-sync for session %s: %s", session_id, e)
+                db.update_session(session_id, current_npcs=morning_npcs)
+        except Exception as e:
+            log.warning("Failed morning NPC schedule re-sync for session %s: %s", session_id, e)
 
     sleep_boundary_tick = {}
-    try:
-        sleep_boundary_tick = run_boundary_autonomy_and_epistemic_tick(
-            session_id,
-            curr_day,
-            curr_min,
-            new_day,
-            new_minute,
-            party_uids=party_uids,
-        )
-    except Exception as e:
-        log.warning("Failed running sleep boundary autonomy/epistemic tick for session %s: %s", session_id, e)
+    if clock_advanced:
+        try:
+            sleep_boundary_tick = run_boundary_autonomy_and_epistemic_tick(
+                session_id,
+                curr_day,
+                curr_min,
+                new_day,
+                new_minute,
+                party_uids=party_uids,
+            )
+        except Exception as e:
+            log.warning("Failed running sleep boundary autonomy/epistemic tick for session %s: %s", session_id, e)
 
     return {
         "session_id": session_id,
@@ -1085,7 +1141,9 @@ def apply_sleep_rest(
         "fatigue_cleared": fatigue_effects_cleared,
         "hp_restored": True,
         "mp_restored": True,
-        "recovery_ratio": recovery_ratio,
+        "recovery_ratio": eff_recovery_ratio,
+        "banquet_buff_applied": bool(banquet_bonus.get("active")),
+        "banquet_buff_name": str(banquet_bonus.get("buff_name") or ""),
         "surface_label": surface_label,
         "morning_npcs": morning_npcs,
         "threat_clock_tick": sleep_clock_tick,
@@ -1099,24 +1157,30 @@ def apply_nap_rest(
     nap_minutes: int = 120,
     recovery_ratio: float = 1.0,
     surface_label: str = "Bed",
+    freeze_clock: bool = False,
+    clock_minutes: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Advances time by nap_minutes and restores proportional HP/MP."""
+    """Advances time by eff_clock_mins (or freezes when freeze_clock=True) and restores proportional HP/MP."""
     curr_day, curr_min, _ = db.get_session_time(session_id)
-    new_total = curr_min + int(nap_minutes)
+    eff_clock_mins = 0 if freeze_clock else (
+        max(0, int(clock_minutes)) if clock_minutes is not None else max(0, int(nap_minutes))
+    )
+    new_total = curr_min + eff_clock_mins
     new_day = curr_day + (new_total // 1440)
     new_min = new_total % 1440
-    db.update_session_time(session_id=session_id, current_day=new_day, current_minute=new_min)
+    if eff_clock_mins > 0:
+        db.update_session_time(session_id=session_id, current_day=new_day, current_minute=new_min)
 
-    try:
-        from mechanics.system.commitments_engine import audit_and_expire_commitments
-        audit_and_expire_commitments(session_id, new_day, new_min)
-    except Exception as e:
-        log.warning("Failed processing commitments audit/expiration on nap for session %s: %s", session_id, e)
+        try:
+            from mechanics.system.commitments_engine import audit_and_expire_commitments
+            audit_and_expire_commitments(session_id, new_day, new_min)
+        except Exception as e:
+            log.warning("Failed processing commitments audit/expiration on nap for session %s: %s", session_id, e)
 
     eff_ratio = (float(nap_minutes) / 480.0) * float(recovery_ratio)
     for uid in party_uids:
         try:
-            char = db.get_character(uid)
+            char = db.get_character(uid, session_id=session_id)
             if not char:
                 continue
             max_hp = char.get("max_hp", 100)
@@ -1125,7 +1189,13 @@ def apply_nap_rest(
             curr_mp = char.get("mp", max_mp)
             add_hp = int(max_hp * eff_ratio)
             add_mp = int(max_mp * eff_ratio)
-            db.update_character_fields(uid, hp=min(max_hp, curr_hp + add_hp), mp=min(max_mp, curr_mp + add_mp))
+            db.update_character_fields(
+                uid,
+                session_id=session_id,
+                character_id=char.get("id"),
+                hp=min(max_hp, curr_hp + add_hp),
+                mp=min(max_mp, curr_mp + add_mp),
+            )
 
             if nap_minutes >= 120:
                 raw_status = char.get("status_effects") or "[]"
@@ -1133,28 +1203,29 @@ def apply_nap_rest(
                 status_low = [str(s.get("name") if isinstance(s, dict) else s).lower() for s in status_list]
                 if "delirious" in status_low:
                     status_list = [s for s in status_list if str(s.get("name") if isinstance(s, dict) else s).lower() != "delirious"] + ["Exhausted"]
-                    db.set_status_effects(uid, status_list)
+                    db.set_status_effects(uid, status_list, session_id=session_id, character_id=char.get("id"))
                 elif "exhausted" in status_low:
                     status_list = [s for s in status_list if str(s.get("name") if isinstance(s, dict) else s).lower() != "exhausted"] + ["Fatigued"]
-                    db.set_status_effects(uid, status_list)
+                    db.set_status_effects(uid, status_list, session_id=session_id, character_id=char.get("id"))
                 elif "fatigued" in status_low:
                     status_list = [s for s in status_list if str(s.get("name") if isinstance(s, dict) else s).lower() != "fatigued"]
-                    db.set_status_effects(uid, status_list)
+                    db.set_status_effects(uid, status_list, session_id=session_id, character_id=char.get("id"))
         except Exception as e:
             log.warning("Failed to apply nap rest: %s", e)
 
     nap_boundary_tick = {}
-    try:
-        nap_boundary_tick = run_boundary_autonomy_and_epistemic_tick(
-            session_id,
-            curr_day,
-            curr_min,
-            new_day,
-            new_min,
-            party_uids=party_uids,
-        )
-    except Exception as e:
-        log.warning("Failed running nap boundary autonomy/epistemic tick for session %s: %s", session_id, e)
+    if eff_clock_mins > 0:
+        try:
+            nap_boundary_tick = run_boundary_autonomy_and_epistemic_tick(
+                session_id,
+                curr_day,
+                curr_min,
+                new_day,
+                new_min,
+                party_uids=party_uids,
+            )
+        except Exception as e:
+            log.warning("Failed running nap boundary autonomy/epistemic tick for session %s: %s", session_id, e)
 
     return {
         "session_id": session_id,
@@ -1197,7 +1268,7 @@ def check_and_apply_fatigue(session_id: int, party_uids: List[int]) -> List[str]
 
     for uid in party_uids:
         try:
-            char = db.get_character(uid)
+            char = db.get_character(uid, session_id=session_id)
             if not char:
                 continue
             
@@ -1220,7 +1291,7 @@ def check_and_apply_fatigue(session_id: int, party_uids: List[int]) -> List[str]
             ]
             
             filtered_status.append(chosen_tag)
-            db.set_status_effects(uid, filtered_status)
+            db.set_status_effects(uid, filtered_status, session_id=session_id, character_id=char.get("id"))
             applied_notices.append(f"{char['name']} is now **{chosen_tag}**")
         except Exception as e:
             log.warning("Failed to apply fatigue to user %s: %s", uid, e)

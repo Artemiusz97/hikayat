@@ -31,6 +31,7 @@ class Appearance(DictAccessibleModel):
     hair_length: Optional[str] = None
     hair_style: Optional[str] = None
     stature: Optional[str] = None
+    physique: Optional[str] = None
     skin_color: Optional[str] = None
     skin_type: Optional[str] = None
     coat_color: Optional[str] = None

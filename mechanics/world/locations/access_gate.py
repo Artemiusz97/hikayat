@@ -10,10 +10,44 @@ import json
 import logging
 import random
 import re
-from typing import Any
+from typing import Any, Mapping
 
 import db
 import scenario_data
+from .constants import (
+    ACADEMIC_FACULTY_TOKENS,
+    ACADEMIC_STAGE_LOCATION_KEYWORDS,
+    ANOM_HQ_REASON_LABELS,
+    ANOM_MONASTIC_RESTRICTED_KEYWORDS,
+    ANOM_PRIV1_OPEN_KEYWORDS,
+    ANOM_PRIV2_OPEN_KEYWORDS,
+    ANOM_PUBLIC_HQ_OPEN_KEYWORDS,
+    ANOM_PUBLIC_HQ_RESTRICTED_KEYWORDS,
+    BREACH_ACTION_KEYWORDS,
+    CIVIC_POLICE_ROLE_TOKENS,
+    COVERT_SNEAK_ATTEMPT_KEYWORDS,
+    INTERCOM_BREACH_EXCLUSION_KEYWORDS,
+    INTERCOM_RING_ONLY_KEYWORDS,
+    INVENTORY_UNLOCK_KEY_RE,
+    LOVE_HOTEL_APPT_KEYWORDS,
+    MULTI_WING_UNLOCK_PARENTS,
+    NPC_AUTHORITY_COUNCIL_ROLES,
+    NPC_AUTHORITY_COUNCIL_TARGETS,
+    NPC_AUTHORITY_FACULTY_ROLES,
+    NPC_AUTHORITY_VELVET_CLUBS,
+    PATROL_AUTHORITY_CLUBS,
+    PATROL_AUTHORITY_ROLES,
+    PATROL_OFFICER_POOL,
+    PERMIT_ACTION_KEYWORDS,
+    SECLUDED_LOCATION_KEYWORDS,
+    SECLUDED_PROP_KEYWORDS,
+    SECLUDED_SIBLING_NAME_KEYWORDS,
+    SECRET_CONTEXT_ACTION_KEYWORDS,
+    TRUANCY_PASS_KEYWORDS,
+    TRUANCY_STAFF_COMPANION_ROLES,
+    _SANCTUARY_EXCLUDED_KEYWORDS,
+    _SANCTUARY_PREFERRED_KEYWORDS,
+)
 
 log = logging.getLogger("hikayat.world.access_gate")
 
@@ -96,29 +130,31 @@ def format_minute_to_hhmm(minute: int | None) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
-_SANCTUARY_PREFERRED_KEYWORDS = (
-    "inn", "tavern", "guild", "cafe", "coffee", "diner", "teahouse",
-    "commons", "agency_hq", "lobby", "sanctuary", "shelter", "bazaar",
-    "market", "promenade", "plaza", "hub",
-)
-_SANCTUARY_EXCLUDED_KEYWORDS = (
-    "homeroom", "classroom", "rooftop", "infirmary", "faculty",
-    "principal", "council", "locker", "pool", "dungeon", "prison",
-    "morgue", "quarantine", "vault", "sewer", "crypt",
-)
+def _parse_node_state_json(node: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Parse `world_nodes.state_json` safely into a dict without DB round-trips."""
+    from mechanics.world.anomalous_sites.catalog import parse_node_state
+    return parse_node_state(node)
 
 
-def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
+def get_designated_hub_sanctuary_node_id(
+    session_id: int,
+    *,
+    all_nodes: list[dict[str, Any]] | None = None,
+    state_by_id: Mapping[str, dict[str, Any]] | None = None,
+) -> str:
     """
     Designates and persists 1 core Hub Sanctuary facility per session (`safe_sanctuary_exempt = True`)
     that can NEVER be locked down by WorldScars or Chapter 8–9 martial law.
     """
     if not session_id:
         return ""
-    try:
-        nodes = db.get_session_world_nodes(session_id) or []
-    except Exception:
-        nodes = []
+    if all_nodes is not None:
+        nodes = list(all_nodes)
+    else:
+        try:
+            nodes = db.get_session_world_nodes(session_id) or []
+        except Exception:
+            nodes = []
     if not nodes:
         return "loc_hub_sanctuary"
 
@@ -131,7 +167,12 @@ def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
         if not nid:
             continue
         try:
-            st = db.get_world_node_state(session_id, nid) or {}
+            if state_by_id is not None and nid in state_by_id:
+                st = state_by_id.get(nid) or {}
+            elif all_nodes is not None:
+                st = _parse_node_state_json(fac)
+            else:
+                st = db.get_world_node_state(session_id, nid) or {}
             if st.get("safe_sanctuary_exempt"):
                 return nid
         except Exception:
@@ -174,32 +215,57 @@ def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
                 break
 
     if chosen_nid:
-        try:
-            db.update_world_node_state(session_id, chosen_nid, {"safe_sanctuary_exempt": True})
-        except Exception:
-            pass
+        if not db.is_in_readonly_uow():
+            try:
+                db.update_world_node_state(session_id, chosen_nid, {"safe_sanctuary_exempt": True})
+            except Exception:
+                pass
+        if isinstance(state_by_id, dict):
+            state_by_id.setdefault(chosen_nid, {})["safe_sanctuary_exempt"] = True
     return chosen_nid
 
 
-def is_safe_sanctuary_node(session_id: int, node_id: str) -> bool:
+def is_safe_sanctuary_node(
+    session_id: int,
+    node_id: str,
+    *,
+    node_by_id: Mapping[str, dict[str, Any]] | None = None,
+    state_by_id: Mapping[str, dict[str, Any]] | None = None,
+    sanctuary_id: str | None = None,
+) -> bool:
     """Returns True if `node_id` (or its parent facility) is the session's Safe Hub Sanctuary."""
     if not session_id or not node_id:
         return False
-    sanctuary_id = get_designated_hub_sanctuary_node_id(session_id)
+    if sanctuary_id is None:
+        sanctuary_id = get_designated_hub_sanctuary_node_id(
+            session_id,
+            all_nodes=list(node_by_id.values()) if node_by_id is not None else None,
+            state_by_id=state_by_id,
+        )
     target = str(node_id).strip()
     if sanctuary_id and target.lower() == sanctuary_id.lower():
         return True
     try:
-        node = db.get_world_node(session_id, target)
+        node = node_by_id.get(target) if node_by_id is not None else db.get_world_node(session_id, target)
         if node:
-            st = db.get_world_node_state(session_id, target) or {}
+            if state_by_id is not None and target in state_by_id:
+                st = state_by_id.get(target) or {}
+            elif node_by_id is not None:
+                st = _parse_node_state_json(node)
+            else:
+                st = db.get_world_node_state(session_id, target) or {}
             if st.get("safe_sanctuary_exempt"):
                 return True
             parent_id = str(node.get("parent_id") or "")
             if parent_id:
                 if sanctuary_id and parent_id.lower() == sanctuary_id.lower():
                     return True
-                pst = db.get_world_node_state(session_id, parent_id) or {}
+                if state_by_id is not None and parent_id in state_by_id:
+                    pst = state_by_id.get(parent_id) or {}
+                elif node_by_id is not None:
+                    pst = _parse_node_state_json(node_by_id.get(parent_id))
+                else:
+                    pst = db.get_world_node_state(session_id, parent_id) or {}
                 if pst.get("safe_sanctuary_exempt"):
                     return True
     except Exception:
@@ -313,6 +379,102 @@ def _get_active_quest_gate_context(
     return out
 
 
+def build_access_eval_context(
+    session_id: int,
+    *,
+    scen_key: str = "",
+    session: dict[str, Any] | None = None,
+    all_nodes: list[dict[str, Any]] | None = None,
+    quest_gate_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Preload session-level spatial, quest, event, faction, and property state once per sweep."""
+    sess_row: dict[str, Any] = dict(session) if isinstance(session, dict) else {}
+    if not sess_row and session_id:
+        try:
+            sess_row = db.get_session(session_id) or {}
+        except Exception:
+            sess_row = {}
+
+    resolved_scen = str(scen_key or sess_row.get("scenario") or "high_school_drama")
+
+    if all_nodes is not None:
+        nodes = list(all_nodes)
+    elif session_id:
+        try:
+            nodes = db.get_session_world_nodes(session_id) or []
+        except Exception:
+            nodes = []
+    else:
+        nodes = []
+
+    node_by_id: dict[str, dict[str, Any]] = {}
+    state_by_id: dict[str, dict[str, Any]] = {}
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        nid = str(n.get("node_id") or "")
+        if nid:
+            node_by_id[nid] = n
+            state_by_id[nid] = _parse_node_state_json(n)
+
+    sanctuary_id = (
+        get_designated_hub_sanctuary_node_id(
+            session_id,
+            all_nodes=nodes,
+            state_by_id=state_by_id,
+        )
+        if session_id
+        else ""
+    )
+
+    macro_events: list[dict[str, Any]] = []
+    if session_id:
+        try:
+            macro_events = db.get_world_events(session_id, entity_type="macro_event") or []
+        except Exception:
+            macro_events = []
+
+    q_snap = (
+        quest_gate_snapshot
+        if quest_gate_snapshot is not None
+        else build_active_quest_gate_snapshot(session_id)
+    )
+
+    faction_state: dict[str, Any] = {}
+    session_quests: list[dict[str, Any]] = []
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if session_id and is_anomalous_incursions_scenario(resolved_scen):
+            from mechanics.social.factions import get_anomalous_faction_state
+            faction_state = get_anomalous_faction_state(session_id) or {}
+            session_quests = db.get_session_quests(session_id) or []
+    except Exception:
+        faction_state = {}
+        session_quests = []
+
+    player_properties: list[dict[str, Any]] = []
+    if session_id:
+        try:
+            player_properties = db.get_player_properties(int(session_id)) or []
+        except Exception:
+            player_properties = []
+
+    return {
+        "session_id": session_id,
+        "session": sess_row,
+        "scen_key": resolved_scen,
+        "all_nodes": nodes,
+        "node_by_id": node_by_id,
+        "state_by_id": state_by_id,
+        "sanctuary_id": sanctuary_id,
+        "macro_events": macro_events,
+        "quest_gate_snapshot": q_snap,
+        "faction_state": faction_state,
+        "session_quests": session_quests,
+        "player_properties": player_properties,
+    }
+
+
 def get_node_effective_access_info(
     session_id: int,
     node_id: str,
@@ -321,6 +483,7 @@ def get_node_effective_access_info(
     scen_key: str = "",
     session: dict | None = None,
     quest_gate_snapshot: dict[str, Any] | None = None,
+    eval_ctx: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Computes effective access status, curfew status, dynamic world-schedule locks,
@@ -339,7 +502,12 @@ def get_node_effective_access_info(
             "is_trespassing": False,
         }
 
-    node = db.get_world_node(session_id, node_id)
+    ctx_nodes_by_id = eval_ctx.get("node_by_id") if isinstance(eval_ctx, Mapping) else None
+    ctx_state_by_id = eval_ctx.get("state_by_id") if isinstance(eval_ctx, Mapping) else None
+    if session is None and isinstance(eval_ctx, Mapping) and isinstance(eval_ctx.get("session"), dict):
+        session = eval_ctx["session"]
+
+    node = ctx_nodes_by_id.get(node_id) if isinstance(ctx_nodes_by_id, Mapping) else db.get_world_node(session_id, node_id)
     if not node:
         return {
             "access_tier": "open",
@@ -354,15 +522,24 @@ def get_node_effective_access_info(
         }
 
     if not scen_key:
-        try:
-            sess_row = db.get_session(session_id)
-            scen_key = (sess_row or {}).get("scenario") or "high_school_drama"
-        except Exception:
-            scen_key = "high_school_drama"
+        if isinstance(eval_ctx, Mapping) and eval_ctx.get("scen_key"):
+            scen_key = str(eval_ctx["scen_key"])
+        elif isinstance(session, dict) and session.get("scenario"):
+            scen_key = str(session["scenario"])
+        else:
+            try:
+                sess_row = db.get_session(session_id)
+                scen_key = (sess_row or {}).get("scenario") or "high_school_drama"
+            except Exception:
+                scen_key = "high_school_drama"
 
     fac_node = None
     if node.get("parent_id") and node.get("node_type") == "ROOM":
-        fac_node = db.get_world_node(session_id, node["parent_id"])
+        fac_node = (
+            ctx_nodes_by_id.get(node["parent_id"])
+            if isinstance(ctx_nodes_by_id, Mapping)
+            else db.get_world_node(session_id, node["parent_id"])
+        )
 
     # Effective access tier
     tier = str(node.get("access_tier") or "open").lower()
@@ -372,8 +549,12 @@ def get_node_effective_access_info(
             tier = fac_tier
 
     # State JSON check for unlocks and residue
-    state = db.get_world_node_state(session_id, node_id)
-    fac_state = db.get_world_node_state(session_id, fac_node["node_id"]) if fac_node else {}
+    if isinstance(ctx_state_by_id, Mapping):
+        state = ctx_state_by_id.get(node_id) or {}
+        fac_state = (ctx_state_by_id.get(fac_node["node_id"]) or {}) if fac_node else {}
+    else:
+        state = db.get_world_node_state(session_id, node_id)
+        fac_state = db.get_world_node_state(session_id, fac_node["node_id"]) if fac_node else {}
 
     is_unlocked = bool(
         state.get("unlocked_permanent")
@@ -436,7 +617,16 @@ def get_node_effective_access_info(
                 curfew_label = sched_access["curfew_label"]
 
     # Anomalous Incursions Tiered HQ Access Gate evaluation
-    anom_hq = evaluate_anomalous_hq_access(session_id, node, fac_node, scen_key=scen_key)
+    ctx_faction_state = eval_ctx.get("faction_state") if isinstance(eval_ctx, Mapping) else None
+    ctx_session_quests = eval_ctx.get("session_quests") if isinstance(eval_ctx, Mapping) else None
+    anom_hq = evaluate_anomalous_hq_access(
+        session_id,
+        node,
+        fac_node,
+        scen_key=scen_key,
+        faction_state=ctx_faction_state,
+        quests=ctx_session_quests,
+    )
     if anom_hq.get("force_open"):
         tier = "open"
         is_unlocked = True
@@ -447,7 +637,10 @@ def get_node_effective_access_info(
             sched_reason_code = "faction_hq_restricted"
 
     # Anomalous High School After-Hours Campus Anomaly Breach Unlock (20:00–06:00)
-    if session_id and not is_unlocked and (schedule_locked or curfew_active) and scenario_data.is_anomalous_high_school_scenario(scen_key):
+    _may_have_incursions = True
+    if isinstance(eval_ctx, Mapping) and isinstance(session, dict) and "daily_incursions" in session and not session.get("daily_incursions"):
+        _may_have_incursions = False
+    if session_id and _may_have_incursions and not is_unlocked and (schedule_locked or curfew_active) and scenario_data.is_anomalous_high_school_scenario(scen_key):
         try:
             from mechanics.world.anomalous_events import get_active_incursion_at_location
             from mechanics.world.world_schedule import is_campus_node_or_location
@@ -468,10 +661,22 @@ def get_node_effective_access_info(
             pass
 
     # Procedural World Event Facility Lockdown / Quarantine evaluation (Safe Hub Sanctuary is NEVER locked)
-    sanctuary_exempt = is_safe_sanctuary_node(session_id, node_id) if session_id else False
+    ctx_sanctuary_id = eval_ctx.get("sanctuary_id") if isinstance(eval_ctx, Mapping) else None
+    sanctuary_exempt = (
+        is_safe_sanctuary_node(
+            session_id,
+            node_id,
+            node_by_id=ctx_nodes_by_id,
+            state_by_id=ctx_state_by_id,
+            sanctuary_id=ctx_sanctuary_id,
+        )
+        if session_id
+        else False
+    )
+    has_ctx_events = isinstance(eval_ctx, Mapping) and "macro_events" in eval_ctx
     if session_id and sanctuary_exempt:
         try:
-            ev_list = db.get_world_events(session_id, entity_type="macro_event")
+            ev_list = eval_ctx["macro_events"] if has_ctx_events else db.get_world_events(session_id, entity_type="macro_event")
             has_crisis_lock = any(
                 ev.get("status") == "active"
                 and (
@@ -497,8 +702,12 @@ def get_node_effective_access_info(
     elif session_id and not is_unlocked:
         try:
             from mechanics.world.world_events.modifiers import is_node_locked_by_event
-            sanctuary_nid = get_designated_hub_sanctuary_node_id(session_id)
-            ev_list = db.get_world_events(session_id, entity_type="macro_event")
+            sanctuary_nid = (
+                ctx_sanctuary_id
+                if ctx_sanctuary_id is not None
+                else get_designated_hub_sanctuary_node_id(session_id)
+            )
+            ev_list = eval_ctx["macro_events"] if has_ctx_events else db.get_world_events(session_id, entity_type="macro_event")
             ev_lock = is_node_locked_by_event(ev_list, node_id, safe_sanctuary_node_id=sanctuary_nid) or (
                 is_node_locked_by_event(ev_list, str(fac_node.get("node_id") or ""), safe_sanctuary_node_id=sanctuary_nid) if fac_node else None
             )
@@ -511,7 +720,10 @@ def get_node_effective_access_info(
             pass
 
     if session_id and not is_unlocked:
-        q_gate_acc = _get_active_quest_gate_context(session_id, node, fac_node, quest_gate_snapshot=quest_gate_snapshot)
+        eff_q_snap = quest_gate_snapshot if quest_gate_snapshot is not None else (
+            eval_ctx.get("quest_gate_snapshot") if isinstance(eval_ctx, Mapping) else None
+        )
+        q_gate_acc = _get_active_quest_gate_context(session_id, node, fac_node, quest_gate_snapshot=eff_q_snap)
         if q_gate_acc.get("has_earned_clearance"):
             is_unlocked = True
             curfew_active = False
@@ -527,7 +739,15 @@ def get_node_effective_access_info(
     if session_id:
         try:
             from .residences import get_player_owned_or_starter_property_for_node, is_unpurchased_realty_node
-            owned_prop = get_player_owned_or_starter_property_for_node(session_id, node_id)
+            p_props = eval_ctx.get("player_properties") if isinstance(eval_ctx, Mapping) else None
+            owned_prop = get_player_owned_or_starter_property_for_node(
+                session_id,
+                node_id,
+                session=session,
+                world_node=node,
+                world_node_loaded=True,
+                player_properties=p_props,
+            )
             if owned_prop is not None:
                 tier = "open"
                 is_unlocked = True
@@ -539,7 +759,12 @@ def get_node_effective_access_info(
                 sched_reason_label = ""
                 owned_badge = "Owned Residence" if not owned_prop.get("is_starter") else "Starter Quarters"
             else:
-                unbought_realty = is_unpurchased_realty_node(session_id, node_id)
+                unbought_realty = is_unpurchased_realty_node(
+                    session_id,
+                    node_id,
+                    session=session,
+                    player_properties=p_props,
+                )
                 if unbought_realty is not None and not is_unlocked:
                     tier = "private"
                     curfew_active = False
@@ -620,14 +845,7 @@ def record_node_unlock(
 
     db.update_world_node_state(session_id, node_id, updates)
     parent_id = str(node.get("parent_id") or "")
-    multi_wing_parents = (
-        "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
-        "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
-        "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
-        "fac_agency_residence", "fac_temple_residence", "fac_cult_residence", "fac_syndicate_residence",
-        "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
-    )
-    if parent_id and node.get("node_type") == "ROOM" and not parent_id.startswith("bld_school_") and parent_id not in multi_wing_parents:
+    if parent_id and node.get("node_type") == "ROOM" and not parent_id.startswith("bld_school_") and parent_id not in MULTI_WING_UNLOCK_PARENTS:
         db.update_world_node_state(session_id, parent_id, updates)
     return True
 
@@ -650,12 +868,12 @@ def has_npc_authority_for_node(npc: dict, node: dict, parent_node: dict | None =
     full_target = f"{n_id} {n_name} {p_id} {p_name}"
 
     # Faculty & Staff have universal academic authority
-    if any(k in role for k in ("teacher", "faculty", "staff", "nurse", "counselor", "principal", "guard", "security")):
+    if any(k in role for k in NPC_AUTHORITY_FACULTY_ROLES):
         return True
 
     # Student Council authority
-    if any(k in club or k in role for k in ("student council", "council", "president", "treasurer", "vice president")):
-        if any(k in full_target for k in ("council", "homeroom", "hallway", "commons", "library")):
+    if any(k in club or k in role for k in NPC_AUTHORITY_COUNCIL_ROLES):
+        if any(k in full_target for k in NPC_AUTHORITY_COUNCIL_TARGETS):
             return True
 
     # Club authority for matching facility
@@ -679,7 +897,7 @@ def has_npc_authority_for_node(npc: dict, node: dict, parent_node: dict | None =
         return True
     if any(k in club for k in ("occult", "paranormal", "tarot")) and "old_storage" in full_target:
         return True
-    if any(k in club for k in ("velvet", "secret society", "after-hours", "salon", "midnight", "crimson", "hedon")) and ("nsfw_faction_hq" in full_target or "velvet basement" in full_target):
+    if any(k in club for k in NPC_AUTHORITY_VELVET_CLUBS) and ("nsfw_faction_hq" in full_target or "velvet basement" in full_target):
         return True
     if str(npc.get("faction_category") or (npc.get("basic_info") or {}).get("faction_category") or "").lower() == "nsfw_club" and ("nsfw_faction_hq" in full_target or "velvet basement" in full_target):
         return True
@@ -717,6 +935,9 @@ def evaluate_anomalous_hq_access(
     node: dict,
     fac_node: dict | None = None,
     scen_key: str = "",
+    *,
+    faction_state: dict[str, Any] | None = None,
+    quests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Evaluates Tiered HQ Access Gates for Anomalous Incursions:
@@ -746,43 +967,28 @@ def evaluate_anomalous_hq_access(
     if "loc_hq_" in combined or n_id in ("zone_agency_hq", "loc_agency_hq") or p_id in ("zone_agency_hq", "loc_agency_hq"):
         if n_id == "loc_agency_hq":
             is_open_lobby_or_shop = True
-        elif any(k in combined for k in (
-            "loc_hq_main_lobby", "loc_hq_tactical_armory", "loc_hq_field_outfitter",
-            "loc_hq_medical_bay", "loc_hq_cleansing_bay", "loc_hq_canteen_cafe",
-            "loc_hq_executive_dispatch", "entrance", "lobby", "reception", "bounty"
-        )) and "loc_hq_containment_sector" not in combined and "loc_hq_research_division" not in combined:
+        elif any(k in combined for k in ANOM_PUBLIC_HQ_OPEN_KEYWORDS) and "loc_hq_containment_sector" not in combined and "loc_hq_research_division" not in combined:
             is_open_lobby_or_shop = True
-        elif any(k in combined for k in (
-            "loc_hq_containment_sector", "loc_hq_research_division", "loc_hq_parapsych_lab",
-            "loc_hq_training_range", "loc_hq_training_arena", "loc_hq_agent_dormitories",
-        )):
+        elif any(k in combined for k in ANOM_PUBLIC_HQ_RESTRICTED_KEYWORDS):
             required_arch = "public_agency"
 
     # 2. Private Agency #1 HQ (`loc_private_hq_1` / `sub_priv1_*`) — Big Corporate Tower
     elif "loc_private_hq_1" in combined or "sub_priv1_" in combined:
-        if n_id == "loc_private_hq_1" or any(k in combined for k in (
-            "sub_priv1_entrance", "sub_priv1_dispatch", "entrance", "lobby", "atrium",
-            "atrium concierge", "global contracts", "contracts & telemetry",
-            "contract board", "contract & telemetry", "contract & tactical dispatch",
-        )):
+        if n_id == "loc_private_hq_1" or any(k in combined for k in ANOM_PRIV1_OPEN_KEYWORDS):
             is_open_lobby_or_shop = True
         else:
             required_arch = "private_agency_1"
 
     # 3. Private Agency #2 HQ (`loc_private_hq_2` / `sub_priv2_*`) — Small Commercial Office
     elif "loc_private_hq_2" in combined or "sub_priv2_" in combined:
-        if n_id == "loc_private_hq_2" or any(k in combined for k in (
-            "sub_priv2_entrance", "sub_priv2_dispatch", "entrance", "foyer", "reception",
-            "brick-front vestibule", "security reception", "partner case room",
-            "lobby", "corkboard", "dispatch bullpen", "contract board", "contract & tactical dispatch",
-        )):
+        if n_id == "loc_private_hq_2" or any(k in combined for k in ANOM_PRIV2_OPEN_KEYWORDS):
             is_open_lobby_or_shop = True
         else:
             required_arch = "private_agency_2"
 
     # 4. Monastic Shrine Order HQ (`loc_eastern_temple` / `loc_et_*`)
     elif "loc_et_" in combined or n_id in ("loc_eastern_temple", "zone_eastern_temple"):
-        if any(k in combined for k in ("loc_et_five_story_pagoda", "loc_et_reliquary_pagoda", "loc_et_exorcist_dojo")) and "entrance" not in n_name:
+        if any(k in combined for k in ANOM_MONASTIC_RESTRICTED_KEYWORDS) and "entrance" not in n_name:
             required_arch = "monastic_order"
         else:
             is_open_lobby_or_shop = True
@@ -812,16 +1018,19 @@ def evaluate_anomalous_hq_access(
     if not required_arch:
         return {}
 
-    from mechanics.social.factions import get_anomalous_faction_state
-    f_state = get_anomalous_faction_state(session_id)
+    if faction_state is None:
+        from mechanics.social.factions import get_anomalous_faction_state
+        f_state = get_anomalous_faction_state(session_id)
+    else:
+        f_state = faction_state
     player_arch = str(f_state.get("faction_archetype_key") or "").lower()
     if player_arch == required_arch:
         return {"force_open": True, "unlocked_by_faction": required_arch}
 
     # Check if an active Story Quest or Accepted Bounty targets this location
     try:
-        quests = db.get_session_quests(session_id) or []
-        for q in quests:
+        quests_list = db.get_session_quests(session_id) or [] if quests is None else quests
+        for q in quests_list:
             if str(q.get("status") or "").lower() in ("active", "accepted", "in_progress"):
                 cand_locs = [
                     str(q.get("target_location") or "").lower(),
@@ -843,18 +1052,10 @@ def evaluate_anomalous_hq_access(
     except Exception:
         pass
 
-    label_map = {
-        "public_agency": "Restricted Bureau Inner Sector (Public Agency Clearance Required)",
-        "private_agency_1": "Restricted High-Security Tower Floor & Vault (Conglomerate Clearance Required)",
-        "private_agency_2": "Restricted Partner Suite & Vaulted Armory (Agency Partner Credentials Required)",
-        "monastic_order": "Restricted Monastic Inner Sanctum (Order Initiate Clearance Required)",
-        "cult_faction": "Ward-Sealed Occult Sanctum (Hostile Cult Restricted Area)",
-        "clandestine_faction": "Biometric Clandestine Vault (Unauthorized Entry Prohibited)",
-    }
     return {
         "force_restricted": True,
         "required_faction_archetype": required_arch,
-        "reason_label": label_map.get(required_arch, "Restricted Faction Sector"),
+        "reason_label": ANOM_HQ_REASON_LABELS.get(required_arch, "Restricted Faction Sector"),
     }
 
 
@@ -981,11 +1182,7 @@ def evaluate_node_access_gate(
 
     current_action_label = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or [])).lower()
     has_check = bool(actions and isinstance(actions[0], dict) and (actions[0].get("check") or str(actions[0].get("stat", "NONE")).upper() != "NONE"))
-    is_breach_action = has_check or any(w in current_action_label for w in (
-        "sneak", "pick", "climb", "scale", "fence", "lockpick", "force", "break in", "bypass",
-        "talk your way", "convince", "excuse", "nurse", "ring the intercom", "buzz", "apologize",
-        "audition", "charm", "cellar", "grate", "contract permit", "freelance permit", "public agency", "flash permit"
-    ))
+    is_breach_action = has_check or any(w in current_action_label for w in BREACH_ACTION_KEYWORDS)
 
     action_check_tier = ""
     if actions and isinstance(actions[0], dict) and actions[0].get("check"):
@@ -1006,7 +1203,7 @@ def evaluate_node_access_gate(
         _action_stat and _action_stat not in ("NONE", "FREE", "ITEM")
         and action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
     )
-    is_permit_action = any(k in current_action_label for k in ("contract permit", "freelance permit", "flash permit"))
+    is_permit_action = any(k in current_action_label for k in PERMIT_ACTION_KEYWORDS)
 
     # 0b. High School Weekday Class Hours (08:00–15:00 Mon–Fri): Outbound Truancy Lockdown & Late Arrival
     late_arrival_directive = ""
@@ -1056,10 +1253,10 @@ def evaluate_node_access_gate(
                 _is_adult_in_ahs
                 or (gate_state.get("truancy_unlocked_day") or 0) >= curr_day
                 or (isinstance(session, dict) and int(session.get("infirmary_pass_day") or 0) >= curr_day)
-                or any(k in inv_str for k in ("hall pass", "nurse pass", "sick pass", "early dismissal", "staff pass", "gate pass", "master key", "council badge"))
+                or any(k in inv_str for k in TRUANCY_PASS_KEYWORDS)
                 or any(
                     isinstance(comp, dict)
-                    and any(r in str(comp.get("role") or (comp.get("basic_info") or {}).get("role") or "").lower() for r in ("teacher", "faculty", "staff", "nurse", "counselor", "principal"))
+                    and any(r in str(comp.get("role") or (comp.get("basic_info") or {}).get("role") or "").lower() for r in TRUANCY_STAFF_COMPANION_ROLES)
                     for comp in active_companions
                 )
             )
@@ -1214,7 +1411,7 @@ def evaluate_node_access_gate(
             for appt in appts_lh:
                 appt_t = str(appt.get("target_node_id") or "").lower()
                 appt_l = str(appt.get("rendezvous_location") or "").lower()
-                if any(k in f"{appt_t} {appt_l}" for k in ("love_hotel", "love hotel", "mirrored luxury", "rooftop jacuzzi")):
+                if any(k in f"{appt_t} {appt_l}" for k in LOVE_HOTEL_APPT_KEYWORDS):
                     partner_waived = True
                     break
 
@@ -1394,10 +1591,7 @@ def evaluate_node_access_gate(
 
     # 3. Check Inventory for Key / Pass / Badge (strict word-boundary match so "Keychain"/"Whiskey" never unlock vaults)
     unbought_realty = is_unpurchased_realty_node(session_id, target_node_id, session=session if isinstance(session, dict) else None) if session_id else None
-    if (unbought_realty is None) and re.search(
-        r"\b(master key|skeleton key|staff pass|council badge|keycard|passcard|access card|clearance badge|door key|gate key|vault key|sanctum key|room key|office key|key)\b",
-        inv_str,
-    ):
+    if (unbought_realty is None) and INVENTORY_UNLOCK_KEY_RE.search(inv_str):
         if persist_db:
             record_node_unlock(session_id, target_node_id, unlock_type="permanent", current_day=curr_day, reason="key")
         return {"gated": False, "unlocked_by": "key"}
@@ -1598,8 +1792,8 @@ def evaluate_node_access_gate(
     is_lock_jammed = False if is_active_quest_room else (state.get("failed_block") == failed_block_tag)
 
     _is_intercom_ring_only = (
-        any(w in current_action_label for w in ("ring the intercom", "buzz", "ring the bell", "intercom"))
-        and not any(w in current_action_label for w in ("sneak", "pick", "lockpick", "climb", "scale", "force", "break in", "bypass"))
+        any(w in current_action_label for w in INTERCOM_RING_ONLY_KEYWORDS)
+        and not any(w in current_action_label for w in INTERCOM_BREACH_EXCLUSION_KEYWORDS)
     )
     if tier == "private" and _is_intercom_ring_only and (
         intercom_reason_code == "resident_not_home" or (not has_check and not action_check_tier)
@@ -1632,9 +1826,7 @@ def evaluate_node_access_gate(
                 current_minute=curr_min,
                 scen_key=scen_key,
             )
-            is_covert_sneak_attempt = any(
-                k in current_action_label for k in ("sneak", "infiltrate", "slip", "creep", "climb", "scale")
-            )
+            is_covert_sneak_attempt = any(k in current_action_label for k in COVERT_SNEAK_ATTEMPT_KEYWORDS)
             patrol_confrontation = bool(is_crit_fail_tier or curfew_active or is_trespassing or is_covert_sneak_attempt)
             if persist_db and isinstance(session, dict):
                 try:
@@ -1666,8 +1858,8 @@ def evaluate_node_access_gate(
                     c_txt = str(cand.get("club") or cand_basic.get("club") or "").lower()
                     return (
                         _is_watch_role(cand)
-                        or any(k in r_txt for k in ("teacher", "staff", "guidance", "counselor", "principal", "vice principal", "prefect", "hall monitor", "discipline", "security", "guard", "officer"))
-                        or any(k in c_txt for k in ("student council", "disciplinary"))
+                        or any(k in r_txt for k in PATROL_AUTHORITY_ROLES)
+                        or any(k in c_txt for k in PATROL_AUTHORITY_CLUBS)
                     )
 
                 for w in world_roster:
@@ -1729,9 +1921,8 @@ def evaluate_node_access_gate(
                             turn=turn_num,
                         )
                 else:
-                    officer_pool = ["Officer Takahashi", "Officer Miller", "Officer Sato", "Officer Vance", "Officer Henderson"]
-                    s_idx = int(hashlib.md5(f"patrol_{session_id}_{target_node_id}_{curr_day}".encode()).hexdigest(), 16) % len(officer_pool)
-                    chosen_officer = officer_pool[s_idx]
+                    s_idx = int(hashlib.md5(f"patrol_{session_id}_{target_node_id}_{curr_day}".encode()).hexdigest(), 16) % len(PATROL_OFFICER_POOL)
+                    chosen_officer = PATROL_OFFICER_POOL[s_idx]
                     patrol_npc = {
                         "name": chosen_officer,
                         "role": "Night Security Officer" if (curfew_active or is_trespassing) else "Campus Hall Monitor",
@@ -2107,13 +2298,9 @@ def get_privacy_nudge_choice(
     curr_focal = str(sess_dict.get('focal_point') or '').strip().lower()
     curr_loc_str = str(sess_dict.get('current_location') or '').strip()
     curr_loc_lower = curr_loc_str.lower()
-    secluded_keywords = (
-        'aisle', 'alcove', 'corner', 'behind', 'booth', 'closet', 'balcony',
-        'stairwell', 'under', 'terrace', 'shed', 'secluded', 'private', 'trellis'
-    )
-    if curr_focal and any(k in curr_focal for k in secluded_keywords):
+    if curr_focal and any(k in curr_focal for k in SECLUDED_PROP_KEYWORDS):
         return None
-    if any(k in curr_loc_lower for k in ('balcony', 'booth', 'alcove', 'shed', 'closet', 'terrace', 'secluded', 'stairwell', 'trellis')):
+    if any(k in curr_loc_lower for k in SECLUDED_LOCATION_KEYWORDS):
         return None
 
     eff_nid = str(current_node_id or sess_dict.get('current_node_id') or '').strip()
@@ -2171,7 +2358,7 @@ def get_privacy_nudge_choice(
     is_romantic = (score >= 30) or (track == 'romantic')
 
     action_text = ' '.join(str(a.get('label', '') if isinstance(a, dict) else a) for a in (actions or [])).lower()
-    is_secret_context = any(w in action_text for w in ('confess', 'kiss', 'whisper', 'private', 'alone', 'secret', 'hide', 'intimate'))
+    is_secret_context = any(w in action_text for w in SECRET_CONTEXT_ACTION_KEYWORDS)
 
     if not (is_romantic or is_secret_context):
         return None
@@ -2194,8 +2381,38 @@ def get_privacy_nudge_choice(
                     home_dc_mod = int(p_cat.get("cha_invite_dc_mod") or 0)
     except Exception:
         home_dc_mod = 0
+    openness_nudge_mod = 0
+    if isinstance(contact, dict):
+        c_app_pn = contact.get("appearance")
+        if isinstance(c_app_pn, str):
+            try:
+                c_app_pn = json.loads(c_app_pn)
+            except Exception:
+                c_app_pn = {}
+        if isinstance(c_app_pn, dict):
+            raw_op_pn = c_app_pn.get("erotic_openness") or c_app_pn.get("openness")
+            if raw_op_pn not in (None, ""):
+                from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+                op_t_pn = normalize_openness_tier(raw_op_pn)
+                sh_pn = len(contact.get("gameplay_intimate_events") or [])
+                host_pn = str(contact.get("disposition") or "").strip().lower() == "hostile"
+                comf_pn = compute_with_you_comfort(
+                    op_t_pn,
+                    relationship_score=score,
+                    relationship_track=track or "platonic",
+                    shared_intimate_count=sh_pn,
+                    is_hostile=host_pn,
+                )
+                if op_t_pn == "shameless":
+                    openness_nudge_mod = -2
+                elif op_t_pn == "bold":
+                    openness_nudge_mod = -1
+                elif op_t_pn == "prude":
+                    openness_nudge_mod = 2 if comf_pn["stage"] == "guarded" else (1 if comf_pn["stage"] == "warming_up" else 0)
+
     base_dc = max(5, min(14, 12 - score_discount - track_bonus))
-    req_dc = max(3, min(14, base_dc + home_dc_mod))
+    req_dc = max(3, min(14, base_dc + home_dc_mod + openness_nudge_mod))
 
     scen_key = str(sess_dict.get('scenario') or 'high_school_drama')
     from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
@@ -2228,7 +2445,7 @@ def get_privacy_nudge_choice(
         nid = str(n.get('node_id') or '')
         is_affiliated = nid.startswith(curr_nid + '_')
         name_low = str(n.get('name') or '').lower()
-        has_secluded_name = any(k in name_low for k in ('balcony', 'terrace', 'booth', 'alcove', 'shed', 'nook', 'private', 'corner'))
+        has_secluded_name = any(k in name_low for k in SECLUDED_SIBLING_NAME_KEYWORDS)
         sj_raw = n.get('state_json')
         sj_dict = json.loads(sj_raw) if isinstance(sj_raw, str) and sj_raw.strip().startswith('{') else (sj_raw if isinstance(sj_raw, dict) else {})
         is_child = bool(getattr(sj_dict, 'get', lambda _k: None)('parent_sub_id') == curr_nid)
@@ -2267,7 +2484,7 @@ def get_privacy_nudge_choice(
         room_props = get_node_props(session_id, curr_node['node_id'], scenario_key=scen_key)
         for pr in room_props:
             pr_low = pr.lower()
-            if pr_low != curr_focal and any(k in pr_low for k in secluded_keywords):
+            if pr_low != curr_focal and any(k in pr_low for k in SECLUDED_PROP_KEYWORDS):
                 dest_loc = format_tiered_location_string(pz, curr_node.get('name') or pp, pr)
                 return Phase2Choice(
                     f'Step into {pr} with {partner_name} for privacy',
@@ -2308,15 +2525,6 @@ def get_privacy_nudge_choice(
     return None
 
 
-CIVIC_POLICE_ROLE_TOKENS = frozenset({
-    "police", "patrol", "officer", "detective", "sergeant", "sheriff", "koban", "constable"
-})
-ACADEMIC_FACULTY_TOKENS = frozenset({
-    "teacher", "faculty", "staff", "nurse", "librarian", "principal", "counselor",
-    "custodian", "janitor", "professor", "instructor"
-})
-
-
 def can_npc_stage_at_facility(
     npc_or_role: dict | str,
     location: str,
@@ -2333,7 +2541,7 @@ def can_npc_stage_at_facility(
     if not location or not npc_or_role:
         return True
     loc_low = str(location).lower()
-    is_academic_loc = any(k in loc_low for k in ("school", "academy", "classroom", "homeroom", "stacks", "library", "infirmary", "staff room"))
+    is_academic_loc = any(k in loc_low for k in ACADEMIC_STAGE_LOCATION_KEYWORDS)
     safe_min = int(current_minute or 480) % 1440
     is_school_hours = 450 <= safe_min < 990  # 07:30 to 16:30
 

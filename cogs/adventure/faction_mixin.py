@@ -6,10 +6,12 @@ from db import adb
 from mechanics.social.factions import (
     infer_anomalous_faction_archetype,
     is_nsfw_salon_faction,
+    is_spirit_court_faction,
     validate_club_quartermaster_hours,
     validate_faction_hq_action_access,
     validate_major_club_subroom_action,
 )
+from mechanics.system.concurrency import distributed_adventure_lock
 from mechanics.world.locations import reveal_hidden_club_facility
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ class FactionMixin:
         current_loc = session.get("current_location", "")
         faction, char = await asyncio.gather(
             adb(db.get_faction_by_hq, session_id, current_loc),
-            adb(db.get_character, user_id),
+            adb(db.get_character, user_id, session_id=session_id),
         )
         if not faction:
             await interaction.response.send_message("No Faction HQ here.", ephemeral=True)
@@ -53,187 +55,207 @@ class FactionMixin:
     async def faction_apply(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
         import scenario_data
 
-        session = (await adb(db.get_session, session_id)) or {}
-        subroom_err = await adb(
-            validate_major_club_subroom_action,
-            session_id,
-            faction,
-            "join",
-            session.get("current_location", ""),
-            session.get("scenario", ""),
-        )
-        if subroom_err:
-            await interaction.response.send_message(subroom_err, ephemeral=True)
-            return
-        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
-            from mechanics.social.factions import join_or_transfer_anomalous_faction
-
-            target_fac = (
-                infer_anomalous_faction_archetype(faction)
-                or faction.get("faction_id")
-                or faction.get("name", "")
-            )
-            res = await adb(join_or_transfer_anomalous_faction, session_id, target_fac, user_id)
-            if not res.get("success"):
+        async with distributed_adventure_lock(user_id, session_id):
+            session = (await adb(db.get_session, session_id)) or {}
+            if is_spirit_court_faction(faction):
                 await interaction.response.send_message(
-                    res.get("error") or "Unable to enlist in this faction.",
+                    f"**{faction.get('name', 'Spirit Court')}** is an autonomous Spirit Court; formal enlistment is not required.",
                     ephemeral=True,
                 )
                 return
+            subroom_err = await adb(
+                validate_major_club_subroom_action,
+                session_id,
+                faction,
+                "join",
+                session.get("current_location", ""),
+                session.get("scenario", ""),
+            )
+            if subroom_err:
+                await interaction.response.send_message(subroom_err, ephemeral=True)
+                return
+            if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+                from mechanics.social.factions import join_or_transfer_anomalous_faction
+
+                target_fac = (
+                    infer_anomalous_faction_archetype(faction)
+                    or faction.get("faction_id")
+                    or faction.get("name", "")
+                )
+                res = await adb(join_or_transfer_anomalous_faction, session_id, target_fac, user_id)
+                if not res.get("success"):
+                    await interaction.response.send_message(
+                        res.get("error") or "Unable to enlist in this faction.",
+                        ephemeral=True,
+                    )
+                    return
+                if is_nsfw_salon_faction(faction):
+                    await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
+                await interaction.response.send_message(
+                    res.get("message") or f"Welcome to **{faction.get('name', 'the faction')}**!",
+                    ephemeral=True,
+                )
+                return
+
+            char = await adb(db.get_character, user_id, session_id=session_id)
+            if not char:
+                await interaction.response.send_message("No character found.", ephemeral=True)
+                return
+            if char.get("joined_faction_id"):
+                await interaction.response.send_message("You are already pledged to a faction! Defecting carries severe penalties.", ephemeral=True)
+                return
+
+            # Join faction logic
+            await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], 1, "Initiate")
             if is_nsfw_salon_faction(faction):
                 await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
-            await interaction.response.send_message(
-                res.get("message") or f"Welcome to **{faction.get('name', 'the faction')}**!",
-                ephemeral=True,
-            )
-            return
-
-        char = await adb(db.get_character, user_id)
-        if char.get("joined_faction_id"):
-            await interaction.response.send_message("You are already pledged to a faction! Defecting carries severe penalties.", ephemeral=True)
-            return
-            
-        # Join faction logic
-        await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], 1, "Initiate")
-        if is_nsfw_salon_faction(faction):
-            await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
-        await interaction.response.send_message(f"Welcome to **{faction.get('name', 'the faction')}**! You are now a member.", ephemeral=True)
+            await interaction.response.send_message(f"Welcome to **{faction.get('name', 'the faction')}**! You are now a member.", ephemeral=True)
 
     async def faction_rest(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
-        session = (await adb(db.get_session, session_id)) or {}
-        subroom_err = await adb(
-            validate_major_club_subroom_action,
-            session_id,
-            faction,
-            "rest",
-            session.get("current_location", ""),
-            session.get("scenario", ""),
-        )
-        if subroom_err:
-            await interaction.response.send_message(subroom_err, ephemeral=True)
-            return
-        hq_ok, hq_err, _ = await adb(
-            validate_faction_hq_action_access, session_id, user_id, faction, "rest", session
-        )
-        if not hq_ok:
-            await interaction.response.send_message(hq_err, ephemeral=True)
-            return
+        async with distributed_adventure_lock(user_id, session_id):
+            session = (await adb(db.get_session, session_id)) or {}
+            subroom_err = await adb(
+                validate_major_club_subroom_action,
+                session_id,
+                faction,
+                "rest",
+                session.get("current_location", ""),
+                session.get("scenario", ""),
+            )
+            if subroom_err:
+                await interaction.response.send_message(subroom_err, ephemeral=True)
+                return
+            hq_ok, hq_err, _ = await adb(
+                validate_faction_hq_action_access, session_id, user_id, faction, "rest", session
+            )
+            if not hq_ok:
+                await interaction.response.send_message(hq_err, ephemeral=True)
+                return
 
-        char = await adb(db.get_character, user_id)
-        if char:
-            await adb(db.apply_hp_mp_delta, user_id, char["max_hp"], char["max_mp"], 0)
-        party_npcs_rest = await adb(db.get_session_party_npcs, session_id)
-        if party_npcs_rest:
-            rested_companions = []
-            for p_comp in party_npcs_rest:
-                if isinstance(p_comp, dict):
-                    p_comp = dict(p_comp)
-                    p_comp["hp"] = int(p_comp.get("max_hp", p_comp.get("hp", 100)) or 100)
-                    p_comp["mp"] = int(p_comp.get("max_mp", p_comp.get("mp", 0)) or 0)
-                    p_comp["status_effects"] = [
-                        s for s in (p_comp.get("status_effects") or [])
-                        if not any(k in str(s).lower() for k in ("incapacitated", "knocked out", "exhausted", "triage"))
-                    ]
-                    rested_companions.append(p_comp)
-            await adb(db.set_session_party_npcs, session_id, rested_companions)
-        await interaction.response.send_message("You rest at the faction safehouse, recovering all HP and MP safely.", ephemeral=True)
+            char = await adb(db.get_character, user_id, session_id=session_id)
+            if char:
+                await adb(
+                    db.apply_hp_mp_delta,
+                    user_id,
+                    char["max_hp"],
+                    char["max_mp"],
+                    0,
+                    character_id=char["id"],
+                    session_id=session_id,
+                )
+            party_npcs_rest = await adb(db.get_session_party_npcs, session_id)
+            if party_npcs_rest:
+                rested_companions = []
+                for p_comp in party_npcs_rest:
+                    if isinstance(p_comp, dict):
+                        p_comp = dict(p_comp)
+                        p_comp["hp"] = int(p_comp.get("max_hp", p_comp.get("hp", 100)) or 100)
+                        p_comp["mp"] = int(p_comp.get("max_mp", p_comp.get("mp", 0)) or 0)
+                        p_comp["status_effects"] = [
+                            s for s in (p_comp.get("status_effects") or [])
+                            if not any(k in str(s).lower() for k in ("incapacitated", "knocked out", "exhausted", "triage"))
+                        ]
+                        rested_companions.append(p_comp)
+                await adb(db.set_session_party_npcs, session_id, rested_companions)
+            await interaction.response.send_message("You rest at the faction safehouse, recovering all HP and MP safely.", ephemeral=True)
 
     async def faction_quartermaster(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
         import scenario_data
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
-        session = (await adb(db.get_session, session_id)) or {}
-        current_day, current_minute, _ = await adb(db.get_session_time, session_id)
-        subroom_err = await adb(
-            validate_major_club_subroom_action,
-            session_id,
-            faction,
-            "quartermaster",
-            session.get("current_location", ""),
-            session.get("scenario", ""),
-        )
-        if subroom_err:
-            await interaction.followup.send(subroom_err, ephemeral=True)
-            return
-        hq_ok, hq_err, _ = await adb(
-            validate_faction_hq_action_access, session_id, user_id, faction, "quartermaster", session
-        )
-        if not hq_ok:
-            await interaction.followup.send(hq_err, ephemeral=True)
-            return
-        hours_err = validate_club_quartermaster_hours(faction, current_minute)
-        if hours_err:
-            await interaction.followup.send(hours_err, ephemeral=True)
-            return
-        is_anom = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
-        fac_arch = infer_anomalous_faction_archetype(faction) if is_anom else ""
-        merchant = session.setdefault("merchant", {})
-        faction_id = faction.get("faction_id") or faction.get("id") or faction.get("name", "default")
-        faction_key = (
-            f"faction_{faction_id}:monastic_daily"
-            if (is_anom and fac_arch == "monastic_order")
-            else f"faction_{faction_id}"
-        )
-
-        from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
-            generate_faction_quartermaster_shop,
-            BuySelectView,
-            get_or_create_merchant_catalogue,
-            update_merchant_catalogue,
-            compute_effective_shop_item_price,
-            get_anomalous_shop_faction_context,
-        )
-
-        cat_entry, needs_restock = get_or_create_merchant_catalogue(
-            merchant, faction_key, current_day, current_minute
-        )
-        if needs_restock:
-            shop = await generate_faction_quartermaster_shop(faction, session)
-            cat_entry = update_merchant_catalogue(merchant, faction_key, shop, current_day, current_minute)
-
-        discount = 0 if is_anom else cat_entry.get("discount_pct", 0)
-        merchant.update({
-            "active": True,
-            "active_store_key": faction_key,
-            "stock": cat_entry["stock"],
-            "discount_pct": discount,
-            "is_faction_quartermaster": True,
-            "quartermaster_faction_arch": fac_arch if is_anom else (faction.get("archetype_key") or faction.get("category") or ""),
-            "restock_day": cat_entry.get("restock_day", current_day),
-            "restock_minute": cat_entry.get("restock_minute", current_minute),
-        })
-        await adb(db.save_merchant_state, session_id, merchant)
-
-        stock = [item for item in cat_entry.get("stock", []) if item.get("quantity", 0) > 0]
-        if not stock:
-            await interaction.followup.send(
-                f"📦 The quartermaster's stock is sold out for today. Wares will restock on **Day {current_day + 1}**!",
-                ephemeral=True
+        async with distributed_adventure_lock(user_id, session_id):
+            session = (await adb(db.get_session, session_id)) or {}
+            current_day, current_minute, _ = await adb(db.get_session_time, session_id)
+            subroom_err = await adb(
+                validate_major_club_subroom_action,
+                session_id,
+                faction,
+                "quartermaster",
+                session.get("current_location", ""),
+                session.get("scenario", ""),
             )
-            return
+            if subroom_err:
+                await interaction.followup.send(subroom_err, ephemeral=True)
+                return
+            hq_ok, hq_err, _ = await adb(
+                validate_faction_hq_action_access, session_id, user_id, faction, "quartermaster", session
+            )
+            if not hq_ok:
+                await interaction.followup.send(hq_err, ephemeral=True)
+                return
+            hours_err = validate_club_quartermaster_hours(faction, current_minute)
+            if hours_err:
+                await interaction.followup.send(hours_err, ephemeral=True)
+                return
+            is_anom = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+            fac_arch = infer_anomalous_faction_archetype(faction) if is_anom else ""
+            merchant = session.setdefault("merchant", {})
+            faction_id = faction.get("faction_id") or faction.get("id") or faction.get("name", "default")
+            faction_key = (
+                f"faction_{faction_id}:monastic_daily"
+                if (is_anom and fac_arch == "monastic_order")
+                else f"faction_{faction_id}"
+            )
 
-        shop_ctx = await adb(
-            get_anomalous_shop_faction_context,
-            session,
-            session.get("current_location", ""),
-            False,
-            user_id,
-        )
-        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx, user_id=user_id)
-        lines = "\n".join(
-            f"**{i['name']}** ({i['item_type']}) — {compute_effective_shop_item_price(i, shop_ctx=shop_ctx, discount_pct=discount)}g "
-            f"x{i['quantity']}\n{i.get('description') or ''}".rstrip()
-            for i in stock)
+            from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
+                generate_faction_quartermaster_shop,
+                BuySelectView,
+                get_or_create_merchant_catalogue,
+                update_merchant_catalogue,
+                compute_effective_shop_item_price,
+                get_anomalous_shop_faction_context,
+            )
 
-        intro = cat_entry.get("intro_narrative") or "Exclusive wares available for faction operatives."
-        embed = discord.Embed(title="🛍️ Faction Quartermaster", description=intro, color=discord.Color.dark_gold())
-        embed.add_field(name="Discount", value=f"{discount}% off", inline=False)
-        embed.set_footer(text=f"🕒 Daily Restock: Start of Day {current_day + 1}")
-        content = f"**For sale:**\n{lines}"
-        if len(content) > 1950:
-            content = content[:1920] + "\n\n*(additional items available in dropdown below)*"
-        await interaction.followup.send(content=content, embed=embed, view=view, ephemeral=True)
+            cat_entry, needs_restock = get_or_create_merchant_catalogue(
+                merchant, faction_key, current_day, current_minute
+            )
+            if needs_restock:
+                shop = await generate_faction_quartermaster_shop(faction, session)
+                cat_entry = update_merchant_catalogue(merchant, faction_key, shop, current_day, current_minute)
+
+            discount = 0 if is_anom else cat_entry.get("discount_pct", 0)
+            merchant.update({
+                "active": True,
+                "active_store_key": faction_key,
+                "stock": cat_entry["stock"],
+                "discount_pct": discount,
+                "is_faction_quartermaster": True,
+                "quartermaster_faction_arch": fac_arch if is_anom else (faction.get("archetype_key") or faction.get("category") or ""),
+                "restock_day": cat_entry.get("restock_day", current_day),
+                "restock_minute": cat_entry.get("restock_minute", current_minute),
+            })
+            await adb(db.save_merchant_state, session_id, merchant)
+
+            stock = [item for item in cat_entry.get("stock", []) if item.get("quantity", 0) > 0]
+            if not stock:
+                await interaction.followup.send(
+                    f"📦 The quartermaster's stock is sold out for today. Wares will restock on **Day {current_day + 1}**!",
+                    ephemeral=True
+                )
+                return
+
+            shop_ctx = await adb(
+                get_anomalous_shop_faction_context,
+                session,
+                session.get("current_location", ""),
+                False,
+                user_id,
+            )
+            view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx, user_id=user_id)
+            lines = "\n".join(
+                f"**{i['name']}** ({i['item_type']}) — {compute_effective_shop_item_price(i, shop_ctx=shop_ctx, discount_pct=discount)}g "
+                f"x{i['quantity']}\n{i.get('description') or ''}".rstrip()
+                for i in stock)
+
+            intro = cat_entry.get("intro_narrative") or "Exclusive wares available for faction operatives."
+            embed = discord.Embed(title="🛍️ Faction Quartermaster", description=intro, color=discord.Color.dark_gold())
+            embed.add_field(name="Discount", value=f"{discount}% off", inline=False)
+            embed.set_footer(text=f"🕒 Daily Restock: Start of Day {current_day + 1}")
+            content = f"**For sale:**\n{lines}"
+            if len(content) > 1950:
+                content = content[:1920] + "\n\n*(additional items available in dropdown below)*"
+            await interaction.followup.send(content=content, embed=embed, view=view, ephemeral=True)
 
     async def faction_bounty(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
         if not interaction.response.is_done():
@@ -317,83 +339,100 @@ class FactionMixin:
     async def faction_promotion(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
         import scenario_data
 
-        session = (await adb(db.get_session, session_id)) or {}
-        subroom_err = await adb(
-            validate_major_club_subroom_action,
-            session_id,
-            faction,
-            "promote",
-            session.get("current_location", ""),
-            session.get("scenario", ""),
-        )
-        if subroom_err:
-            await interaction.response.send_message(subroom_err, ephemeral=True)
-            return
-        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
-            from mechanics.social.factions import get_anomalous_faction_state
-
-            a_state = await adb(get_anomalous_faction_state, session_id, user_id)
-            tier = int(a_state.get("promotion_tier", 0) or 0)
-            title = a_state.get("promotion_title") or "Independent Freelancer"
-            rep = int(a_state.get("promotion_rep", 0) or 0)
-            if a_state.get("faction_archetype_key") == "freelancer" or tier <= 0:
+        async with distributed_adventure_lock(user_id, session_id):
+            session = (await adb(db.get_session, session_id)) or {}
+            if is_spirit_court_faction(faction):
                 await interaction.response.send_message(
-                    "Independent Freelancers do not hold agency rank. Enlist at a joinable Faction HQ first!",
+                    f"**{faction.get('name', 'Spirit Court')}** is an autonomous Spirit Court; formal enlistment is not required.",
                     ephemeral=True,
                 )
                 return
-            await interaction.response.send_message(
-                f"🎖️ **Agent Promotion Meter**: **Tier {tier} — {title}** ({rep}/100 Rep).\n"
-                "Promotions in Anomalous Incursions advance automatically at **20 / 45 / 70 / 90 Rep** by completing Daily Mandatory Dispatches and Agency Bounties (no duel trials required).",
-                ephemeral=True,
+            subroom_err = await adb(
+                validate_major_club_subroom_action,
+                session_id,
+                faction,
+                "promote",
+                session.get("current_location", ""),
+                session.get("scenario", ""),
             )
-            return
+            if subroom_err:
+                await interaction.response.send_message(subroom_err, ephemeral=True)
+                return
+            if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+                from mechanics.social.factions import get_anomalous_faction_state
 
-        char = await adb(db.get_character, user_id)
-        rep = faction.get("reputation_score", 0)
-        from mechanics.social.factions import get_eligible_rank, get_rank_title, get_incumbent_at_rank, get_promotion_trial_directive
-        
-        template = faction.get("hierarchy_template", "default")
-        eligible = get_eligible_rank(template, rep)
-        current_rank = char.get("faction_rank", 1)
-        
-        if eligible <= current_rank:
-            await interaction.response.send_message("You don't have enough reputation to challenge for the next rank yet.", ephemeral=True)
-            return
-            
-        target_rank = current_rank + 1
-        roster = faction.get("leadership_roster", [])
-        incumbent_name = get_incumbent_at_rank(roster, target_rank)
-        
-        if not incumbent_name:
-            # Slot is vacant or already held by a player (edge case), auto-promote
-            new_title = get_rank_title(template, target_rank)
-            from mechanics.social.factions import promote_player_in_roster
-            new_roster = promote_player_in_roster(roster, char["name"], target_rank, template)
-            await adb(db.update_faction_leadership_roster, session_id, faction["faction_id"], new_roster)
-            await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], target_rank, new_title)
-            await interaction.response.send_message(f"You have been promoted to **{new_title}**!", ephemeral=True)
-            return
+                a_state = await adb(get_anomalous_faction_state, session_id, user_id)
+                tier = int(a_state.get("promotion_tier", 0) or 0)
+                title = a_state.get("promotion_title") or "Independent Freelancer"
+                rep = int(a_state.get("promotion_rep", 0) or 0)
+                if a_state.get("faction_archetype_key") == "freelancer" or tier <= 0:
+                    await interaction.response.send_message(
+                        "Independent Freelancers do not hold agency rank. Enlist at a joinable Faction HQ first!",
+                        ephemeral=True,
+                    )
+                    return
+                await interaction.response.send_message(
+                    f"🎖️ **Agent Promotion Meter**: **Tier {tier} — {title}** ({rep}/100 Rep).\n"
+                    "Promotions in Anomalous Incursions advance automatically at **20 / 45 / 70 / 90 Rep** by completing Daily Mandatory Dispatches and Agency Bounties (no duel trials required).",
+                    ephemeral=True,
+                )
+                return
 
-        # Store pending promotion in session so game_engine can resolve it
-        session = await adb(db.get_session, session_id)
-        scen_key = session.get("scenario", "fantasy")
-        session["pending_promotion"] = {
-            "faction_id": faction["faction_id"],
-            "target_rank": target_rank,
-            "player_name": char["name"],
-            "template": template
-        }
-        await adb(db.update_session, session_id, extra={"pending_promotion": session["pending_promotion"]})
+            char = await adb(db.get_character, user_id, session_id=session_id)
+            rep = faction.get("reputation_score", 0)
+            from mechanics.social.factions import get_eligible_rank, get_rank_title, get_incumbent_at_rank, get_promotion_trial_directive
 
-        # Inject the promotion trial directive into the current turn
-        directive = get_promotion_trial_directive(current_rank, target_rank, incumbent_name, faction.get("name", "Faction"), template, scen_key)
+            template = faction.get("hierarchy_template", "default")
+            eligible = get_eligible_rank(template, rep)
+            current_rank = char.get("faction_rank", 1)
 
-        embed = discord.Embed(title="⚔️ Promotion Trial Triggered", description=f"You have challenged **{incumbent_name}** for the rank of {get_rank_title(template, target_rank)}! Wait for the GM to respond.", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+            if eligible <= current_rank:
+                await interaction.response.send_message("You don't have enough reputation to challenge for the next rank yet.", ephemeral=True)
+                return
 
-        # We manually trigger an LLM turn to resolve the challenge setup
-        await self._trigger_promotion_trial_turn(interaction, session_id, directive)
+            target_rank = current_rank + 1
+            roster = faction.get("leadership_roster", [])
+            incumbent_name = get_incumbent_at_rank(roster, target_rank)
+
+            if not incumbent_name:
+                # Slot is vacant or already held by a player (edge case), auto-promote
+                new_title = get_rank_title(template, target_rank)
+                from mechanics.social.factions import promote_player_in_roster
+                new_roster = promote_player_in_roster(roster, char["name"], target_rank, template)
+                await adb(db.update_faction_leadership_roster, session_id, faction["faction_id"], new_roster)
+                await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], target_rank, new_title)
+                await interaction.response.send_message(f"You have been promoted to **{new_title}**!", ephemeral=True)
+                return
+
+            # Store pending promotion in session so game_engine can resolve it
+            session = (await adb(db.get_session, session_id)) or {}
+            if session.get("pending_promotion"):
+                await interaction.response.send_message(
+                    "⏳ A promotion trial is already pending resolution. Please wait for it to finish.",
+                    ephemeral=True,
+                )
+                return
+            scen_key = session.get("scenario", "fantasy")
+            session["pending_promotion"] = {
+                "faction_id": faction["faction_id"],
+                "target_rank": target_rank,
+                "player_name": char["name"],
+                "template": template
+            }
+            await adb(db.update_session, session_id, extra={"pending_promotion": session["pending_promotion"]})
+
+            # Inject the promotion trial directive into the current turn
+            directive = get_promotion_trial_directive(current_rank, target_rank, incumbent_name, faction.get("name", "Faction"), template, scen_key)
+
+            embed = discord.Embed(title="⚔️ Promotion Trial Triggered", description=f"You have challenged **{incumbent_name}** for the rank of {get_rank_title(template, target_rank)}! Wait for the GM to respond.", color=discord.Color.red())
+            await interaction.response.send_message(embed=embed, ephemeral=False)
+
+        # We manually trigger an LLM turn to resolve the challenge setup (outside lock to avoid re-entry deadlock)
+        try:
+            await self._trigger_promotion_trial_turn(interaction, session_id, directive)
+        except Exception:
+            await adb(db.update_session, session_id, extra={"pending_promotion": None})
+            raise
 
     async def _trigger_promotion_trial_turn(self, interaction: discord.Interaction, session_id: int, directive: str):
         # We simulate a turn submission with the directive embedded in the narrative

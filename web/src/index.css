@@ -356,10 +356,133 @@ body::before {
     font-weight: 600;
     color: oklch(var(--g-400));
   }
-  .hk-segmented > button[aria-selected='true'] {
+  .hk-segmented > button[aria-selected='true'],
+  .hk-segmented > button[aria-pressed='true'] {
     color: oklch(var(--g-50));
     background: oklch(var(--panel));
     box-shadow: 0 2px 8px -2px oklch(var(--shadow) / 0.4), 0 0 0 1px oklch(var(--accent) / 0.35);
+  }
+
+  input[type='range'].hk-slider {
+    --slider-track-size: 0.375rem;
+    --slider-thumb-size: 1.125rem;
+    --slider-track-radius: 999px;
+    --slider-thumb-radius: 50%;
+    --slider-track-color: oklch(var(--g-500) / 0.28);
+    --slider-fill-color: oklch(var(--accent));
+    --slider-thumb-color: oklch(var(--accent));
+    --slider-direction: to right;
+    --attr-min: attr(min type(<number>), 0);
+    --attr-max: attr(max type(<number>), 100);
+    --control-value: attr(value type(<number>), 50);
+    --slider-progress: calc(
+      progress(var(--control-value), var(--attr-min), var(--attr-max)) * 100%
+    );
+    -webkit-appearance: none;
+    appearance: none;
+    inline-size: 100%;
+    block-size: 2.25rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    cursor: pointer;
+  }
+  input[type='range'].hk-slider:dir(rtl) {
+    --slider-direction: to left;
+  }
+  input[type='range'].hk-slider:focus {
+    border-color: transparent;
+    box-shadow: none;
+    outline: none;
+  }
+  input[type='range'].hk-slider:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+  }
+  input[type='range'].hk-slider::-webkit-slider-runnable-track {
+    block-size: var(--slider-track-size);
+    border: 0;
+    border-radius: var(--slider-track-radius);
+    background: linear-gradient(
+      var(--slider-direction),
+      var(--slider-fill-color) var(--slider-progress),
+      var(--slider-track-color) var(--slider-progress)
+    );
+  }
+  input[type='range'].hk-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    inline-size: var(--slider-thumb-size);
+    block-size: var(--slider-thumb-size);
+    margin-block-start: calc((var(--slider-track-size) - var(--slider-thumb-size)) / 2);
+    border: 2px solid oklch(var(--panel));
+    border-radius: var(--slider-thumb-radius);
+    background: var(--slider-thumb-color);
+    box-shadow: 0 2px 8px oklch(var(--shadow) / 0.45);
+  }
+  input[type='range'].hk-slider::-moz-range-track {
+    block-size: var(--slider-track-size);
+    border: 0;
+    border-radius: var(--slider-track-radius);
+    background: var(--slider-track-color);
+  }
+  input[type='range'].hk-slider::-moz-range-progress {
+    block-size: var(--slider-track-size);
+    border-radius: var(--slider-track-radius);
+    background: var(--slider-fill-color);
+  }
+  input[type='range'].hk-slider::-moz-range-thumb {
+    inline-size: var(--slider-thumb-size);
+    block-size: var(--slider-thumb-size);
+    border: 2px solid oklch(var(--panel));
+    border-radius: var(--slider-thumb-radius);
+    background: var(--slider-thumb-color);
+    box-shadow: 0 2px 8px oklch(var(--shadow) / 0.45);
+  }
+
+  .hk-dial-interactive {
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .hk-dial-interactive.is-dragging {
+    cursor: grabbing;
+  }
+  .hk-dial-interactive:focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 4px;
+  }
+
+  .hk-dossier-tabs-wrap {
+    container-type: inline-size;
+  }
+  .hk-dossier-tab {
+    position: relative;
+  }
+  .hk-dossier-tab[aria-selected='true']::before {
+    content: '';
+    position: absolute;
+    inset: -1px 0 auto;
+    border-top: 2px solid var(--hk-tab-accent, oklch(var(--accent)));
+    border-radius: 0.375rem 0.375rem 0 0;
+    pointer-events: none;
+  }
+  .hk-dossier-tab-full {
+    display: none;
+  }
+  .hk-dossier-tab-short {
+    display: inline;
+  }
+  @container (min-width: 480px) {
+    .hk-dossier-tab-full {
+      display: inline;
+    }
+    .hk-dossier-tab-short {
+      display: none;
+    }
   }
 
   .hk-quest-tabs {
@@ -1146,6 +1269,15 @@ body::before {
   }
 }
 
+@supports not (opacity: progress(1, 0, 100)) {
+  input[type='range'].hk-slider {
+    --slider-progress: calc(
+      (var(--control-value) - var(--attr-min)) /
+      (var(--attr-max) - var(--attr-min)) * 100%
+    );
+  }
+}
+
 @media (forced-colors: active) {
   .hk-backdrop-root {
     display: none;
@@ -1158,6 +1290,17 @@ body::before {
     background-image: none;
     background: Canvas;
     border: 1px solid CanvasText;
+  }
+  input[type='range'].hk-slider {
+    --slider-track-color: GrayText;
+    --slider-fill-color: Highlight;
+    --slider-thumb-color: Highlight;
+  }
+  input[type='range'].hk-slider::-webkit-slider-thumb {
+    border-color: CanvasText;
+  }
+  input[type='range'].hk-slider::-moz-range-thumb {
+    border-color: CanvasText;
   }
 }
 
@@ -1313,3 +1456,269 @@ dialog::backdrop {
   font-size: 1.0625rem;
   line-height: 1.5;
 }
+
+/* ==========================================================================
+   Smartphone OS: iPhone-inspired Default Wallpaper & Frosted Glass Mode
+   ========================================================================== */
+.hk-phone-wp-iphone {
+  position: relative;
+  overflow: hidden;
+  background-color: #070b1a;
+  background-image:
+    radial-gradient(92% 62% at 18% 12%, rgba(56, 189, 248, 0.42) 0%, rgba(56, 189, 248, 0) 62%),
+    radial-gradient(85% 68% at 86% 24%, rgba(168, 85, 247, 0.46) 0%, rgba(168, 85, 247, 0) 64%),
+    radial-gradient(96% 68% at 24% 88%, rgba(244, 63, 94, 0.42) 0%, rgba(244, 63, 94, 0) 60%),
+    radial-gradient(85% 62% at 82% 82%, rgba(37, 99, 235, 0.55) 0%, rgba(37, 99, 235, 0) 64%),
+    linear-gradient(155deg, #070a18 0%, #14173c 44%, #1a1036 74%, #090d1f 100%);
+}
+
+.hk-phone-wp-iphone::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background:
+    conic-gradient(
+      from 215deg at 52% 48%,
+      rgba(56, 189, 248, 0.24) 0deg,
+      rgba(167, 139, 250, 0.16) 95deg,
+      rgba(244, 114, 182, 0.24) 185deg,
+      rgba(34, 211, 238, 0.14) 270deg,
+      rgba(56, 189, 248, 0.24) 360deg
+    );
+  filter: blur(36px);
+  opacity: 0.72;
+  animation: hk-phone-aurora 28s var(--ease-in-out) infinite alternate;
+  pointer-events: none;
+}
+
+.hk-phone-wp-iphone::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 0.5px, transparent 0.5px);
+  background-size: 14px 14px;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+@keyframes hk-phone-aurora {
+  from { transform: translate3d(-4%, -3%, 0) rotate(-4deg) scale(1.02); }
+  to { transform: translate3d(4%, 3%, 0) rotate(5deg) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hk-phone-wp-iphone::before {
+    animation: none;
+  }
+}
+
+/* Keep Home Screen clock, labels, and bright app-icon glyphs crisp white over wallpapers even in Light themes */
+.hk-phone-home-text {
+  color: #f9fafb !important;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65), 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.hk-phone-home-subtext {
+  color: rgba(243, 244, 246, 0.86) !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
+}
+
+.hk-phone-home-accent {
+  color: #fcd34d !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+
+.hk-phone-icon-glyph {
+  color: #ffffff !important;
+}
+
+/* True-dark photographic overlays that stay dark even under Light themes */
+.hk-phone-backdrop {
+  background-color: #090a0f;
+}
+@media (min-width: 768px) {
+  .hk-phone-backdrop {
+    background-color: rgba(5, 7, 12, 0.8);
+  }
+}
+
+.hk-phone-thumb-scrim {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.26) 52%, rgba(0, 0, 0, 0) 100%);
+}
+
+.hk-phone-play-badge {
+  background-color: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+}
+
+.hk-phone-notif-classic {
+  background-color: rgba(8, 10, 16, 0.6);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.hk-phone-lightbox {
+  background-color: rgba(6, 8, 14, 0.94);
+}
+
+.hk-phone-media-frame {
+  background-color: rgba(5, 7, 12, 0.75);
+}
+
+/* Classic dock behind Home screen */
+.hk-phone-dock-classic {
+  background: rgba(14, 16, 24, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* Frosted Glass UI Style: inherits Hikayat's active main-UI theme (--panel, --border, --accent, acrylic tokens) */
+[data-phone-style='glass'].hk-phone-shell {
+  border-color: oklch(var(--border) / var(--acrylic-border-a));
+  background: oklch(var(--bg-deep) / 0.78);
+}
+
+[data-phone-style='glass'] .hk-phone-chrome {
+  background: oklch(var(--panel) / var(--acrylic-bg-a)) !important;
+  border-color: oklch(var(--border) / var(--acrylic-border-a)) !important;
+  box-shadow: inset 0 1px 0 var(--acrylic-highlight), 0 8px 24px -12px oklch(var(--shadow) / 0.45);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+}
+
+[data-phone-style='glass'] .hk-phone-dock {
+  background: oklch(var(--panel) / clamp(0.55, var(--acrylic-bg-a), 0.96)) !important;
+  border: 1px solid oklch(var(--border) / var(--acrylic-border-a)) !important;
+  box-shadow: inset 0 1px 0 var(--acrylic-highlight), 0 12px 28px -10px oklch(var(--shadow) / 0.55);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+}
+
+[data-phone-style='glass'] .hk-phone-canvas[data-phone-app='home'] {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas:not([data-phone-app='home']) {
+  background-color: oklch(var(--panel) / clamp(0.56, var(--acrylic-bg-a), 0.92)) !important;
+  background-image: none !important;
+}
+
+/* Translucent theme-harmonized surfaces inside all Phone sub-apps without stacking heavy per-card blur */
+[data-phone-style='glass'] .hk-phone-canvas :is(.bg-neutral-950, .bg-neutral-950\/95, .bg-neutral-950\/90, .bg-neutral-950\/80, .bg-neutral-950\/70, .bg-neutral-950\/60, .bg-black) {
+  background-color: oklch(var(--bg-deep) / clamp(0.32, calc(var(--acrylic-bg-a) + 0.08), 0.84)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas :is(.bg-neutral-900, .bg-neutral-900\/95, .bg-neutral-900\/90, .bg-neutral-900\/85, .bg-neutral-900\/80, .bg-neutral-900\/70, .bg-neutral-900\/60, .bg-neutral-900\/50, .bg-neutral-900\/40) {
+  background-color: oklch(var(--panel) / clamp(0.26, var(--acrylic-bg-a), 0.78)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas :is(.bg-neutral-800, .bg-neutral-800\/80, .bg-neutral-800\/70, .bg-neutral-700, .bg-neutral-700\/80) {
+  background-color: oklch(var(--panel) / clamp(0.34, calc(var(--acrylic-bg-a) + 0.14), 0.88)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas :is(.border-neutral-950, .border-neutral-900, .border-neutral-800, .border-neutral-800\/90, .border-neutral-800\/80, .border-neutral-800\/70, .border-neutral-800\/60, .border-neutral-800\/40, .border-neutral-700, .border-neutral-700\/80, .border-neutral-700\/60, .border-neutral-700\/50) {
+  border-color: oklch(var(--border) / var(--acrylic-border-a)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas .hk-phone-card {
+  background-color: oklch(var(--panel) / clamp(0.3, var(--acrylic-bg-a), 0.82));
+  border-color: oklch(var(--border) / var(--acrylic-border-a));
+  box-shadow: inset 0 1px 0 var(--acrylic-highlight);
+}
+
+[data-phone-style='glass'] .hk-phone-header-accent {
+  color: oklch(var(--accent)) !important;
+}
+
+/* Single-row horizontally scrollable shop category tablist with scroll-driven edge fades */
+@property --fade-start {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fade-end {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes hk-fade-start-kf {
+  from { --fade-start: 0px; }
+  to { --fade-start: 1.5rem; }
+}
+
+@keyframes hk-fade-end-kf {
+  from { --fade-end: 1.5rem; }
+  to { --fade-end: 0px; }
+}
+
+.hk-tabs-scroller {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 0.25rem;
+  scroll-snap-type: inline proximity;
+  scroll-padding-inline: 1.5rem;
+  scrollbar-width: none;
+  border-bottom: 1px solid oklch(var(--border) / 0.55);
+}
+.hk-tabs-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+@supports (animation-timeline: scroll(self inline)) {
+  .hk-tabs-scroller {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black var(--fade-start),
+      black calc(100% - var(--fade-end)),
+      transparent
+    );
+    animation: hk-fade-start-kf linear both, hk-fade-end-kf linear both;
+    animation-timeline: scroll(self inline);
+    animation-range: 0 3rem, calc(100% - 3rem) 100%;
+  }
+}
+
+.hk-shop-tab {
+  position: relative;
+  flex: none;
+  scroll-snap-align: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4375rem 0.625rem 0.5rem;
+  border-radius: 0.5rem 0.5rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  color: oklch(var(--g-400));
+  background: transparent;
+  cursor: pointer;
+}
+.hk-shop-tab:hover {
+  color: oklch(var(--g-100));
+  background: oklch(var(--g-500) / 0.08);
+}
+.hk-shop-tab[aria-selected='true'] {
+  color: oklch(var(--accent));
+}
+.hk-shop-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  inset: auto 0.25rem -1px;
+  border-block-end: 2px solid oklch(var(--accent));
+}
+@media (forced-colors: active) {
+  .hk-shop-tab[aria-selected='true']::after {
+    border-block-end-color: Highlight;
+  }
+}
+
+

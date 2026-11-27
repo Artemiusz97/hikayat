@@ -1,5 +1,6 @@
 /**
- * Fog-of-War masked Known Wardrobe dossier card rendered inside ContactsPanel's Persona subtab.
+ * Fog-of-War masked Known Wardrobe dossier card rendered below Combat Dossier and above Schedule & Routine
+ * across Scene Side Card, Saved Contacts, Acquaintances, and Codex Known Characters.
  * Displays co-located "Currently Wearing" pill strictly when present in scene alongside NPC,
  * plus discovered Main/Duty, Casual, Sleepwear, and contextual activity kits.
  */
@@ -28,21 +29,24 @@ export default function KnownWardrobeCard({ npc, showDebug = false, t }) {
     coreRows.some((r) => Boolean(r.entry?.known && r.entry?.summary && r.entry.summary !== '???'));
 
   const kitList = Object.entries(activityKits).filter(
-    ([, v]) => v && (v.known || showDebug) && v.summary
+    ([, v]) => v && (v.known || showDebug) && String(v.summary || '').trim()
   );
 
   return (
     <div className="pt-2.5 border-t border-fantasy-border/30 text-xs space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
           👔 {t('social.wardrobe_header', 'Known Wardrobe')}
         </span>
-        {currentlyWearing?.summary && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-700/50 font-medium truncate max-w-[65%]">
+      </div>
+
+      {currentlyWearing?.summary && (
+        <div>
+          <span className="inline-block max-w-full text-[10px] px-2 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-700/50 font-medium leading-snug">
             {t('social.currently_wearing', 'Currently Wearing')}: {currentlyWearing.summary}
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="space-y-1 text-gray-300">
         {coreRows.map(({ key, label, entry }) => {
@@ -75,7 +79,7 @@ export default function KnownWardrobeCard({ npc, showDebug = false, t }) {
               className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900/80 text-slate-300 border border-slate-700/50"
               title={kitVal.summary}
             >
-              {kitKey.replace('activity:', '').replace('_', ' ')}: {kitVal.summary}
+              {kitKey.replace('activity:', '').replaceAll('_', ' ')}: {kitVal.summary}
             </span>
           ))}
         </div>

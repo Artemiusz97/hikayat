@@ -77,6 +77,17 @@ def _extract_rumors(events_or_snapshot: Any) -> list[dict[str, Any]]:
 
 
 def _node_matches(ev: dict[str, Any], target_node_id: str) -> bool:
+    meta = _parse_dict(ev.get("metadata") if ev.get("metadata") is not None else ev.get("metadata_json"))
+    allowed_zones = meta.get("allowed_zone_ids")
+    realm_scope = str(meta.get("realm_scope") or "").strip()
+    if (isinstance(allowed_zones, list) and allowed_zones) or realm_scope:
+        if not target_node_id:
+            return False
+        from .spirit_realm_events import infer_spirit_zone_for_node, node_matches_spirit_event_zones
+        if isinstance(allowed_zones, list) and allowed_zones:
+            return node_matches_spirit_event_zones(target_node_id, allowed_zones)
+        if realm_scope == "realm_veiled_spirit_world":
+            return bool(infer_spirit_zone_for_node(target_node_id))
     ev_node = str(ev.get("location_node_id") or "").strip().lower()
     if not ev_node or not target_node_id:
         return True
@@ -335,14 +346,33 @@ def resolve_npc_stationing_with_events(
         return str(story_node_id)
     if date_node_id:
         return str(date_node_id)
+    from .spirit_realm_events import infer_spirit_zone_for_node
     for ev in _extract_macro_events(events_or_snapshot):
         if ev.get("status") != "active":
             continue
         ev_node = str(ev.get("location_node_id") or "").strip()
         if not ev_node:
             continue
+        meta = _parse_dict(ev.get("metadata") if ev.get("metadata") is not None else ev.get("metadata_json"))
+        is_spirit_event = (
+            str(meta.get("realm_scope") or "").strip() == "realm_veiled_spirit_world"
+            or bool(meta.get("allowed_zone_ids"))
+            or bool(infer_spirit_zone_for_node(ev_node))
+        )
         mods = _extract_event_modifiers(ev)
         if ev.get("event_subtype") == "festival" or str(mods.get("crowd_density") or "").lower() == "high":
+            if is_spirit_event:
+                if not isinstance(npc, dict):
+                    continue
+                npc_village = str(npc.get("folklore_village") or "").strip().lower()
+                is_spirit_npc = (
+                    npc_village in ("kitsune", "bunian", "ghoul", "crossroads")
+                    or bool(infer_spirit_zone_for_node(str(npc.get("home_node_id") or "")))
+                    or bool(infer_spirit_zone_for_node(str(scheduled_node_id or "")))
+                    or bool(infer_spirit_zone_for_node(str(base_node_id or "")))
+                )
+                if not is_spirit_npc:
+                    continue
             if not isinstance(npc, dict):
                 return ev_node
             implicated = _is_npc_implicated_in_event(npc, ev)

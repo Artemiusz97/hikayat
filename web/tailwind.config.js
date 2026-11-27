@@ -28,12 +28,19 @@ const themePlugin = plugin(({ addBase }) => {
   }
   // Light schemes mirror status hues (text-red-300 -> red-700, bg-red-950 -> red-50).
   const lightStatus = {};
+  const darkStatus = {};
   for (const hue of STATUS_HUES) {
     for (const s of SHADES) {
       lightStatus[`--${hue}-${s}`] = hexToRgb(twColors[hue][1000 - s]);
+      darkStatus[`--${hue}-${s}`] = hexToRgb(twColors[hue][s]);
     }
   }
   base['[data-scheme="light"]'] = lightStatus;
+  // Pin Classic Dark smartphone shell to dark tokens even when the main UI uses a Light theme.
+  base['[data-phone-style="classic"]'] = {
+    ...buildThemeVars(DEFAULT_THEME),
+    ...darkStatus,
+  };
   addBase(base);
 });
 

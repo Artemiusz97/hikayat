@@ -8,6 +8,10 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true);
   const authEpochRef = useRef(0);
   const fetchAbortRef = useRef(null);
+  const charFetchSeqRef = useRef(0);
+  const charFetchAbortRef = useRef(null);
+  const rosterFetchSeqRef = useRef(0);
+  const rosterFetchAbortRef = useRef(null);
   const userRef = useRef(user);
   userRef.current = user;
 
@@ -37,24 +41,52 @@ export const useAuth = () => {
   const fetchCharacters = useCallback(async (epoch = authEpochRef.current, signal = null) => {
     const curUser = userRef.current;
     if (!curUser || signal?.aborted || epoch !== authEpochRef.current) return;
+    const seq = ++rosterFetchSeqRef.current;
+    let localAbort = null;
+    if (!signal) {
+      if (rosterFetchAbortRef.current) {
+        try {
+          rosterFetchAbortRef.current.abort();
+        } catch {}
+      }
+      localAbort = new AbortController();
+      rosterFetchAbortRef.current = localAbort;
+    }
+    const effSignal = signal || localAbort?.signal;
     try {
-      const data = await apiCall(`/api/characters/${curUser.user_id}`, signal ? { signal } : {});
-      if (signal?.aborted || epoch !== authEpochRef.current) return;
+      const data = await apiCall(`/api/characters/${curUser.user_id}`, effSignal ? { signal: effSignal } : {});
+      if (effSignal?.aborted || epoch !== authEpochRef.current || seq !== rosterFetchSeqRef.current) return;
       const roster = data.characters || [];
       // Keep characters stably ordered by creation ID so their positions never jump when switching
       setCharacters([...roster].sort((a, b) => (a.id || 0) - (b.id || 0)));
     } catch (e) {
-      if (e?.name === 'AbortError' || signal?.aborted || epoch !== authEpochRef.current) return;
+      if (e?.name === 'AbortError' || effSignal?.aborted || epoch !== authEpochRef.current || seq !== rosterFetchSeqRef.current) return;
       console.warn("Failed to fetch characters roster");
+    } finally {
+      if (localAbort && rosterFetchAbortRef.current === localAbort) {
+        rosterFetchAbortRef.current = null;
+      }
     }
   }, []);
 
   const fetchActiveCharacter = useCallback(async (epoch = authEpochRef.current, signal = null) => {
     const curUser = userRef.current;
     if (!curUser || signal?.aborted || epoch !== authEpochRef.current) return;
+    const seq = ++charFetchSeqRef.current;
+    let localAbort = null;
+    if (!signal) {
+      if (charFetchAbortRef.current) {
+        try {
+          charFetchAbortRef.current.abort();
+        } catch {}
+      }
+      localAbort = new AbortController();
+      charFetchAbortRef.current = localAbort;
+    }
+    const effSignal = signal || localAbort?.signal;
     try {
-      const data = await apiCall(`/api/character/${curUser.user_id}`, signal ? { signal } : {});
-      if (signal?.aborted || epoch !== authEpochRef.current) return;
+      const data = await apiCall(`/api/character/${curUser.user_id}`, effSignal ? { signal: effSignal } : {});
+      if (effSignal?.aborted || epoch !== authEpochRef.current || seq !== charFetchSeqRef.current) return;
       if (data && data.character) {
         const canonicalId = data.character.user_id_str || String(data.character.user_id);
         if (userRef.current && userRef.current.user_id !== canonicalId) {
@@ -77,8 +109,12 @@ export const useAuth = () => {
         setCharacter(data);
       }
     } catch (e) {
-      if (e?.name === 'AbortError' || signal?.aborted || epoch !== authEpochRef.current) return;
+      if (e?.name === 'AbortError' || effSignal?.aborted || epoch !== authEpochRef.current || seq !== charFetchSeqRef.current) return;
       setCharacter(null);
+    } finally {
+      if (localAbort && charFetchAbortRef.current === localAbort) {
+        charFetchAbortRef.current = null;
+      }
     }
   }, []);
 
@@ -102,48 +138,98 @@ export const useAuth = () => {
 
   const loginGuest = async (displayName) => {
     const cleanName = (displayName || '').trim();
+    const loginEpoch = ++authEpochRef.current;
+    charFetchSeqRef.current += 1;
+    if (charFetchAbortRef.current) {
+      try {
+        charFetchAbortRef.current.abort();
+      } catch {}
+      charFetchAbortRef.current = null;
+    }
+    rosterFetchSeqRef.current += 1;
+    if (rosterFetchAbortRef.current) {
+      try {
+        rosterFetchAbortRef.current.abort();
+      } catch {}
+      rosterFetchAbortRef.current = null;
+    }
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
+    }
     const data = await apiCall('/api/auth/guest', {
       method: 'POST',
       body: JSON.stringify({ guest_name: cleanName, display_name: cleanName })
     });
+    if (authEpochRef.current !== loginEpoch) {
+      return null;
+    }
     const userObj = {
       ...data,
       user_id: data.user_id_str || String(data.user_id),
       username: data.username || data.display_name || cleanName || 'Guest',
       display_name: data.display_name || data.username || cleanName || 'Guest'
     };
-    authEpochRef.current += 1;
-    if (fetchAbortRef.current) {
-      fetchAbortRef.current.abort();
-      fetchAbortRef.current = null;
-    }
     localStorage.setItem('cf_user', JSON.stringify(userObj));
     setUser(userObj);
+    return userObj;
   };
 
   const loginDiscord = async (discordId) => {
     const cleanId = (discordId || '').trim();
+    const loginEpoch = ++authEpochRef.current;
+    charFetchSeqRef.current += 1;
+    if (charFetchAbortRef.current) {
+      try {
+        charFetchAbortRef.current.abort();
+      } catch {}
+      charFetchAbortRef.current = null;
+    }
+    rosterFetchSeqRef.current += 1;
+    if (rosterFetchAbortRef.current) {
+      try {
+        rosterFetchAbortRef.current.abort();
+      } catch {}
+      rosterFetchAbortRef.current = null;
+    }
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
+    }
     const data = await apiCall('/api/auth/discord', {
       method: 'POST',
       body: JSON.stringify({ user_id_or_name: cleanId, discord_id: cleanId })
     });
+    if (authEpochRef.current !== loginEpoch) {
+      return null;
+    }
     const userObj = {
       ...data,
       user_id: data.user_id_str || String(data.user_id),
       username: data.username || data.display_name || cleanId || 'Discord User',
       display_name: data.display_name || data.username || cleanId || 'Discord User'
     };
-    authEpochRef.current += 1;
-    if (fetchAbortRef.current) {
-      fetchAbortRef.current.abort();
-      fetchAbortRef.current = null;
-    }
     localStorage.setItem('cf_user', JSON.stringify(userObj));
     setUser(userObj);
+    return userObj;
   };
 
   const logout = useCallback(() => {
     authEpochRef.current += 1;
+    charFetchSeqRef.current += 1;
+    if (charFetchAbortRef.current) {
+      try {
+        charFetchAbortRef.current.abort();
+      } catch {}
+      charFetchAbortRef.current = null;
+    }
+    rosterFetchSeqRef.current += 1;
+    if (rosterFetchAbortRef.current) {
+      try {
+        rosterFetchAbortRef.current.abort();
+      } catch {}
+      rosterFetchAbortRef.current = null;
+    }
     if (fetchAbortRef.current) {
       fetchAbortRef.current.abort();
       fetchAbortRef.current = null;
@@ -161,7 +247,7 @@ export const useAuth = () => {
   }, [logout]);
 
   const allocateStatPoint = async (stat) => {
-    if (!user) return;
+    if (!user?.user_id) return null;
     const res = await apiCall('/api/character/allocate', {
       method: 'POST',
       body: JSON.stringify({ user_id: user.user_id, stat })
@@ -171,6 +257,7 @@ export const useAuth = () => {
   };
 
   const createCharacter = async (nameOrPayload, class_name) => {
+    if (!user?.user_id) return null;
     const payload = typeof nameOrPayload === 'object' && nameOrPayload !== null
       ? { user_id: user.user_id, ...nameOrPayload }
       : { user_id: user.user_id, name: nameOrPayload, char_class: class_name || 'Warrior' };
@@ -184,12 +271,14 @@ export const useAuth = () => {
   };
 
   const switchCharacter = async (charId) => {
-    await apiCall('/api/character/switch', {
+    if (!user?.user_id) return null;
+    const res = await apiCall('/api/character/switch', {
       method: 'POST',
       body: JSON.stringify({ user_id: user.user_id, character_id: charId })
     });
     await fetchCharacters();
     await fetchActiveCharacter();
+    return res;
   };
 
   const deleteCharacter = async (characterId) => {
@@ -214,6 +303,6 @@ export const useAuth = () => {
     switchCharacter,
     deleteCharacter,
     allocateStatPoint,
-    refreshCharacter: () => fetchActiveCharacter()
+    refreshCharacter: useCallback(() => fetchActiveCharacter(), [fetchActiveCharacter])
   };
 };

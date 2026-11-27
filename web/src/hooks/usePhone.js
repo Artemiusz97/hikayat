@@ -14,6 +14,91 @@ export const usePhone = (sessionId, user) => {
   const chatAbortRef = useRef(null);
   const stateSeqRef = useRef(0);
   const stateAbortRef = useRef(null);
+  const activeSessionIdRef = useRef(sessionId);
+  activeSessionIdRef.current = sessionId;
+  const pendingMediaEventsRef = useRef(new Map());
+  const wsEventSeqRef = useRef(0);
+  const mediaWsStateRef = useRef(new Map());
+
+  const mergeGalleryMonotonic = (prevGallery = [], nextGallery = [], fetchStartWsSeq = 0) => {
+    const pendingMap = pendingMediaEventsRef.current;
+    const wsStateMap = mediaWsStateRef.current;
+    const prevById = new Map();
+    for (const pm of prevGallery || []) {
+      if (pm?.id != null) prevById.set(String(pm.id), pm);
+    }
+    return (nextGallery || []).map((inc) => {
+      if (!inc || inc.id == null) return inc;
+      const key = String(inc.id);
+      const prevItem = prevById.get(key);
+      const pending = pendingMap.get(key);
+      const wsSnap = wsStateMap.get(key);
+      if (pending) {
+        pendingMap.delete(key);
+      }
+
+      if (wsSnap && wsSnap.seq > fetchStartWsSeq) {
+        if (wsSnap.image_status === 'ready' && wsSnap.image_url) {
+          return {
+            ...inc,
+            image_url: wsSnap.image_url,
+            image_status: 'ready',
+          };
+        }
+        if (wsSnap.image_status === 'error') {
+          return {
+            ...inc,
+            image_url: wsSnap.image_url || inc.image_url || '',
+            image_status: 'error',
+          };
+        }
+        if (wsSnap.image_status === 'generating' && inc.image_status !== 'ready') {
+          return {
+            ...inc,
+            image_status: 'generating',
+          };
+        }
+      }
+
+      if (pending) {
+        if (pending.image_status === 'ready' && pending.image_url) {
+          return {
+            ...inc,
+            image_url: pending.image_url,
+            image_status: 'ready',
+          };
+        }
+        if (pending.image_url && !inc.image_url) {
+          return {
+            ...inc,
+            image_url: pending.image_url,
+            image_status: pending.image_status || 'ready',
+          };
+        }
+        if (pending.image_status === 'error' && inc.image_status === 'generating') {
+          return {
+            ...inc,
+            image_status: 'error',
+          };
+        }
+      }
+
+      if (prevItem?.image_url && !inc.image_url) {
+        return {
+          ...inc,
+          image_url: prevItem.image_url,
+          image_status: prevItem.image_status || 'ready',
+        };
+      }
+      if (prevItem?.image_status === 'error' && inc.image_status === 'generating' && !inc.image_url) {
+        return {
+          ...inc,
+          image_status: 'error',
+        };
+      }
+      return inc;
+    });
+  };
 
   const fetchPhoneState = useCallback(async () => {
     if (!isValidSessionId(sessionId) || !user) {
@@ -34,6 +119,7 @@ export const usePhone = (sessionId, user) => {
       } catch {}
     }
     const seq = ++stateSeqRef.current;
+    const fetchStartWsSeq = wsEventSeqRef.current;
     const controller = new AbortController();
     stateAbortRef.current = controller;
     try {
@@ -42,7 +128,10 @@ export const usePhone = (sessionId, user) => {
         signal: controller.signal,
       });
       if (seq !== stateSeqRef.current) return;
-      setPhoneData(data);
+      setPhoneData((prev) => ({
+        ...data,
+        media_gallery: mergeGalleryMonotonic(prev?.media_gallery, data?.media_gallery, fetchStartWsSeq),
+      }));
     } catch (err) {
       if (err?.isUserAbort || err?.name === 'AbortError' || seq !== stateSeqRef.current) return;
       console.error("Failed to load phone state:", err);
@@ -77,10 +166,15 @@ export const usePhone = (sessionId, user) => {
       } catch {}
       chatAbortRef.current = null;
     }
+    pendingMediaEventsRef.current.clear();
+    mediaWsStateRef.current.clear();
+    setPhoneData(null);
+    setLoading(true);
     setActiveChatNpc(null);
     setChatMessages([]);
     setDailyLimits(null);
     setLoadingChat(false);
+    setSendingChat(false);
     return () => {
       if (chatAbortRef.current) {
         try {
@@ -90,6 +184,51 @@ export const usePhone = (sessionId, user) => {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    const handleMediaImageEvent = (event) => {
+      const detail = event?.detail;
+      if (!detail || detail.item_id == null) return;
+      if (detail.session_id != null && String(detail.session_id) !== String(sessionId)) return;
+      const targetId = String(detail.item_id);
+      const evSeq = ++wsEventSeqRef.current;
+      const resolvedStatus = detail.image_status || (detail.image_url ? 'ready' : undefined);
+      mediaWsStateRef.current.set(targetId, {
+        seq: evSeq,
+        image_url: detail.image_url || '',
+        image_status: resolvedStatus,
+      });
+      setPhoneData((prev) => {
+        if (!prev || !Array.isArray(prev.media_gallery)) {
+          pendingMediaEventsRef.current.set(targetId, detail);
+          return prev;
+        }
+        let touched = false;
+        const nextGallery = prev.media_gallery.map((m) => {
+          if (String(m?.id) !== targetId) return m;
+          touched = true;
+          if (m.image_url && detail.image_status === 'generating' && !detail.image_url) {
+            return m;
+          }
+          return {
+            ...m,
+            image_url: detail.image_url !== undefined && detail.image_url !== ''
+              ? detail.image_url
+              : m.image_url,
+            image_status:
+              resolvedStatus || m.image_status,
+          };
+        });
+        if (!touched) {
+          pendingMediaEventsRef.current.set(targetId, detail);
+          return prev;
+        }
+        return { ...prev, media_gallery: nextGallery };
+      });
+    };
+    window.addEventListener('hikayat:phone-media-image', handleMediaImageEvent);
+    return () => window.removeEventListener('hikayat:phone-media-image', handleMediaImageEvent);
+  }, [sessionId]);
+
   const loadChatMessages = async (npcId) => {
     if (!isValidSessionId(sessionId) || !npcId) return;
     if (chatAbortRef.current) {
@@ -97,26 +236,36 @@ export const usePhone = (sessionId, user) => {
         chatAbortRef.current.abort();
       } catch {}
     }
+    const reqSid = String(sessionId);
     const seq = ++chatSeqRef.current;
     const controller = new AbortController();
     chatAbortRef.current = controller;
     setActiveChatNpc(npcId);
     setLoadingChat(true);
     try {
-      const data = await apiCall(`/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}`, {
-        signal: controller.signal,
-      });
-      if (seq !== chatSeqRef.current) return;
+      const uidQuery = user?.user_id != null ? `?user_id=${encodeURIComponent(user.user_id)}` : '';
+      const data = await apiCall(
+        `/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}${uidQuery}`,
+        { signal: controller.signal }
+      );
+      if (seq !== chatSeqRef.current || String(activeSessionIdRef.current) !== reqSid) return;
       setChatMessages(data.messages || []);
       if (data.daily_limits) {
         setDailyLimits(data.daily_limits);
       }
     } catch (err) {
-      if (err?.isUserAbort || err?.name === 'AbortError' || seq !== chatSeqRef.current) return;
+      if (
+        err?.isUserAbort ||
+        err?.name === 'AbortError' ||
+        seq !== chatSeqRef.current ||
+        String(activeSessionIdRef.current) !== reqSid
+      ) {
+        return;
+      }
       console.error("Failed to fetch NPC chat messages:", err);
       setChatMessages([]);
     } finally {
-      if (seq === chatSeqRef.current) {
+      if (seq === chatSeqRef.current && String(activeSessionIdRef.current) === reqSid) {
         setLoadingChat(false);
         if (chatAbortRef.current === controller) {
           chatAbortRef.current = null;
@@ -128,6 +277,7 @@ export const usePhone = (sessionId, user) => {
   const sendMessage = async (npcId, messageText, intent = 'chat') => {
     const cleanText = (messageText || '__auto__').trim();
     if (!isValidSessionId(sessionId) || !npcId || !user || !cleanText || sendingChat) return null;
+    const reqSid = String(sessionId);
     setSendingChat(true);
     try {
       const data = await apiCall(`/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}`, {
@@ -138,6 +288,7 @@ export const usePhone = (sessionId, user) => {
           intent: intent || 'chat'
         })
       });
+      if (String(activeSessionIdRef.current) !== reqSid) return null;
       if (data?.messages) {
         setChatMessages(data.messages);
       }
@@ -152,12 +303,15 @@ export const usePhone = (sessionId, user) => {
       console.error("Failed to send NPC message:", err);
       throw err;
     } finally {
-      setSendingChat(false);
+      if (String(activeSessionIdRef.current) === reqSid) {
+        setSendingChat(false);
+      }
     }
   };
 
   const refreshFeed = async () => {
     if (!isValidSessionId(sessionId) || !user) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/phone/${sessionId}/feed/refresh`, {
       method: 'POST',
       body: JSON.stringify({
@@ -165,7 +319,7 @@ export const usePhone = (sessionId, user) => {
         force_refresh: true,
       }),
     });
-    if (data) {
+    if (data && String(activeSessionIdRef.current) === reqSid) {
       setPhoneData(prev => ({
         ...(prev || {}),
         gossip_feed: data.gossip_feed || data.posts || prev?.gossip_feed || [],
@@ -177,13 +331,14 @@ export const usePhone = (sessionId, user) => {
 
   const scourFeed = async () => {
     if (!isValidSessionId(sessionId) || !user) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/phone/${sessionId}/feed/scour`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user.user_id,
       }),
     });
-    if (data) {
+    if (data && String(activeSessionIdRef.current) === reqSid) {
       setPhoneData(prev => ({
         ...(prev || {}),
         social_state: data.social_state || prev?.social_state,
@@ -206,6 +361,7 @@ export const usePhone = (sessionId, user) => {
 
   const sendFriendRequest = async (profile) => {
     if (!isValidSessionId(sessionId) || !user || !profile) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/phone/${sessionId}/peerpulse/friend-request`, {
       method: 'POST',
       body: JSON.stringify({
@@ -213,6 +369,7 @@ export const usePhone = (sessionId, user) => {
         profile,
       }),
     });
+    if (String(activeSessionIdRef.current) !== reqSid) return data;
     if (data?.accepted) {
       setPhoneData(prev => ({
         ...(prev || {}),
@@ -243,6 +400,7 @@ export const usePhone = (sessionId, user) => {
 
   const cancelCommitment = async (commitmentId, reason = 'player_cancelled') => {
     if (!isValidSessionId(sessionId) || !commitmentId) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/commitments/${sessionId}/${commitmentId}/cancel`, {
       method: 'POST',
       body: JSON.stringify({
@@ -250,7 +408,7 @@ export const usePhone = (sessionId, user) => {
         reason,
       }),
     });
-    if (data) {
+    if (data && String(activeSessionIdRef.current) === reqSid) {
       setPhoneData(prev => ({
         ...(prev || {}),
         commitments: data.commitments || [],
@@ -260,13 +418,73 @@ export const usePhone = (sessionId, user) => {
     return data;
   };
 
+  const generateMediaPhoto = async (itemId, { forceRegenerate = false } = {}) => {
+    if (!isValidSessionId(sessionId) || !itemId || !user?.user_id) return null;
+    const reqSid = String(sessionId);
+    const targetId = String(itemId);
+    setPhoneData((prev) => {
+      if (!prev || !Array.isArray(prev.media_gallery)) return prev;
+      return {
+        ...prev,
+        media_gallery: prev.media_gallery.map((m) =>
+          String(m?.id) === targetId ? { ...m, image_status: 'generating' } : m
+        ),
+      };
+    });
+    try {
+      const data = await apiCall(`/api/phone/${sessionId}/media/${itemId}/generate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: user.user_id,
+          force_regenerate: Boolean(forceRegenerate),
+        }),
+      });
+      if (String(activeSessionIdRef.current) !== reqSid) return null;
+      if (data?.media) {
+        setPhoneData((prev) => {
+          if (!prev || !Array.isArray(prev.media_gallery)) return prev;
+          return {
+            ...prev,
+            media_gallery: prev.media_gallery.map((m) =>
+              String(m?.id) === targetId ? { ...m, ...data.media } : m
+            ),
+          };
+        });
+      }
+      return data?.media || null;
+    } catch (err) {
+      if (String(activeSessionIdRef.current) === reqSid) {
+        setPhoneData((prev) => {
+          if (!prev || !Array.isArray(prev.media_gallery)) return prev;
+          return {
+            ...prev,
+            media_gallery: prev.media_gallery.map((m) =>
+              String(m?.id) === targetId
+                ? { ...m, image_status: 'error' }
+                : m
+            ),
+          };
+        });
+      }
+      throw err;
+    }
+  };
+
   return {
     phoneData,
+    imageGenEnabled: phoneData?.image_gen_enabled ?? 0,
+    playerProfile: phoneData?.player_profile || null,
     branding: phoneData?.branding || {
       device_name: '📱 Smartphone',
       gallery_app_name: 'Photos',
       dm_app_name: 'Messages',
       feed_app_name: 'Feed',
+      shop_app_name: 'Online Store',
+      shop_subtitle: 'Instant Delivery',
+      bounty_app_name: 'Bounty Board',
+      bounty_subtitle: 'Contracts & Guilds',
+      people_tab_label: 'Network',
+      show_general_bounties: true,
       emoji: '📱'
     },
     appointments: phoneData?.appointments || [],
@@ -277,6 +495,9 @@ export const usePhone = (sessionId, user) => {
     dispatchChannels: phoneData?.dispatch_channels || [],
     suggestedPeers: phoneData?.suggested_peers || [],
     socialState: phoneData?.social_state || { charges: 3, turn_count: 0 },
+    commsStatus: phoneData?.comms_status || { available: true, reason: '' },
+    spiritRelayStaticActive: Boolean(phoneData?.spirit_relay_static_active),
+    spiritRelayStaticNote: phoneData?.spirit_relay_static_note || '',
     loading,
     refreshPhone: fetchPhoneState,
     refreshPhoneData: fetchPhoneState,
@@ -285,6 +506,7 @@ export const usePhone = (sessionId, user) => {
     discoverPeer,
     sendFriendRequest,
     cancelCommitment,
+    generateMediaPhoto,
     activeChatNpc,
     chatMessages,
     dailyLimits,

@@ -99,6 +99,7 @@ def get_player_owned_or_starter_property_for_node(
     *,
     world_node: Mapping[str, Any] | None = None,
     world_node_loaded: bool = False,
+    player_properties: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """
     If `node_id` belongs to the player's active starter quarters, a Student Operative's
@@ -128,7 +129,7 @@ def get_player_owned_or_starter_property_for_node(
         except Exception:
             parent_id = ""
 
-    props = db.get_player_properties(int(session_id))
+    props = db.get_player_properties(int(session_id)) if player_properties is None else player_properties
     for p in props:
         fac_id = str(p.get("facility_node_id") or "")
         if target == fac_id or (parent_id and parent_id == fac_id):
@@ -241,10 +242,26 @@ def is_excluded_from_random_incursions(
     for candidate in (nid, str(parent_id or "").strip()):
         if not candidate:
             continue
-        if candidate in ALL_STATIC_RESIDENTIAL_FACILITY_IDS or candidate in ("loc_hidden_kitsune_village", "loc_hidden_bunian_village"):
+        if candidate in ALL_STATIC_RESIDENTIAL_FACILITY_IDS or candidate in (
+            "loc_hidden_kitsune_village",
+            "loc_hidden_bunian_village",
+            "loc_hidden_ghoul_village",
+            "fac_kitsune_guest_villa",
+            "fac_bunian_guest_house",
+            "fac_ghoul_guest_manor",
+            "zone_spirit_kitsune",
+            "zone_spirit_bunian",
+            "zone_spirit_ghoul",
+            "zone_spirit_crossroads",
+        ):
             return True
         low = candidate.lower()
-        if low.startswith(("fac_npc_res_", "sub_npc_ent_", "sub_npc_bed_", "sub_agency_unit_", "sub_temple_cell_", "sub_kitsune_", "sub_bunian_")):
+        if low.startswith((
+            "fac_npc_res_", "sub_npc_ent_", "sub_npc_bed_",
+            "sub_agency_unit_", "sub_temple_cell_",
+            "sub_kitsune_", "sub_bunian_", "sub_ghoul_", "loc_kitsune_", "loc_bunian_", "loc_ghoul_",
+            "loc_crossroads_", "sub_crossroads_",
+        )):
             return True
         if low.endswith("_house") or low.endswith("_apartment"):
             return True
@@ -300,6 +317,8 @@ def is_unpurchased_realty_node(
     session_id: int,
     node_id: str,
     session: Mapping[str, Any] | None = None,
+    *,
+    player_properties: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """
     If `node_id` is part of an unpurchased realty property in an Anomalous scenario,
@@ -315,7 +334,7 @@ def is_unpurchased_realty_node(
     if not entry:
         return None
 
-    props = db.get_player_properties(int(session_id))
+    props = db.get_player_properties(int(session_id)) if player_properties is None else player_properties
     for p in props:
         if not p.get("is_starter") and (
             p.get("property_id") == entry["property_id"]
@@ -860,7 +879,7 @@ def is_npc_active_spare_key_holder(
             or str(cb.get("status") or "").strip().lower() == "deceased"
         ):
             return False
-        if str(matched_c.get("race") or cb.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+        if str(matched_c.get("race") or cb.get("race") or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid"):
             return False
         score = int(matched_c.get("relationship_score") or 0)
         if score < 0:
@@ -1056,7 +1075,7 @@ def build_realty_payload(
                 b_info = {}
         if not isinstance(b_info, Mapping):
             b_info = {}
-        if str(c_dict.get("race") or b_info.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+        if str(c_dict.get("race") or b_info.get("race") or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid"):
             continue
         if b_info.get("is_deceased") or c_dict.get("is_deceased") or b_info.get("is_dispatch_channel"):
             continue

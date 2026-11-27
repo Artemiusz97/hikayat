@@ -35,17 +35,16 @@ from .in_flight import (
 from .enrichment import (
     _trigger_scene_image_broadcast,
     enrich_session_for_client,
+    heal_session_before_projection,
 )
 
 router = APIRouter()
 
 
 @router.get("/api/adventure/session-image/{session_id}")
-async def get_session_image(session_id: int):
+async def get_session_image(session_id: int, request: Request = None):
     """Lightweight polling endpoint returning the latest scene_image_url for active turn reconciliation."""
-    sess = await adb(db.get_session, session_id)
-    if not sess:
-        raise HTTPException(status_code=404, detail="Session not found")
+    sess, _ = await verify_session_participant(request, session_id)
     raw_hist = list(sess.get("history") or [])
     last_img = raw_hist[-1].get("scene_image_url") if (raw_hist and isinstance(raw_hist[-1], dict)) else None
     return {
@@ -84,7 +83,43 @@ async def get_character_sessions_endpoint(character_id: int, request: Request = 
     def _load_and_enrich_char_sessions() -> list[dict]:
         with db.ReadUnitOfWork():
             sessions = db.get_character_sessions(character_id)
-            return [enrich_session_for_client(s, user_id, read_only=True) for s in sessions]
+            if not sessions:
+                return []
+            shared_settings = db.get_settings(user_id) or {}
+            shared_inv = db.get_inventory(user_id, char=char) or []
+            from db.characters import _apply_debug_stat_override
+            sids = [int(s["id"]) for s in sessions if s and s.get("id")]
+            pacts_by_sid: dict[int, list[dict]] = {}
+            grudges_by_sid: dict[int, list[dict]] = {}
+            if sids:
+                pacts_by_sid, grudges_by_sid = db.get_sessions_player_pacts_and_grudges_batch(
+                    sids, int(user_id), character_id=character_id
+                )
+            out: list[dict] = []
+            for s in sessions:
+                s_id = int(s["id"]) if s and s.get("id") else None
+                slot_pacts = pacts_by_sid.get(s_id, []) if s_id is not None else []
+                slot_grudges = grudges_by_sid.get(s_id, []) if s_id is not None else []
+                slot_char = _apply_debug_stat_override(
+                    dict(char),
+                    settings=shared_settings,
+                    session_id=s_id,
+                    active_pacts=slot_pacts,
+                    active_grudges=slot_grudges,
+                )
+                out.append(
+                    enrich_session_for_client(
+                        s,
+                        user_id,
+                        read_only=True,
+                        preloaded_settings=shared_settings,
+                        preloaded_char=slot_char,
+                        preloaded_inv=shared_inv,
+                        preloaded_pacts=slot_pacts,
+                        preloaded_physical_state=s.get("physical_state") if isinstance(s.get("physical_state"), dict) else None,
+                    )
+                )
+            return out
 
     enriched = await adb(_load_and_enrich_char_sessions)
     return {"sessions": enriched}
@@ -119,7 +154,15 @@ async def resume_session_endpoint(req: ResumeSessionRequest, request: Request = 
     except Exception:
         pass
 
-    enriched = await adb(enrich_session_for_client, dict(session_row), canonical_id)
+    sess_dict = dict(session_row)
+    pre_roster = await adb(heal_session_before_projection, sess_dict, req.session_id)
+    enriched = await adb(
+        enrich_session_for_client,
+        sess_dict,
+        canonical_id,
+        pre_agent_roster=pre_roster,
+        pre_healed=True,
+    )
     return {"success": True, "session": enriched}
 
 
@@ -209,9 +252,13 @@ async def start_adventure(req: StartAdventureRequest, request: Request = None):
                     "luk": req.luk,
                 },
                 appearance=req.appearance,
+                stature=getattr(req, "stature", None),
+                physique=getattr(req, "physique", None),
                 breast_size=req.breast_size,
                 penis_size=req.penis_size,
                 asset_texture=req.asset_texture,
+                rear_size=getattr(req, "rear_size", None),
+                rear_texture=getattr(req, "rear_texture", None),
                 schedule_chapter_plan=True,
             )
         except LookupError as e:

@@ -1,17 +1,27 @@
 import { useRef } from 'react';
 import {
   Calendar,
+  Camera,
   ChevronLeft,
   Heart,
+  Loader2,
   MapPin,
   MessageSquare,
+  Play,
   Send,
   ShieldAlert,
+  Sparkles,
   User,
   Users,
+  Video,
 } from 'lucide-react';
 import { formatCleanLocation } from '../../utils/locationFormat';
-import { formatTimestamp } from './phoneHelpers';
+import {
+  formatTimestamp,
+  matchDmAttachmentToGallery,
+  parseDmMediaAttachment,
+} from './phoneHelpers';
+import { isImageGenModeActive } from './phoneWallpapers';
 
 const PhoneDmsApp = ({
   branding,
@@ -39,10 +49,23 @@ const PhoneDmsApp = ({
   dmDirectory = [],
   dispatchDirectory = [],
   onLoadChatMessages,
+  mediaGallery = [],
+  imageGenEnabled = 0,
+  onSelectPhoto,
+  onGenerateMediaPhoto,
+  commsOffline = false,
+  supportsSpiritRelay = false,
+  spiritRelayStaticActive = false,
+  spiritRelayStaticNote = '',
   clockFormat = '12h',
   t,
 }) => {
   const msgTabRefs = useRef({});
+  const isImgGenActive = isImageGenModeActive(imageGenEnabled);
+  const activeHasSpiritRelay = Boolean(
+    supportsSpiritRelay && !isDispatchThread && activeContactEntry?.spirit_relay_unlocked
+  );
+  const dmComposerDisabled = commsOffline && !activeHasSpiritRelay;
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0">
@@ -75,6 +98,16 @@ const PhoneDmsApp = ({
                 {isDispatchThread ? '📡' : <User size={12} />}
               </div>
               <span className="font-bold text-xs text-gray-100 truncate">{activeDisplayTitle}</span>
+              {activeHasSpiritRelay && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-600/50 font-bold uppercase shrink-0">
+                  ⛩️ {t('phone.dms.spirit_relay_badge', 'Spirit Relay')}
+                </span>
+              )}
+              {activeContactEntry?.folklore_village === 'ghoul' && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/70 text-violet-300 border border-violet-600/50 font-bold uppercase shrink-0">
+                  🦴 {t('spirit_realm.spirit_relay_ghoul_badge', 'Ossuary Relay')}
+                </span>
+              )}
               {isBlockedContact && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-700/60 font-bold uppercase shrink-0">
                   🚫 {t('contacts.blocked_badge', 'Blocked')}
@@ -85,8 +118,17 @@ const PhoneDmsApp = ({
           </div>
 
           {/* DM Reply Outcome Banner */}
+          {spiritRelayStaticActive && (commsOffline || supportsSpiritRelay) && (
+            <div className="bg-amber-950/40 border border-amber-600/50 rounded-xl px-2.5 py-1.5 text-[10px] text-amber-200 leading-snug shrink-0">
+              ⚡ {spiritRelayStaticNote || t('spirit_realm.spirit_relay_static_banner', 'Neon-Static Leyline Surge: Spirit Relay crackling.')}
+            </div>
+          )}
           {dmOutcomeBanner && (
-            <div className="bg-neutral-950/90 border border-cyan-700/50 rounded-xl p-2 text-[10px] space-y-1 shrink-0">
+            <div
+              className={`bg-neutral-950/90 border rounded-xl p-2 text-[10px] space-y-1 shrink-0 ${
+                dmOutcomeBanner.error ? 'border-red-700/60' : 'border-cyan-700/50'
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {dmOutcomeBanner.check && (
@@ -117,6 +159,9 @@ const PhoneDmsApp = ({
                   ✕
                 </button>
               </div>
+              {dmOutcomeBanner.error && (
+                <div className="text-red-300 font-medium">⚠️ {dmOutcomeBanner.error}</div>
+              )}
               {dmOutcomeBanner.daily_digestion_capped && (
                 <div className="text-indigo-300">
                   💬{' '}
@@ -168,10 +213,13 @@ const PhoneDmsApp = ({
             ) : (
               chatMessages.map((msg, idx) => {
                 const isPlayer = msg.sender === 'player' || msg.sender === 'Player' || msg.sender === 'You';
+                const { cleanText, attachments = [] } = parseDmMediaAttachment(msg.message);
+                const resolvedNpcId = activeContactEntry?.npc_id || '';
+
                 return (
                   <div key={msg.id || idx} className={`flex flex-col ${isPlayer ? 'items-end' : 'items-start'}`}>
                     <div
-                      className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs ${
+                      className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs space-y-1.5 ${
                         isPlayer
                           ? 'bg-cyan-600 text-white rounded-tr-none'
                           : isDispatchThread
@@ -179,7 +227,135 @@ const PhoneDmsApp = ({
                             : 'bg-neutral-800 text-gray-200 rounded-tl-none border border-neutral-700/50'
                       }`}
                     >
-                      <p className="leading-snug whitespace-pre-line">{msg.message}</p>
+                      {cleanText && <p className="leading-snug whitespace-pre-line">{cleanText}</p>}
+
+                      {attachments.map((attachment, aIdx) => {
+                        const matchedMedia = !isPlayer
+                          ? matchDmAttachmentToGallery(
+                              attachment,
+                              msg.timestamp,
+                              activeDisplayTitle,
+                              mediaGallery,
+                              resolvedNpcId
+                            )
+                          : null;
+                        const mediaImageUrl = matchedMedia?.image_url || '';
+                        const mediaStatus = matchedMedia?.image_status || (mediaImageUrl ? 'ready' : 'idle');
+                        const inspectPayload = matchedMedia || {
+                          id: null,
+                          name: `${attachment.isVideo ? 'Video' : 'Photo'}: ${isPlayer ? 'You' : activeDisplayTitle}`,
+                          contact_name: isPlayer ? 'You' : activeDisplayTitle,
+                          media_type: attachment.mediaType,
+                          caption: attachment.caption,
+                          timestamp: msg.timestamp,
+                          tags: ['misc', 'digital'],
+                          image_url: '',
+                          image_status: 'idle',
+                        };
+
+                        return (
+                          <div
+                            key={`${msg.id || idx}-att-${aIdx}`}
+                            data-phone-style="classic"
+                            className="rounded-xl overflow-hidden border border-white/15 hk-phone-media-frame"
+                          >
+                            {mediaImageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => onSelectPhoto?.(inspectPayload)}
+                                className="block w-full text-left cursor-pointer group relative"
+                              >
+                                <div className="relative h-48 w-full overflow-hidden hk-phone-media-frame">
+                                  <img
+                                    src={mediaImageUrl}
+                                    alt={attachment.caption || activeDisplayTitle}
+                                    loading="lazy"
+                                    className="w-full h-full object-cover object-top group-hover:scale-[1.02] transition-transform"
+                                  />
+                                  {attachment.isVideo && (
+                                    <span className="absolute inset-0 m-auto w-9 h-9 rounded-full hk-phone-play-badge flex items-center justify-center hk-phone-icon-glyph">
+                                      <Play size={15} className="ml-0.5" />
+                                    </span>
+                                  )}
+                                  {attachment.isBonus && (
+                                    <span className="absolute top-1.5 left-1.5 text-[8.5px] px-1.5 py-0.5 bg-amber-950/85 text-amber-200 rounded border border-amber-700/70 font-bold">
+                                      +Bonus
+                                    </span>
+                                  )}
+                                  {attachment.isIntimate && (
+                                    <span className="absolute top-1.5 right-1.5 text-[8.5px] px-1.5 py-0.5 bg-red-950/85 text-red-200 rounded border border-red-700/70 font-bold">
+                                      18+
+                                    </span>
+                                  )}
+                                </div>
+                                {attachment.caption && (
+                                  <p className="px-2.5 py-1.5 text-[10px] text-gray-200 italic leading-snug line-clamp-2">
+                                    &ldquo;{attachment.caption}&rdquo;
+                                  </p>
+                                )}
+                              </button>
+                            ) : mediaStatus === 'generating' ? (
+                              <div className="p-3 flex items-center gap-2 text-[11px] text-pink-300 animate-pulse">
+                                <Loader2 size={14} className="animate-spin shrink-0" />
+                                <span>{t('phone.dms.generating_photo', 'Developing photo...')}</span>
+                              </div>
+                            ) : (
+                              <div className="p-2.5 space-y-1.5">
+                                <div className="flex items-start gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectPhoto?.(inspectPayload)}
+                                    className="w-7 h-7 rounded-lg bg-pink-950/60 border border-pink-700/40 text-pink-300 flex items-center justify-center shrink-0 cursor-pointer"
+                                    title={t('phone.dms.open_photo_vault', 'Open Preview')}
+                                  >
+                                    {attachment.isVideo ? <Video size={13} /> : <Camera size={13} />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectPhoto?.(inspectPayload)}
+                                    className="text-left min-w-0 flex-1 cursor-pointer"
+                                  >
+                                    <span className="text-[10px] font-bold text-pink-300 flex items-center gap-1 flex-wrap">
+                                      <span>
+                                        {attachment.isIntimate
+                                          ? t('phone.dms.attached_intimate', 'Intimate Attachment')
+                                          : attachment.isVideo
+                                            ? t('phone.dms.attached_video', 'Video Attachment')
+                                            : t('phone.dms.attached_photo', 'Photo Attachment')}
+                                      </span>
+                                      {attachment.isBonus && (
+                                        <span className="text-[8px] px-1 py-0.5 bg-amber-950/85 text-amber-200 rounded border border-amber-700/70">
+                                          +Bonus
+                                        </span>
+                                      )}
+                                    </span>
+                                    {attachment.caption && (
+                                      <span className="text-[10px] text-gray-200 italic line-clamp-2 block">
+                                        &ldquo;{attachment.caption}&rdquo;
+                                      </span>
+                                    )}
+                                  </button>
+                                </div>
+                                {mediaStatus === 'error' && (
+                                  <p className="text-[10px] text-red-300 bg-red-950/50 border border-red-800/50 rounded-md px-2 py-1">
+                                    {t('phone.vault.generate_failed', 'Could not generate photo.')}
+                                  </p>
+                                )}
+                                {!isPlayer && isImgGenActive && matchedMedia?.id && onGenerateMediaPhoto && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onGenerateMediaPhoto(matchedMedia.id)}
+                                    className="w-full py-1 px-2 rounded-lg bg-pink-600/25 hover:bg-pink-600/40 text-pink-200 border border-pink-500/40 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                  >
+                                    <Sparkles size={11} />
+                                    <span>{t('phone.vault.generate_photo', 'Generate Photo')}</span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                     <span className="text-[9px] font-mono tabular-nums text-gray-500 mt-0.5 px-1">
                       {formatTimestamp(msg.timestamp, clockFormat)}
@@ -236,7 +412,7 @@ const PhoneDmsApp = ({
                     icon: '💬',
                     badge: `${chatLeft}/${chatMax}`,
                     locked: chatLeft === 0,
-                    disabled: sendingChat,
+                    disabled: sendingChat || dmComposerDisabled,
                     color: 'hover:border-cyan-500/50 hover:bg-cyan-950/40 text-cyan-200',
                     title: t(
                       'phone.dms.action_chat_title',
@@ -254,7 +430,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.flirt?.used ?? 0))}/3`
                       : '3/3',
                     locked: flirtLocked,
-                    disabled: sendingChat || flirtLocked,
+                    disabled: sendingChat || dmComposerDisabled || flirtLocked,
                     color: 'hover:border-pink-500/50 hover:bg-pink-950/40 text-pink-200',
                     title: t('phone.dms.action_flirt_title', 'Flirt with contact (3 attempts/day)'),
                   },
@@ -274,7 +450,7 @@ const PhoneDmsApp = ({
                           : '1/1'
                       : '1/1',
                     locked: meetupLocked,
-                    disabled: sendingChat || meetupLocked,
+                    disabled: sendingChat || dmComposerDisabled || meetupLocked,
                     color: 'hover:border-amber-500/50 hover:bg-amber-950/40 text-amber-200',
                     title: isMeetupAccepted
                       ? t('phone.dms.action_move_title', 'Relocate meetup spot (up to 2 times)')
@@ -286,7 +462,7 @@ const PhoneDmsApp = ({
                     icon: '🕵️',
                     badge: dailyLimits ? (rumorLocked ? '🔒' : '1/1') : '1/1',
                     locked: rumorLocked,
-                    disabled: sendingChat || rumorLocked,
+                    disabled: sendingChat || dmComposerDisabled || rumorLocked,
                     color: 'hover:border-emerald-500/50 hover:bg-emerald-950/40 text-emerald-200',
                     title: t('phone.dms.action_rumor_title', 'Ask for rumors and gossip (1 attempt/day)'),
                   },
@@ -300,7 +476,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`
                       : '3/3',
                     locked: photoLocked,
-                    disabled: sendingChat || photoLocked,
+                    disabled: sendingChat || dmComposerDisabled || photoLocked,
                     color: 'hover:border-purple-500/50 hover:bg-purple-950/40 text-purple-200',
                     title: t('phone.dms.action_ask_pic_title', 'Ask contact for a casual photo (shared 3/day)'),
                   },
@@ -314,7 +490,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`
                       : '3/3',
                     locked: photoLocked,
-                    disabled: sendingChat || photoLocked,
+                    disabled: sendingChat || dmComposerDisabled || photoLocked,
                     color: 'hover:border-teal-500/50 hover:bg-teal-950/40 text-teal-200',
                     title: t('phone.dms.action_send_pic_title', 'Send contact a casual photo (shared 3/day)'),
                   },
@@ -328,7 +504,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`
                       : '3/3',
                     locked: spicyLocked,
-                    disabled: sendingChat || spicyLocked,
+                    disabled: sendingChat || dmComposerDisabled || spicyLocked,
                     color: 'hover:border-rose-500/50 hover:bg-rose-950/40 text-rose-200',
                     title: t('phone.dms.action_ask_spicy_title', 'Ask contact for a spicy photo (shared 3/day)'),
                   },
@@ -342,7 +518,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`
                       : '3/3',
                     locked: spicyLocked,
-                    disabled: sendingChat || spicyLocked,
+                    disabled: sendingChat || dmComposerDisabled || spicyLocked,
                     color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-200',
                     title: t(
                       'phone.dms.action_send_spicy_title',
@@ -358,7 +534,10 @@ const PhoneDmsApp = ({
                         key={opt.id}
                         type="button"
                         disabled={opt.disabled}
-                        onClick={() => onInstantIntentSend(opt.id)}
+                        onClick={() => {
+                          if (dmComposerDisabled) return;
+                          onInstantIntentSend(opt.id);
+                        }}
                         className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer select-none active:scale-95 border shadow-xs ${
                           opt.disabled
                             ? 'opacity-40 cursor-not-allowed bg-neutral-900/40 border-neutral-800/40 text-neutral-500'
@@ -388,18 +567,18 @@ const PhoneDmsApp = ({
               })()}
 
               {/* Custom Message Composer */}
-              <form onSubmit={onSendDm} className="flex items-center gap-2 pt-1.5 shrink-0">
+              <form onSubmit={(e) => { if (dmComposerDisabled) { e.preventDefault(); return; } onSendDm(e); }} className="flex items-center gap-2 pt-1.5 shrink-0">
                 <input
                   type="text"
                   value={dmInput}
                   onChange={(e) => onChangeDmInput(e.target.value)}
-                  disabled={sendingChat}
-                  placeholder={`Custom message to ${activeDisplayTitle}...`}
+                  disabled={sendingChat || dmComposerDisabled}
+                  placeholder={dmComposerDisabled ? t('phone.no_signal_banner', 'No Signal — Isolated Realm') : `Custom message to ${activeDisplayTitle}...`}
                   className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none disabled:opacity-50 transition-colors"
                 />
                 <button
                   type="submit"
-                  disabled={!dmInput.trim() || sendingChat}
+                  disabled={!dmInput.trim() || sendingChat || dmComposerDisabled}
                   className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-sm"
                   title={t('phone.dms.send_custom', 'Send Custom Message')}
                 >
@@ -425,6 +604,11 @@ const PhoneDmsApp = ({
           </div>
 
           {/* Contacts vs Alerts / Dispatch Sub-View Switcher */}
+          {spiritRelayStaticActive && (commsOffline || supportsSpiritRelay) && (
+            <div className="bg-amber-950/40 border border-amber-600/50 rounded-xl px-2.5 py-1.5 text-[10px] text-amber-200 leading-snug shrink-0">
+              ⚡ {spiritRelayStaticNote || t('spirit_realm.spirit_relay_static_banner', 'Neon-Static Leyline Surge: Spirit Relay crackling.')}
+            </div>
+          )}
           {showDispatchTab && (
             <div
               role="tablist"
@@ -537,7 +721,10 @@ const PhoneDmsApp = ({
                     <button
                       key={ch.npc_id}
                       type="button"
-                      onClick={() => onLoadChatMessages(ch.npc_id)}
+                      onClick={() => {
+                        onClearOutcomeBanner?.();
+                        onLoadChatMessages(ch.npc_id);
+                      }}
                       className="w-full text-left bg-indigo-950/25 border border-indigo-800/50 hover:border-indigo-500/60 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -577,7 +764,10 @@ const PhoneDmsApp = ({
                     <button
                       key={c.npc_id}
                       type="button"
-                      onClick={() => onLoadChatMessages(c.npc_id)}
+                      onClick={() => {
+                        onClearOutcomeBanner?.();
+                        onLoadChatMessages(c.npc_id);
+                      }}
                       className={`w-full text-left bg-neutral-900/60 border rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
                         c.is_blocked_contact
                           ? 'border-red-900/60 hover:border-red-700/70'
@@ -606,6 +796,16 @@ const PhoneDmsApp = ({
                             {c.is_blocked_contact && (
                               <span className="text-[8.5px] px-1 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-700/60 font-bold uppercase shrink-0">
                                 🚫 {t('contacts.blocked_badge', 'Blocked')}
+                              </span>
+                            )}
+                            {supportsSpiritRelay && c.spirit_relay_unlocked && (
+                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-600/50 font-bold uppercase shrink-0">
+                                ⛩️ {t('phone.dms.spirit_relay_badge', 'Spirit Relay')}
+                              </span>
+                            )}
+                            {c.folklore_village === 'ghoul' && (
+                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-violet-950/70 text-violet-300 border border-violet-600/50 font-bold uppercase shrink-0">
+                                🦴 {t('spirit_realm.spirit_relay_ghoul_badge', 'Ossuary Relay')}
                               </span>
                             )}
                             {c.anomalous_npc_tag === 'special_agent' && (

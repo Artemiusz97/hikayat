@@ -43,6 +43,18 @@ def _migrate_outlaw_factions_v60(conn: sqlite3.Connection) -> int:
     from mechanics.world.anomalous_sites.lifecycle import backfill_outlaw_faction_hqs_and_residences_v60
     return backfill_outlaw_faction_hqs_and_residences_v60(conn)
 
+
+def _migrate_folklore_spirit_realm_v52(conn: sqlite3.Connection) -> int:
+    """Idempotently backfills The Veiled Spirit Realm (`realm_veiled_spirit_world`), 4 Spirit zones, and portals."""
+    from mechanics.world.locations.folklore_spirit_realm_lifecycle import backfill_folklore_spirit_realm_v52
+    return backfill_folklore_spirit_realm_v52(conn)
+
+
+def _migrate_folklore_spirit_realm_v64(conn: sqlite3.Connection) -> int:
+    """Idempotently backfills Spirit Realm v2 (Ghoul enclave, 3 frontiers, 4-Wing Night Market, procedural names, court rosters)."""
+    from mechanics.world.locations.folklore_spirit_realm_lifecycle import backfill_folklore_spirit_realm_v64
+    return backfill_folklore_spirit_realm_v64(conn)
+
 def _migrate_dynamic_social_overhaul_v50(conn: sqlite3.Connection) -> int:
     """Idempotently backfills contact_dossier_discoveries for kin, companions, romantic partners, and pre-v50 saves."""
     from ..social_pacing import backfill_exempt_and_legacy_contact_discoveries
@@ -358,6 +370,12 @@ def _backfill_campaign_spines_from_legacy_sessions(conn: sqlite3.Connection) -> 
 def _strip_legacy_session_fk_constraints(conn: sqlite3.Connection) -> None:
     """Removes legacy FOREIGN KEY(session_id) REFERENCES sessions(id) from normalized child tables
     so synthetic session_ids in unit tests and simulations match all other SESSION_CHILD_TABLES."""
+    from .connection import is_in_uow
+
+    if is_in_uow():
+        raise RuntimeError(
+            "Cannot run _strip_legacy_session_fk_constraints inside an active UnitOfWork or ReadUnitOfWork."
+        )
     target_ddls = {
         "households": (
             """CREATE TABLE households__new (
@@ -930,11 +948,13 @@ def _migrate_contacts_intimacy_profiles(conn: sqlite3.Connection) -> int:
         cur_o = prof.get("oral_experience") or app.get("oral_experience") or "inexperienced"
         cur_m = prof.get("manual_experience") or app.get("manual_experience") or "inexperienced"
         cur_a = prof.get("anal_experience") or app.get("anal_experience") or "inexperienced"
-        openness = prof.get("erotic_openness") or app.get("erotic_openness") or "moderate"
+        openness = prof.get("erotic_openness") or prof.get("openness") or app.get("erotic_openness") or app.get("openness") or "moderate"
 
         for k in intimate_keys:
             if k in app and k not in prof:
                 prof[k] = app[k]
+        if "erotic_openness" not in prof and app.get("openness") not in (None, ""):
+            prof["erotic_openness"] = app["openness"]
 
         disc_flags = prof.get("disclosure_flags", {})
         for k in intimate_keys:

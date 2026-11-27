@@ -50,6 +50,7 @@ const SettingsModal = ({
   onSessionUpdated,
   onRefreshCharacter,
   onRefreshCodex,
+  onImageModeSaved = null,
 }) => {
   const { t, i18n } = useTranslation();
   const {
@@ -65,6 +66,8 @@ const SettingsModal = ({
     setReadingMode,
     clockFormat,
     setClockFormat,
+    timeSkipControl,
+    setTimeSkipControl,
     uiFont,
     setUiFont,
     narrationFont,
@@ -351,7 +354,12 @@ const SettingsModal = ({
                   return (
                     <MotionButton
                       key={mode.id}
-                      onClick={() => updateSettings({ image_gen_enabled: mode.id })}
+                      onClick={async () => {
+                        try {
+                          await updateSettings({ image_gen_enabled: mode.id });
+                          onImageModeSaved?.(mode.id);
+                        } catch {}
+                      }}
                       disabled={saving}
                       className={`p-2 rounded-xl text-left transition-all border ${
                         isSelected
@@ -453,6 +461,32 @@ const SettingsModal = ({
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Time Skip Control Style (Analog Clock Dial vs Slider) */}
+              <div className="flex items-center justify-between gap-4 pt-3 border-t border-fantasy-border/25">
+                <div>
+                  <span className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+                    <Clock size={13} className="text-fantasy-accent shrink-0" aria-hidden="true" />
+                    <span>{t('settings.timeskip_analog_clock', 'Analog Clock Dial')}</span>
+                  </span>
+                  <span className="text-[11px] text-gray-400 block mt-0.5">
+                    {t(
+                      'settings.timeskip_analog_clock_desc',
+                      'Use an interactive 24-hour clock dial in Time Skip instead of the horizontal slider.'
+                    )}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={timeSkipControl === 'dial'}
+                  aria-label={t('settings.timeskip_analog_clock', 'Analog Clock Dial')}
+                  onClick={() =>
+                    setTimeSkipControl(timeSkipControl === 'dial' ? 'slider' : 'dial')
+                  }
+                  className={`hk-toggle ${timeSkipControl === 'dial' ? 'is-on' : ''}`}
+                />
               </div>
             </div>
 

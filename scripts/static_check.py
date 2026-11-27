@@ -48,13 +48,12 @@ def _discover_script_files() -> List[str]:
     return [f"scripts/{p.name}" for p in sorted(scripts_dir.glob("*.py"))]
 
 
-SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models", "localization", "bin"]
+SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "llm_client", "mechanics", "services", "models", "localization", "bin"]
 SCAN_ROOT_FILES = [
     "bot.py",
     "character_data.py",
     "config.py",
     "image_client.py",
-    "llm_client.py",
     "namegen.py",
     "scenario_data.py",
     "scenario_variants.py",
@@ -548,7 +547,7 @@ def analyze_possibly_unbound(path: Path, rel: str) -> List[Finding]:
 # Analyzers 3–5: Bundle B DB/Async/Registry Architecture Contracts
 # ---------------------------------------------------------------------------
 
-_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/", "mechanics/", "server.py")
+_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/", "mechanics/", "server.py", "bot.py")
 _ASYNC_SAFE_DB_ATTRS = frozenset({
     "adb",
     "distributed_session_lock",
@@ -641,11 +640,17 @@ def _collect_db_imports(
             and node.module
             and (node.module == "db" or node.module.startswith("db."))
         ):
+            mod_dir = ROOT.joinpath(*node.module.split("."))
             for al in node.names:
                 if al.name == "*":
                     continue
                 bound = al.asname or al.name
-                if node.module == "db" and al.name in subs:
+                is_submod_name = (
+                    (node.module == "db" and al.name in subs)
+                    or (mod_dir / f"{al.name}.py").is_file()
+                    or (mod_dir / al.name / "__init__.py").is_file()
+                )
+                if is_submod_name:
                     aliases.add(bound)
                 else:
                     symbols[bound] = al.name
@@ -727,12 +732,28 @@ def _dotted_attr_chain(expr: ast.AST) -> Optional[str]:
     return None
 
 
+def _collect_sqlite3_imports(nodes: Iterable[ast.AST]) -> Tuple[Set[str], Set[str]]:
+    """Collect aliases of `import sqlite3` and `from sqlite3 import connect` bindings in a block."""
+    sq_aliases: Set[str] = set()
+    connect_syms: Set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for al in node.names:
+                if al.name == "sqlite3":
+                    sq_aliases.add(al.asname or "sqlite3")
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "sqlite3":
+            for al in node.names:
+                if al.name == "connect":
+                    connect_syms.add(al.asname or "connect")
+    return sq_aliases, connect_syms
+
+
 def analyze_sync_db_in_async(
     path: Path,
     rel: str,
     pure_helpers: Optional[Set[str]] = None,
 ) -> List[Finding]:
-    """Flag direct blocking db.* calls inside `async def` (offload via `await adb(...)`)."""
+    """Flag direct blocking db.* or sqlite3.connect() calls inside `async def` (offload via `await adb(...)`)."""
     norm_rel = rel.replace("\\", "/")
     if not norm_rel.startswith(_SYNC_DB_ASYNC_PREFIXES):
         return []
@@ -759,39 +780,49 @@ def analyze_sync_db_in_async(
             stack.extend(ast.iter_child_nodes(node))
         return stmts
 
-    mod_aliases, mod_symbols = _collect_db_imports(_iter_direct_imports(tree.body))
+    mod_imps = _iter_direct_imports(tree.body)
+    mod_aliases, mod_symbols = _collect_db_imports(mod_imps)
+    mod_sq_aliases, mod_sq_connect = _collect_sqlite3_imports(mod_imps)
 
     def _scan_async_fn(
         fn: ast.AsyncFunctionDef,
         qualname: str,
         parent_aliases: Set[str],
         parent_symbols: Dict[str, str],
+        parent_sq_aliases: Set[str],
+        parent_sq_connect: Set[str],
     ) -> None:
         local_stmts = _iter_direct_imports(fn.body)
         loc_aliases, loc_symbols = _collect_db_imports(local_stmts)
+        loc_sq_aliases, loc_sq_connect = _collect_sqlite3_imports(local_stmts)
         shadowed = _collect_local_bindings(fn)
         aliases = (parent_aliases - shadowed) | loc_aliases
         symbols = {k: v for k, v in parent_symbols.items() if k not in shadowed}
         symbols.update(loc_symbols)
+        sq_aliases = (parent_sq_aliases - shadowed) | loc_sq_aliases
+        sq_connect = (parent_sq_connect - shadowed) | loc_sq_connect
 
         def _visit(node: ast.AST) -> None:
             if node is not fn:
                 if isinstance(node, ast.AsyncFunctionDef):
-                    _scan_async_fn(node, f"{qualname}.{node.name}", aliases, symbols)
+                    _scan_async_fn(node, f"{qualname}.{node.name}", aliases, symbols, sq_aliases, sq_connect)
                     return
                 if isinstance(node, ast.FunctionDef):
                     for d in node.decorator_list:
                         _visit(d)
                     for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
                         _visit(d)
-                    # Recurse only into nested async defs inside this sync helper, scoping any local imports to its body.
-                    fn_aliases, fn_symbols = _collect_db_imports(_iter_direct_imports(node.body))
+                    fn_imps = _iter_direct_imports(node.body)
+                    fn_aliases, fn_symbols = _collect_db_imports(fn_imps)
+                    fn_sq_aliases, fn_sq_connect = _collect_sqlite3_imports(fn_imps)
                     fn_shadowed = _collect_local_bindings(node)
                     sub_aliases = (aliases - fn_shadowed) | fn_aliases
                     sub_symbols = {k: v for k, v in symbols.items() if k not in fn_shadowed}
                     sub_symbols.update(fn_symbols)
+                    sub_sq_aliases = (sq_aliases - fn_shadowed) | fn_sq_aliases
+                    sub_sq_connect = (sq_connect - fn_shadowed) | fn_sq_connect
                     for sub in node.body:
-                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", sub_aliases, sub_symbols)
+                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", sub_aliases, sub_symbols, sub_sq_aliases, sub_sq_connect)
                     return
                 if isinstance(node, ast.Lambda):
                     for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
@@ -799,9 +830,28 @@ def analyze_sync_db_in_async(
                     return
                 if isinstance(node, ast.ClassDef):
                     for sub in node.body:
-                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", aliases, symbols)
+                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", aliases, symbols, sq_aliases, sq_connect)
                     return
                 if isinstance(node, ast.Call):
+                    is_sq_connect = False
+                    if (
+                        isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "connect"
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id in sq_aliases
+                    ):
+                        is_sq_connect = True
+                    elif isinstance(node.func, ast.Name) and node.func.id in sq_connect:
+                        is_sq_connect = True
+                    if is_sq_connect and not _is_suppressed_line(lines, node.lineno, "sync-db-in-async"):
+                        findings.append(Finding(
+                            norm_rel,
+                            node.lineno,
+                            "sync-db-in-async",
+                            qualname,
+                            "blocking `sqlite3.connect()` called inside async def; offload via `await adb(...)`",
+                        ))
+
                     fn_name: Optional[str] = None
                     via_alias = False
                     if isinstance(node.func, ast.Attribute):
@@ -846,31 +896,37 @@ def analyze_sync_db_in_async(
         scope_prefix: str,
         parent_aliases: Set[str],
         parent_symbols: Dict[str, str],
+        parent_sq_aliases: Set[str],
+        parent_sq_connect: Set[str],
     ) -> None:
         if isinstance(node, ast.AsyncFunctionDef):
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
-            _scan_async_fn(node, q, parent_aliases, parent_symbols)
+            _scan_async_fn(node, q, parent_aliases, parent_symbols, parent_sq_aliases, parent_sq_connect)
             return
         if isinstance(node, ast.FunctionDef):
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
-            fn_aliases, fn_symbols = _collect_db_imports(_iter_direct_imports(node.body))
+            fn_imps = _iter_direct_imports(node.body)
+            fn_aliases, fn_symbols = _collect_db_imports(fn_imps)
+            fn_sq_aliases, fn_sq_connect = _collect_sqlite3_imports(fn_imps)
             fn_shadowed = _collect_local_bindings(node)
             sub_aliases = (parent_aliases - fn_shadowed) | fn_aliases
             sub_symbols = {k: v for k, v in parent_symbols.items() if k not in fn_shadowed}
             sub_symbols.update(fn_symbols)
+            sub_sq_aliases = (parent_sq_aliases - fn_shadowed) | fn_sq_aliases
+            sub_sq_connect = (parent_sq_connect - fn_shadowed) | fn_sq_connect
             for sub in node.body:
-                _scan_for_nested_async(sub, q, sub_aliases, sub_symbols)
+                _scan_for_nested_async(sub, q, sub_aliases, sub_symbols, sub_sq_aliases, sub_sq_connect)
             return
         if isinstance(node, ast.ClassDef):
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
             for sub in node.body:
-                _scan_for_nested_async(sub, q, parent_aliases, parent_symbols)
+                _scan_for_nested_async(sub, q, parent_aliases, parent_symbols, parent_sq_aliases, parent_sq_connect)
             return
         for child in ast.iter_child_nodes(node):
-            _scan_for_nested_async(child, scope_prefix, parent_aliases, parent_symbols)
+            _scan_for_nested_async(child, scope_prefix, parent_aliases, parent_symbols, parent_sq_aliases, parent_sq_connect)
 
     for item in tree.body:
-        _scan_for_nested_async(item, "", mod_aliases, mod_symbols)
+        _scan_for_nested_async(item, "", mod_aliases, mod_symbols, mod_sq_aliases, mod_sq_connect)
     return findings
 
 
@@ -1037,80 +1093,171 @@ def _extract_registered_table_names(registry_path: Path, *, include_global: bool
     return names
 
 
+def _extract_ddl_strings_from_module(tree: ast.Module, only_named_ddl: bool = False) -> List[Tuple[str, int, str]]:
+    """Yield `(sql_text, start_line, context_label)` from SCHEMA, SCHEMA_MIGRATIONS, or `*_DDL*` bindings."""
+    out: List[Tuple[str, int, str]] = []
+
+    def _collect_str_nodes(node: Optional[ast.AST], label: str) -> None:
+        if node is None:
+            return
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            out.append((node.value, getattr(node, "lineno", 1) or 1, label))
+        elif isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            for elt in node.elts:
+                _collect_str_nodes(elt, label)
+        elif isinstance(node, ast.Call):
+            for arg in node.args:
+                _collect_str_nodes(arg, label)
+
+    for stmt in tree.body:
+        target_name: Optional[str] = None
+        val_node: Optional[ast.AST] = None
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            target_name = stmt.target.id
+            val_node = stmt.value
+        elif isinstance(stmt, ast.Assign):
+            for t in stmt.targets:
+                if isinstance(t, ast.Name):
+                    target_name = t.id
+                    val_node = stmt.value
+                    break
+        elif (
+            not only_named_ddl
+            and isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and stmt.value.func.attr in ("append", "extend")
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == "SCHEMA_MIGRATIONS"
+        ):
+            _collect_str_nodes(stmt.value, "SCHEMA_MIGRATIONS")
+            continue
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for sub in ast.walk(stmt):
+                if (
+                    isinstance(sub, ast.Constant)
+                    and isinstance(sub.value, str)
+                    and re.search(r"CREATE\s+(?:VIRTUAL\s+)?TABLE", sub.value, re.IGNORECASE)
+                ):
+                    out.append((sub.value, getattr(sub, "lineno", stmt.lineno) or 1, stmt.name))
+            continue
+
+        if target_name and val_node is not None:
+            if only_named_ddl:
+                if "DDL" in target_name.upper():
+                    _collect_str_nodes(val_node, target_name)
+            elif target_name in ("SCHEMA", "SCHEMA_MIGRATIONS") or "DDL" in target_name.upper():
+                _collect_str_nodes(val_node, target_name)
+    return out
+
+
 def analyze_unregistered_session_tables(
     db_core_path: Optional[Path] = None,
     registry_path: Optional[Path] = None,
     rel: str = "db/core.py",
 ) -> List[Finding]:
-    """Flag any SCHEMA table in db/core/schema.py (or db/core.py) with a `session_id` column missing from SESSION_TABLE_REGISTRY / FTS5_VIRTUAL_TABLES."""
+    """Flag any SCHEMA / migration / *_DDL table with a `session_id` column missing from SESSION_TABLE_REGISTRY / FTS5_VIRTUAL_TABLES."""
     schema_pkg_p = ROOT / "db" / "core" / "schema.py"
     if db_core_path is not None:
         core_p = db_core_path
+        inspect_extra_db_files = False
     elif schema_pkg_p.exists():
         core_p = schema_pkg_p
         rel = "db/core/schema.py"
+        inspect_extra_db_files = True
     else:
         core_p = ROOT / "db" / "core.py"
+        inspect_extra_db_files = False
     reg_p = registry_path or (ROOT / "db" / "registry.py")
     if not core_p.exists() or not reg_p.exists():
         return []
     try:
-        core_source = core_p.read_text(encoding="utf-8")
-        core_tree = ast.parse(core_source, filename=str(core_p))
         registered = _extract_registered_table_names(reg_p, include_global=False)
     except (SyntaxError, UnicodeDecodeError, OSError):
         return []
 
-    schema_str: Optional[str] = None
-    schema_start_line = 1
-    for stmt in core_tree.body:
-        val_node: Optional[ast.AST] = None
-        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "SCHEMA":
-            val_node = stmt.value
-        elif isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "SCHEMA" for t in stmt.targets):
-            val_node = stmt.value
-        if isinstance(val_node, ast.Constant) and isinstance(val_node.value, str):
-            schema_str = val_node.value
-            schema_start_line = getattr(val_node, "lineno", stmt.lineno) or stmt.lineno
-            break
-    if not schema_str:
-        return []
+    candidate_sources: List[Tuple[Path, str, bool]] = [(core_p, rel.replace("\\", "/"), False)]
+    dropped_tables: Set[str] = set()
+    drop_re = re.compile(r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 
-    core_lines = core_source.splitlines()
+    if inspect_extra_db_files:
+        mig_p = ROOT / "db" / "core" / "migrations.py"
+        if mig_p.exists():
+            candidate_sources.append((mig_p, "db/core/migrations.py", False))
+        db_dir = ROOT / "db"
+        if db_dir.is_dir():
+            for sub_p in sorted(db_dir.rglob("*.py")):
+                sub_rel = str(sub_p.relative_to(ROOT)).replace("\\", "/")
+                if sub_p in (core_p, mig_p):
+                    continue
+                candidate_sources.append((sub_p, sub_rel, True))
+        for drop_src_p in (mig_p, ROOT / "db" / "core" / "migrations_backfills.py"):
+            if drop_src_p.exists():
+                try:
+                    raw_drop = drop_src_p.read_text(encoding="utf-8")
+                    for dm in drop_re.finditer(raw_drop):
+                        dropped_tables.add(dm.group(1).strip().lower())
+                except OSError:
+                    pass
+        # Exclude FTS5 rebuild drops that remain live in SCHEMA
+        try:
+            schema_txt = core_p.read_text(encoding="utf-8")
+            create_any_re = re.compile(
+                r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+                re.IGNORECASE,
+            )
+            live_in_schema = {m.group(1).strip().lower() for m in create_any_re.finditer(schema_txt)}
+            dropped_tables -= live_in_schema
+        except OSError:
+            pass
+
     findings: List[Finding] = []
+    seen_reported: Set[Tuple[str, str]] = set()
     create_re = re.compile(
         r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:USING\s+[A-Za-z0-9_]+\s*)?\(",
         re.IGNORECASE,
     )
-    for m in create_re.finditer(schema_str):
-        tname = m.group(1).strip().lower()
-        open_idx = m.end() - 1
-        depth = 0
-        end_idx = len(schema_str)
-        for pos in range(open_idx, len(schema_str)):
-            ch = schema_str[pos]
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0:
-                    end_idx = pos
-                    break
-        body = schema_str[open_idx + 1 : end_idx]
-        if not re.search(r"\bsession_id\b", body, re.IGNORECASE):
+
+    for src_path, src_rel, only_ddl in candidate_sources:
+        try:
+            src_text = src_path.read_text(encoding="utf-8")
+            src_tree = ast.parse(src_text, filename=str(src_path))
+        except (SyntaxError, UnicodeDecodeError, OSError):
             continue
-        if tname in registered:
-            continue
-        lineno = schema_start_line + schema_str[: m.start()].count("\n")
-        if _is_suppressed_line(core_lines, lineno, "unregistered-session-table"):
-            continue
-        findings.append(Finding(
-            rel.replace("\\", "/"),
-            lineno,
-            "unregistered-session-table",
-            "SCHEMA",
-            f"table '{tname}' has a `session_id` column in SCHEMA but is missing from db/registry.py (SESSION_TABLE_REGISTRY)",
-        ))
+        src_lines = src_text.splitlines()
+        for sql_str, start_line, ctx_label in _extract_ddl_strings_from_module(src_tree, only_named_ddl=only_ddl):
+            for m in create_re.finditer(sql_str):
+                tname = m.group(1).strip().lower()
+                if tname in dropped_tables or tname.endswith("__new"):
+                    continue
+                open_idx = m.end() - 1
+                depth = 0
+                end_idx = len(sql_str)
+                for pos in range(open_idx, len(sql_str)):
+                    ch = sql_str[pos]
+                    if ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = pos
+                            break
+                body = sql_str[open_idx + 1 : end_idx]
+                if not re.search(r"\bsession_id\b", body, re.IGNORECASE):
+                    continue
+                if tname in registered or (src_rel, tname) in seen_reported:
+                    continue
+                lineno = start_line + sql_str[: m.start()].count("\n")
+                if _is_suppressed_line(src_lines, lineno, "unregistered-session-table"):
+                    continue
+                seen_reported.add((src_rel, tname))
+                findings.append(Finding(
+                    src_rel,
+                    lineno,
+                    "unregistered-session-table",
+                    ctx_label,
+                    f"table '{tname}' has a `session_id` column in {ctx_label} but is missing from db/registry.py (SESSION_TABLE_REGISTRY)",
+                ))
     return findings
 
 
@@ -1549,9 +1696,14 @@ def run_pylint(targets: List[str]) -> List[Finding]:
         "--score=n", "--persistent=n", *targets,
     ]
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode & 32:  # pylint usage error
-        print(proc.stdout[-2000:], proc.stderr[-2000:], sep="\n")
-        raise SystemExit("pylint failed to run (usage error)")
+    stderr_txt = proc.stderr or ""
+    if (
+        (proc.returncode & 32)
+        or "No module named pylint" in stderr_txt
+        or (proc.returncode != 0 and not proc.stdout.strip() and stderr_txt.strip())
+    ):
+        print(proc.stdout[-2000:], stderr_txt[-2000:], sep="\n")
+        raise SystemExit("pylint failed to run (missing in interpreter or usage error)")
     out: List[Finding] = []
     for raw in proc.stdout.splitlines():
         m = _PYLINT_LINE.match(raw.strip())
@@ -1611,15 +1763,65 @@ def _counts(findings: List[Finding]) -> Dict[str, int]:
 _HOOK_MARKER = "# installed-by: scripts/static_check.py"
 
 
+def analyze_test_db_isolation(path: Path, rel: str) -> List[Finding]:
+    """Lint test/simulator modules for ineffective `os.environ['HIKAYAT_DB_PATH']` or hardcoded `hikayat.db` opens."""
+    norm_rel = rel.replace("\\", "/")
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return []
+    lines = source.splitlines()
+    findings: List[Finding] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Store)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "environ"
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == "os"
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value == "HIKAYAT_DB_PATH"
+        ):
+            if not _is_suppressed_line(lines, node.lineno, "unisolated-test-db"):
+                findings.append(Finding(
+                    norm_rel,
+                    node.lineno,
+                    "unisolated-test-db",
+                    "<test>",
+                    "mutating os.environ['HIKAYAT_DB_PATH'] after importing db does not redirect db.DB_PATH; use db.set_db_path(...) or db.use_temporary_db(...)",
+                ))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "connect"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and Path(node.args[0].value).name == "hikayat.db"
+        ):
+            if not _is_suppressed_line(lines, node.lineno, "unisolated-test-db"):
+                findings.append(Finding(
+                    norm_rel,
+                    node.lineno,
+                    "unisolated-test-db",
+                    "<test>",
+                    "hardcoded sqlite3.connect('hikayat.db') in test; use tmp_path or db.use_temporary_db(...)",
+                ))
+    return findings
+
+
 def _install_hook() -> int:
     proc = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT, capture_output=True, text=True)
     if proc.returncode != 0:
         print("static_check: not a git repository; hook not installed.")
         return 1
+    py_exe = str(Path(sys.executable)).replace("\\", "/")
     hook = (ROOT / proc.stdout.strip() / "pre-commit").resolve()
     if hook.exists() and _HOOK_MARKER not in hook.read_text(encoding="utf-8", errors="replace"):
         print(f"static_check: {hook} already exists and was not created by this script; leaving it untouched.")
-        print("Add this line to it manually:  python scripts/static_check.py --staged || exit 1")
+        print(f'Add this line to it manually:  "{py_exe}" scripts/static_check.py --staged || exit 1')
         return 1
     hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_text(
@@ -1627,7 +1829,7 @@ def _install_hook() -> int:
         f"{_HOOK_MARKER}\n"
         "# Blocks commits that introduce NameError/UnboundLocalError/bad-import/bad-call bugs.\n"
         "# Bypass once (not recommended): git commit --no-verify\n"
-        "python scripts/static_check.py --staged || {\n"
+        f'"{py_exe}" scripts/static_check.py --staged || {{\n'
         "  echo \"\"; echo \"Commit blocked by scripts/static_check.py (see findings above).\"; exit 1;\n"
         "}\n",
         encoding="utf-8",
@@ -1646,6 +1848,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("files", nargs="*", help="explicit files to check (default: whole engine)")
     ap.add_argument("--changed", action="store_true", help="only files changed vs HEAD")
     ap.add_argument("--staged", action="store_true", help="only staged files in git index (for pre-commit)")
+    ap.add_argument("--include-tests", action="store_true", help="also lint tests/ for unisolated DB path writes")
     ap.add_argument("--update-baseline", action="store_true", help="accept all current findings")
     ap.add_argument("--no-pylint", action="store_true", help="skip pylint (custom analyzer only)")
     ap.add_argument("--all", action="store_true", help="print baselined findings too")
@@ -1666,6 +1869,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         targets = _changed_targets()
     else:
         targets = _all_targets()
+    if args.include_tests and (ROOT / "tests").is_dir():
+        seen_t = set(targets)
+        for tp in sorted((ROOT / "tests").rglob("*.py")):
+            rp = tp.resolve()
+            if rp not in seen_t:
+                targets.append(rp)
+                seen_t.add(rp)
+        if (ROOT / "scripts").is_dir():
+            for sp in sorted((ROOT / "scripts").glob("simulate_*.py")):
+                rp = sp.resolve()
+                if rp not in seen_t:
+                    targets.append(rp)
+                    seen_t.add(rp)
     if not targets:
         print("static_check: no Python files to check.")
         return 0
@@ -1673,16 +1889,24 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     findings: List[Finding] = []
     pure_helpers = _extract_pure_db_helpers()
+    prod_rels: List[str] = []
     for p, rel in zip(targets, rels):
+        norm_r = rel.replace("\\", "/")
+        if norm_r.startswith("tests/"):
+            findings.extend(analyze_test_db_isolation(p, rel))
+            continue
+        if norm_r.startswith("scripts/simulate_"):
+            findings.extend(analyze_test_db_isolation(p, rel))
+        prod_rels.append(rel)
         findings.extend(analyze_possibly_unbound(p, rel))
         findings.extend(analyze_sync_db_in_async(p, rel, pure_helpers=pure_helpers))
         findings.extend(analyze_raw_conn_commit(p, rel))
         findings.extend(analyze_unused_imports(p, rel))
         findings.extend(analyze_shadowing_local_imports(p, rel))
-    if any(r.replace("\\", "/") in ("db/core.py", "db/core/schema.py", "db/registry.py") for r in rels):
+    if any(r.replace("\\", "/").startswith("db/") for r in prod_rels):
         findings.extend(analyze_unregistered_session_tables())
-    if not args.no_pylint:
-        findings.extend(run_pylint(rels))
+    if not args.no_pylint and prod_rels:
+        findings.extend(run_pylint(prod_rels))
     findings.sort(key=lambda f: (f.path, f.line, f.check))
 
     if args.update_baseline:

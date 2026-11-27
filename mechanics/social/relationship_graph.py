@@ -455,6 +455,7 @@ def form_tie(
 
         # 1. Incest guard
         if tie_type in ROMANTIC_TYPES:
+            from mechanics.social.races import is_folklore_beast_race
             _fox_tie_rows = c.execute(
                 """SELECT c_row.race FROM social_persons sp
                    JOIN contacts c_row ON c_row.session_id = sp.session_id
@@ -462,8 +463,8 @@ def form_tie(
                    WHERE sp.session_id = ? AND sp.person_key IN (?, ?)""",
                 (session_id, a_canon, b_canon),
             ).fetchall()
-            if any(str(r["race"] or "").strip().lower() == "kitsune:myobu_fox" for r in _fox_tie_rows):
-                raise ValueError("Cannot form romantic tie while Kitsune is in non-humanoid Myōbu Spirit Fox form (kitsune:myobu_fox).")
+            if any(is_folklore_beast_race(str(r["race"] or "")) for r in _fox_tie_rows):
+                raise ValueError("Cannot form romantic tie while NPC is in non-humanoid folklore beast form.")
             if is_incestuous(session_id, a_canon, b_canon, conn=c):
                 raise ValueError(f"Incest guard blocked romantic tie between {a_canon} and {b_canon}")
 
@@ -1756,8 +1757,8 @@ def seed_contact_social_graph(
             provided_partner = rom.get("current_partner")
 
         from mechanics.social.roster_tags import npc_is_folklore_villager
-        from mechanics.social.races import is_myobu_fox_race
-        is_explicitly_single = bool(npc_is_folklore_villager(contact) or is_myobu_fox_race(contact.get("race")))
+        from mechanics.social.races import is_folklore_beast_race
+        is_explicitly_single = bool(npc_is_folklore_villager(contact) or is_folklore_beast_race(contact.get("race")))
         if isinstance(contact.get("relations"), dict):
             rom = contact["relations"].get("romance", {})
             if rom.get("status") == "Single" and not provided_partner:

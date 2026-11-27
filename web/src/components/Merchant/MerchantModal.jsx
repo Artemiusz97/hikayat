@@ -269,12 +269,24 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         </div>
 
         {/* Specialist Store Directory Switcher */}
-        {Array.isArray(shop?.available_stores) && shop.available_stores.length > 1 && (
+        {((Array.isArray(shop?.available_stores) && shop.available_stores.length > 1) || shop?.is_night_market) && (
           <div className="px-4 py-2 border-b border-fantasy-border/35 flex flex-wrap items-center gap-1.5 shrink-0">
             <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400 mr-1 shrink-0">
-              {t('merchant.bazaar_stalls', 'Bazaar Stalls:')}
+              {shop?.is_night_market
+                ? t('spirit_realm.night_market_wings_title', '4-Wing Night Market Stalls')
+                : t('merchant.bazaar_stalls', 'Bazaar Stalls:')}
             </span>
-            {shop.available_stores.map((st) => {
+            {shop?.twin_moon_fair_active && (
+              <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-amber-950/70 text-amber-300 border border-amber-600/60">
+                🌙 {t('spirit_realm.night_market_fair_discount', 'Twin-Moon Fair (-15%)')}
+              </span>
+            )}
+            {shop?.drifting_lanterns_active && (
+              <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-indigo-950/70 text-indigo-200 border border-indigo-600/60">
+                🏮 {t('spirit_realm.night_market_lantern_tide', 'Drifting Lanterns Tide — ferryman fee waived')}
+              </span>
+            )}
+            {(shop?.available_stores || []).map((st) => {
               const isSelected = (shop?.merchant_type || selectedStoreType) === st.type;
               return (
                 <MotionButton

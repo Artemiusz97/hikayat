@@ -30,7 +30,7 @@ EXCLUDE_DIRS = {
     '__pycache__', '.pytest_cache',
     'node_modules', '.git', '.idea', '.vscode',
     'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', 'custom_fonts', '_norton_', 'reports',
-    'crash_reports', 'htmlcov'
+    'crash_reports', 'htmlcov', '.local', 'logs'
 }
 
 EXCLUDE_EXTS = {
@@ -56,6 +56,7 @@ def collect_release_files(base_dir: str = BASE_DIR) -> tuple[list[tuple[str, str
         bytes([99, 58, 47, 117, 115, 101, 114, 115]).decode('ascii'),
     ]
     personal_info_pattern = re.compile('|'.join(re.escape(t) for t in _p_tokens), re.IGNORECASE)
+    secret_or_lan_pattern = re.compile(r"(?:192\.168\.\d+\.\d+|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})")
     violations: list[tuple[str, int]] = []
 
     for root, dirs, files in os.walk(base_dir):
@@ -76,12 +77,12 @@ def collect_release_files(base_dir: str = BASE_DIR) -> tuple[list[tuple[str, str
             filepath = os.path.join(root, file)
             arcname = os.path.relpath(filepath, base_dir).replace(os.sep, '/')
 
-            # Check for personal path leaks in text files
+            # Check for personal path leaks or credentials in text files
             if not file.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.ico', '.exe', '.woff', '.woff2', '.ttf', '.otf')):
                 try:
                     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                         for line_idx, line in enumerate(f, 1):
-                            if personal_info_pattern.search(line):
+                            if personal_info_pattern.search(line) or secret_or_lan_pattern.search(line):
                                 violations.append((arcname, line_idx))
                 except Exception:
                     pass
@@ -93,7 +94,6 @@ def collect_release_files(base_dir: str = BASE_DIR) -> tuple[list[tuple[str, str
 
 def package_release(dry_run: bool = False) -> str:
     releases_dir = os.path.join(BASE_DIR, "releases")
-    os.makedirs(releases_dir, exist_ok=True)
     target_zip = os.path.join(releases_dir, f"hikayat-v{APP_VERSION}-clean.zip")
 
     files_to_pack, violations = collect_release_files(BASE_DIR)
@@ -110,6 +110,7 @@ def package_release(dry_run: bool = False) -> str:
         print(f"[DRY-RUN] Target: {target_zip}")
         return target_zip
 
+    os.makedirs(releases_dir, exist_ok=True)
     if os.path.exists(target_zip):
         os.remove(target_zip)
 

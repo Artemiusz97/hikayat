@@ -75,7 +75,7 @@ def build_merchant_embed(
 
 
 class BazaarStoreSelectDropdown(discord.ui.Select):
-    def __init__(self, cog: "AdventureCog", session_id: int, available_stores: list[dict]):
+    def __init__(self, cog: "AdventureCog", session_id: int, available_stores: list[dict], *, placeholder: str = "Choose a shop or merchant stall to visit..."):
         self.cog = cog
         self.session_id = session_id
         options = []
@@ -86,7 +86,7 @@ class BazaarStoreSelectDropdown(discord.ui.Select):
                 description=store.get("description", "")[:100],
                 emoji=store.get("emoji", "🛍️")
             ))
-        super().__init__(placeholder="Choose a shop or merchant stall to visit...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder=placeholder[:150], min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         selected_type = self.values[0]
@@ -99,11 +99,11 @@ class BazaarStoreSelectDropdown(discord.ui.Select):
 
 
 class BazaarStoreSelectView(SessionRestrictedView):
-    def __init__(self, cog: "AdventureCog", session_id: int, available_stores: list[dict], user_id: Optional[int] = None):
+    def __init__(self, cog: "AdventureCog", session_id: int, available_stores: list[dict], user_id: Optional[int] = None, *, placeholder: str = "Choose a shop or merchant stall to visit..."):
         super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
-        self.add_item(BazaarStoreSelectDropdown(cog, session_id, available_stores))
+        self.add_item(BazaarStoreSelectDropdown(cog, session_id, available_stores, placeholder=placeholder))
 
 
 async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interaction: discord.Interaction):
@@ -135,10 +135,18 @@ async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interact
             return
 
     from mechanics.world.locations import get_available_merchant_types_for_location
+    from mechanics.world.locations.folklore_spirit_realm import is_node_in_spirit_realm
     available_stores = get_available_merchant_types_for_location(current_loc, scen_key=scen_key)
+    cur_nid = str(session.get("current_node_id") or "").strip()
+    is_spirit_mkt = await adb(is_node_in_spirit_realm, session_id, cur_nid) if cur_nid else False
 
     if len(available_stores) > 1:
-        view = BazaarStoreSelectView(cog, session_id, available_stores, user_id=interaction.user.id)
+        ph = "Choose a shop or merchant stall to visit..."
+        if is_spirit_mkt:
+            import localization
+            u_lang = str(session.get("narration_language") or session.get("language") or "en")
+            ph = localization.get_spirit_court_label("night_market_wing_selector", u_lang)
+        view = BazaarStoreSelectView(cog, session_id, available_stores, user_id=interaction.user.id, placeholder=ph)
         await interaction.response.send_message(
             f"🏛️ **Marketplace Directory — {current_loc}**\nSelect a specialist shop or stall to browse their wares:",
             view=view,
@@ -330,15 +338,15 @@ class MerchantView(SessionRestrictedView):
         buy.callback = self._on_buy
         self.add_item(buy)
 
-        sell = discord.ui.Button(label="Sell", emoji="💰", style=discord.ButtonStyle.primary)
-        sell.callback = self._on_sell
-        self.add_item(sell)
-
-        haggle = discord.ui.Button(label="Haggle", emoji="🤝", style=discord.ButtonStyle.secondary)
-        haggle.callback = self._on_haggle
-        self.add_item(haggle)
-
         if not self.is_phone_shop:
+            sell = discord.ui.Button(label="Sell", emoji="💰", style=discord.ButtonStyle.primary)
+            sell.callback = self._on_sell
+            self.add_item(sell)
+
+            haggle = discord.ui.Button(label="Haggle", emoji="🤝", style=discord.ButtonStyle.secondary)
+            haggle.callback = self._on_haggle
+            self.add_item(haggle)
+
             ask = discord.ui.Button(label="Ask", emoji="👂", style=discord.ButtonStyle.secondary)
             ask.callback = self._on_ask
             self.add_item(ask)

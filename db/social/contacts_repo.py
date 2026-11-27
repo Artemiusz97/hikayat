@@ -3,6 +3,8 @@ from __future__ import annotations
 import db
 import hashlib
 import json
+import logging
+import sqlite3
 import threading
 import time
 from typing import Any
@@ -10,12 +12,14 @@ from ..core import (UnitOfWork, get_conn, is_in_readonly_uow)
 from .contacts_enrichment import _enrich_contact_basic_info, _is_empty_info_val, _merge_basic_info_safely
 from .households_factions import _parse_household_row, get_household_by_id
 
+log = logging.getLogger(__name__)
+
 def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 0,
                    basic_info: dict = None, delta_score: int = 0, track: str = None,
                    new_traits: list = None, new_preferences: list = None, race: str = "", gender: str = "", appearance: dict = None,
                    new_memory: str = None, new_general_memory: str = None, narrative_text: str = "",
                    open_thread: str = "", emotional_tone: str = "", intimate_profile: dict = None,
-                   household_role: str | None = None) -> dict:
+                   household_role: str | None = None, scenario: str | None = None) -> dict:
     import mechanics.social.persona as persona
     import namegen
 
@@ -71,9 +75,14 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
     if not npc_id or not name:
         return {}
 
-    sess = db.get_session(session_id)
-    scen = sess.get("scenario", "fantasy") if sess else "fantasy"
+    sess = None
+    if scenario and str(scenario).strip():
+        scen = str(scenario).strip()
+    else:
+        sess = db.get_session(session_id)
+        scen = sess.get("scenario", "fantasy") if sess else "fantasy"
     import mechanics.social.relationships as relationships
+    import scenario_data
     n_role = (basic_info.get("role") if isinstance(basic_info, dict) else "") or ""
     n_desc = (basic_info.get("description") if isinstance(basic_info, dict) else "") or ""
     n_grade = (basic_info.get("grade") if isinstance(basic_info, dict) else "") or ""
@@ -82,6 +91,12 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
     is_promoted_adult_family = (
         str(household_role or "").strip().lower() in ("father", "mother")
         or bool(isinstance(basic_info, dict) and basic_info.get("is_adult_family"))
+    )
+    skip_sess_lookup = bool(
+        scenario
+        and str(scenario).strip()
+        and not scenario_data.is_anomalous_incursions_scenario(scen)
+        and not scenario_data.is_anomalous_high_school_scenario(scen)
     )
     if not is_promoted_adult_family and not relationships.is_contact_eligible(
         name=name,
@@ -93,6 +108,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
         social_role_type=n_srt,
         age_group=n_age_group,
         is_adult_family=is_promoted_adult_family,
+        preloaded_session=sess,
+        skip_session_lookup=skip_sess_lookup,
     ):
         return {}
 
@@ -266,7 +283,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 cur_track = str(track).strip().lower()
             else:
                 cur_track = existing_track
-            if str(cur_race or "").strip().lower() == "kitsune:myobu_fox" and cur_track == "romantic":
+            if str(cur_race or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid") and cur_track == "romantic":
                 cur_track = "platonic"
 
             existing_gender = existing_dict.get("gender")
@@ -367,6 +384,9 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 elif k == "had_first_time_with_player" and cur_app.get(k):
                     cur_prof[k] = cur_app[k]
                 cur_app.pop(k, None)
+            if cur_app.get("openness") not in (None, "") and not cur_prof.get("erotic_openness"):
+                cur_prof["erotic_openness"] = cur_app["openness"]
+            cur_app.pop("openness", None)
 
             if "tracks" not in cur_prof or not isinstance(cur_prof["tracks"], dict):
                 cur_prof["tracks"] = {}
@@ -418,7 +438,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                     race=cur_race or "human",
                     gender=cur_gender or "female",
                     scenario=scen,
-                    openness=str(cur_prof.get("erotic_openness") or "moderate"),
+                    openness=str(cur_prof.get("erotic_openness") or cur_prof.get("openness") or "moderate"),
                     intercourse=cur_prof["tracks"].get("intercourse", "virgin"),
                     oral=cur_prof["tracks"].get("oral", "inexperienced"),
                     manual=cur_prof["tracks"].get("manual", "inexperienced"),
@@ -478,7 +498,6 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             for dfk in ("intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed", "anal_revealed"):
                 if cur_prof.get(dfk):
                     ret_app[dfk] = cur_prof[dfk]
-            cur_info = _enrich_contact_basic_info(conn, session_id, final_name, cur_info, scenario=scen, narrative_text=narrative_text)
             if cur_prof.get("had_first_time_with_player"):
                 ret_app["had_first_time_with_player"] = cur_prof["had_first_time_with_player"]
 
@@ -550,7 +569,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 seed_str=f"{name}_{info.get('description', '')}"
             )
             cur_track = track if (track and str(track).strip()) else "platonic"
-            if str(cur_race or "").strip().lower() == "kitsune:myobu_fox" and str(cur_track).strip().lower() == "romantic":
+            if str(cur_race or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid") and str(cur_track).strip().lower() == "romantic":
                 cur_track = "platonic"
             cur_gender = canonical_gender or info.get("gender") or gender or ""
             if cur_gender:
@@ -630,7 +649,9 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 elif k == "had_first_time_with_player" and app_dict.get(k):
                     prof_dict[k] = app_dict[k]
                 app_dict.pop(k, None)
-            info = _enrich_contact_basic_info(conn, session_id, name, info, scenario=scen, narrative_text=narrative_text)
+            if app_dict.get("openness") not in (None, "") and not prof_dict.get("erotic_openness"):
+                prof_dict["erotic_openness"] = app_dict["openness"]
+            app_dict.pop("openness", None)
 
             if "tracks" not in prof_dict or not isinstance(prof_dict["tracks"], dict):
                 prof_dict["tracks"] = {}
@@ -671,7 +692,6 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             for k in ("intercourse_experience", "oral_experience", "manual_experience", "anal_experience",
                       "past_intimate_history", "past_intimate_entries"):
                 app_dict.pop(k, None)
-            info = _enrich_contact_basic_info(conn, session_id, name, info, scenario=scen, narrative_text=narrative_text)
 
             cursor = conn.execute(
                 """INSERT INTO contacts (session_id, character_id, npc_id, name, basic_info_json,
@@ -727,7 +747,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                     race=cur_race or "human",
                     gender=cur_gender or "female",
                     scenario=scen,
-                    openness=str(prof_dict.get("erotic_openness") or "moderate"),
+                    openness=str(prof_dict.get("erotic_openness") or prof_dict.get("openness") or "moderate"),
                     intercourse=prof_dict["tracks"].get("intercourse", "virgin"),
                     oral=prof_dict["tracks"].get("oral", "inexperienced"),
                     manual=prof_dict["tracks"].get("manual", "inexperienced"),
@@ -888,10 +908,6 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
             if tc and tc.get("name"):
                 party_char_names.add(str(tc["name"]).strip().lower())
 
-        from mechanics.world.mobility import get_session_dialogue_partners
-        dialogue_partners = {p.lower() for p in get_session_dialogue_partners(sess)}
-
-        scene_narrative = str(sess.get("narrative") or "")
         for npc in unadded:
             n_name = game_engine._get_npc_name(npc)
             if not n_name or n_name.lower() in enemy_names or n_name.lower() in party_char_names:
@@ -1324,7 +1340,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                     )
                     _apply_contact_household_residence(session_id, d, hh, scen_key)
                     d["household_id"] = hh["id"]
-            elif not d.get("relations") or not d["relations"].get("family"):
+            elif (not d.get("relations") or not d["relations"].get("family")) and not is_in_readonly_uow():
                 resolving_set = _get_resolving_contacts_set()
                 resolving_set.add(session_id)
                 try:
@@ -1334,8 +1350,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                         try:
                             with get_conn() as conn:
                                 conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(d["relations"]), d["id"]))
-                        except Exception:
-                            pass
+                        except sqlite3.Error as exc:
+                            log.debug("Relations cache write skipped in get_contacts: %s", exc)
                 finally:
                     resolving_set.discard(session_id)
 
@@ -1464,7 +1480,7 @@ def update_contact_track(session_id: int, npc_id: str, new_track: str, character
                    AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
                 (session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id),
             ).fetchall()
-            if any(str(r["race"] or "").strip().lower() == "kitsune:myobu_fox" for r in _fox_chk):
+            if any(str(r["race"] or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid") for r in _fox_chk):
                 return False
     now = time.time()
     with get_conn() as conn:
@@ -1647,14 +1663,6 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
             conn, session_id, d.get("name", ""), raw_info,
             scenario=scen_key, narrative_text=scene_narrative
         )
-        if enriched_info != raw_info and d.get("id"):
-            try:
-                conn.execute(
-                    "UPDATE contacts SET basic_info_json=? WHERE id=?",
-                    (json.dumps(enriched_info), d["id"])
-                )
-            except Exception:
-                pass
     d["basic_info"] = enriched_info
     try:
         raw_traits = json.loads(d.get("unlocked_traits_json") or "[]")
@@ -1865,15 +1873,15 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
             )
             _apply_contact_household_residence(session_id, d, hh, scen_key)
             d["household_id"] = hh["id"]
-    elif not d.get("relations") or not d["relations"].get("family"):
+    elif (not d.get("relations") or not d["relations"].get("family")) and not is_in_readonly_uow():
         import mechanics.social.genealogy as genealogy
         d["relations"] = genealogy.ensure_contact_relations(d, session_id=session_id, scenario=scen_key)
         if session_id and d.get("id") and not is_in_readonly_uow():
             try:
                 with get_conn() as conn:
                     conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(d["relations"]), d["id"]))
-            except Exception:
-                pass
+            except sqlite3.Error as exc:
+                log.debug("Relations cache write skipped in get_contact: %s", exc)
 
     d["status_effects"] = (d.get("basic_info") or {}).get("status_effects") or []
     return d

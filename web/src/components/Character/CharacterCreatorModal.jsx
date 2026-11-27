@@ -2,6 +2,12 @@ import { useState, useEffect, useId, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Sparkles, Heart, Zap, Package, RotateCcw } from 'lucide-react';
 import { AcrylicModal, MotionButton } from '../Common/MotionPrimitives';
+import {
+  STATURE_OPTIONS,
+  getAllowedPhysiqueOptions,
+  healPhysiqueForSelection,
+  rollClientBuild,
+} from '../../utils/anatomyOptions';
 
 const STAT_KEYS = [
   { key: 'str', code: 'STR', label: 'Strength', emoji: '💪' },
@@ -38,6 +44,8 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const [race, setRace] = useState('Human');
   const [customRace, setCustomRace] = useState('');
   const [raceDescription, setRaceDescription] = useState('');
+  const [stature, setStature] = useState('');
+  const [physique, setPhysique] = useState('');
 
   const { t } = useTranslation();
   const creatorResId = useId();
@@ -55,6 +63,8 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
     setRace('Human');
     setCustomRace('');
     setRaceDescription('');
+    setStature('');
+    setPhysique('');
     setPreviewMediumSynergy('');
     setStats({ ...DEFAULT_STATS });
     setFocusedStat('STR');
@@ -76,6 +86,15 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
 
   const effectiveGender = gender === '__custom__' ? customGender.trim() || 'Non-binary' : gender;
   const effectiveRace = race === '__custom__' ? customRace.trim() || 'Human' : race;
+  const allowedPhysiques = getAllowedPhysiqueOptions(effectiveGender, stature, effectiveRace);
+
+  useEffect(() => {
+    if (!physique) return;
+    const healed = healPhysiqueForSelection(physique, effectiveGender, stature, effectiveRace);
+    if (healed !== physique) {
+      setPhysique(healed);
+    }
+  }, [physique, effectiveGender, stature, effectiveRace]);
 
   const handleResetStats = () => setStats({ ...DEFAULT_STATS });
 
@@ -104,6 +123,8 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
         gender: effectiveGender,
         race: effectiveRace,
         race_description: raceDescription.trim(),
+        ...(stature ? { stature } : {}),
+        ...(physique ? { physique } : {}),
         str: stats.str,
         per: stats.per,
         end: stats.end,
@@ -273,6 +294,68 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                       )}
                     </div>
                   )}
+
+                  {/* Optional Height & Physique Build Controls */}
+                  <div className="pt-2 border-t border-fantasy-border/40 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] uppercase tracking-wider font-bold text-gray-400">
+                        📐 {t('build.build_label', 'Physical Build')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rolled = rollClientBuild(effectiveRace, effectiveGender);
+                          setStature(rolled.stature);
+                          setPhysique(rolled.physique);
+                        }}
+                        className="text-[11px] text-fantasy-accent hover:text-amber-300 font-semibold transition-colors"
+                      >
+                        🎲 {t('build.roll_build', 'Roll Build')}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wider font-semibold text-gray-400 mb-1">
+                          {t('build.height_label', 'Height')}
+                        </label>
+                        <select
+                          value={stature}
+                          onChange={(e) => {
+                            const nextStature = e.target.value;
+                            setStature(nextStature);
+                            if (physique) {
+                              setPhysique(healPhysiqueForSelection(physique, effectiveGender, nextStature, effectiveRace));
+                            }
+                          }}
+                          className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-fantasy-accent"
+                        >
+                          <option value="">{t('build.auto_roll', 'Auto-Roll')}</option>
+                          {STATURE_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {t(opt.i18nKey, opt.fallback)}{opt.rangeHint ? ` ${opt.rangeHint}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wider font-semibold text-gray-400 mb-1">
+                          {t('build.physique_label', 'Physique')}
+                        </label>
+                        <select
+                          value={physique}
+                          onChange={(e) => setPhysique(e.target.value)}
+                          className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-fantasy-accent"
+                        >
+                          <option value="">{t('build.auto_roll', 'Auto-Roll')}</option>
+                          {allowedPhysiques.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {t(opt.i18nKey, opt.fallback)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Live Derived Vitals Preview */}

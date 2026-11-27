@@ -35,6 +35,7 @@ from .connection import (
     _uow_added_table_groups_var,
     _uow_conn_var,
     _uow_db_path_var,
+    _uow_explicit_var,
     _uow_is_readonly_var,
     _uow_savepoint_seq,
     _uow_strict_readonly_var,
@@ -45,6 +46,7 @@ from .connection import (
     get_conn,
     get_main_event_loop,
     is_in_readonly_uow,
+    is_in_uow,
     release_distributed_lock,
     savepoint,
     set_db_path,
@@ -121,6 +123,8 @@ __all__ = [
     "WAL_MAINTENANCE_TURN_INTERVAL",
     "acquire_distributed_lock",
     "adb",
+    "call_with_supported_kwargs",
+    "callable_accepts_kwarg",
     "cleanup_simulation_db",
     "close_all_connections",
     "create_database_snapshot",
@@ -130,6 +134,7 @@ __all__ = [
     "init_db",
     "is_discord_snowflake",
     "is_in_readonly_uow",
+    "is_in_uow",
     "isolate_simulation_db",
     "maybe_run_wal_maintenance",
     "nullify_orphaned_implicated_contacts",
@@ -151,7 +156,11 @@ from . import (
     migrations_backfills as _mod_migrations_backfills,
     schema as _mod_schema,
 )
-from .module_proxy import install_submodule_proxy as _install_submodule_proxy
+from .module_proxy import (
+    call_with_supported_kwargs,
+    callable_accepts_kwarg,
+    install_submodule_proxy as _install_submodule_proxy,
+)
 
 _SUBMODULES = (
     _mod_schema,

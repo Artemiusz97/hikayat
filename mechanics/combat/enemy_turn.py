@@ -323,7 +323,12 @@ def resolve_enemy_combat_phase(ctx: Dict[str, Any]) -> None:
         t_uid_int = int(t_user_id or 0) if t_user_id else 0
         if t_uid_int:
             if t_uid_int not in equip_cache_by_uid:
-                equip_cache_by_uid[t_uid_int] = db.get_equipment(t_uid_int)
+                equip_cache_by_uid[t_uid_int] = db.call_with_supported_kwargs(
+                    db.get_equipment,
+                    t_uid_int,
+                    char=chosen_target if isinstance(chosen_target, dict) else None,
+                    session_id=session.get("id") if isinstance(session, dict) else None,
+                )
             t_equipped = equip_cache_by_uid[t_uid_int]
         else:
             t_equipped = {}

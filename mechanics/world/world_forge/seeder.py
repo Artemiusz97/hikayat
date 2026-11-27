@@ -11,8 +11,10 @@ Execution flow (called from cogs/adventure/cog.py::launch_opening_scene):
 
 
 import logging
+import os
 
 import db
+from db import adb
 import scenario_data
 
 log = logging.getLogger("hikayat.world_forge")
@@ -180,10 +182,13 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
         f"Respond with JSON matching this schema:\n{_WORLD_FORGE_SCHEMA}"
     )
 
-    _is_llm_mocked = hasattr(game_engine.call_llm_json, "_mock_name")
-    if not _is_llm_mocked:
+    _is_llm_mocked = (
+        hasattr(game_engine.call_llm_json, "_mock_name")
+        or not getattr(game_engine.call_llm_json, "__module__", "").startswith("game_engine")
+    )
+    if os.environ.get("HIKAYAT_TEST_MODE") == "1" and not _is_llm_mocked:
         fallback = _build_fallback_macro(factions, scen_key)
-        _persist_macro_world(session_id, fallback)
+        await adb(_persist_macro_world, session_id, fallback)
         return fallback
 
     from scenario_data import uses_nsfw_model
@@ -199,14 +204,14 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
             timeout=15.0,
         )
         if isinstance(result, dict) and result.get("macro_conflict"):
-            _persist_macro_world(session_id, result)
+            await adb(_persist_macro_world, session_id, result)
             return result
     except Exception as e:
         log.warning("[WorldForge] LLM Pass 0 failed (%s). Falling back to procedural macro-conflict.", e)
 
     # Graceful fallback: deterministic placeholder from faction notes
     fallback = _build_fallback_macro(factions, scen_key)
-    _persist_macro_world(session_id, fallback)
+    await adb(_persist_macro_world, session_id, fallback)
     return fallback
 
 
@@ -283,7 +288,6 @@ async def forge_world_state(session: dict, party: list) -> None:
     scen_key   = session.get("scenario", "fantasy")
 
     try:
-        from db import adb
         from mechanics.world.world_events.engine import seed_opening_world_events
         await adb(seed_opening_world_events, session_id, scen_key)
     except Exception as e:
@@ -294,8 +298,8 @@ async def forge_world_state(session: dict, party: list) -> None:
         return
 
     try:
-        # Step 1 — Deterministic Python (no await needed)
-        seed_diplomatic_matrix(session_id, scen_key)
+        # Step 1 — Deterministic Python offloaded from event loop
+        await adb(seed_diplomatic_matrix, session_id, scen_key)
     except Exception as e:
         log.error("[WorldForge] seed_diplomatic_matrix failed: %s", e, exc_info=True)
 

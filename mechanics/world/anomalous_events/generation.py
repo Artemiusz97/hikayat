@@ -294,6 +294,19 @@ ANOMALOUS_SAFE_HQ_FACILITY_IDS = {
     "loc_player_house",
     "loc_hidden_kitsune_village",
     "loc_hidden_bunian_village",
+    "loc_kitsune_foxfire_onsen",
+    "loc_kitsune_mask_theater",
+    "loc_kitsune_scroll_archive",
+    "loc_kitsune_blade_yard",
+    "fac_kitsune_guest_villa",
+    "loc_bunian_orchid_garden",
+    "loc_bunian_songket_wakaf",
+    "loc_bunian_silat_gelanggang",
+    "loc_bunian_canopy_observatory",
+    "fac_bunian_guest_house",
+    "loc_crossroads_night_market",
+    "loc_crossroads_tea_house",
+    "loc_crossroads_boundary_wharf",
 }
 
 
@@ -339,9 +352,12 @@ def roll_daily_anomalous_incursions(
         for n in nodes:
             if n.get("node_type") == "ROOM" and n.get("parent_id"):
                 rooms_by_parent.setdefault(str(n["parent_id"]), []).append(n)
+        from mechanics.world.locations.realms import get_node_realm_id_in_memory
         for n in nodes:
             if n.get("node_type") == "FACILITY":
                 nid = str(n.get("node_id") or "")
+                if get_node_realm_id_in_memory(nid, node_map) == "realm_veiled_spirit_world":
+                    continue
                 # Skip safe Agency HQs & Player House so incursions happen out in the city
                 from mechanics.world.locations.residences import is_excluded_from_random_incursions
                 if nid in ANOMALOUS_SAFE_HQ_FACILITY_IDS or (nid.startswith("loc_hq_") and nid != "loc_hq_containment_sector") or is_excluded_from_random_incursions(session_id, node_id=nid, parent_id=str(n.get("parent_id") or "")):
@@ -382,7 +398,17 @@ def roll_daily_anomalous_incursions(
         seed_data = get_scenario_seed_data(scen_key)
         for z in (seed_data.get("zones") or []):
             z_id = z.get("id", "")
-            if z_id == "zone_agency_hq" or (scenario_data.is_anomalous_high_school_scenario(scen_key) and z_id == "zone_school_campus"):
+            if z_id in (
+                "zone_agency_hq",
+                "zone_spirit_kitsune",
+                "zone_spirit_bunian",
+                "zone_spirit_ghoul",
+                "zone_spirit_crossroads",
+                "zone_spirit_wilds",
+                "zone_spirit_peaks",
+                "zone_spirit_mire",
+                "zone_spirit_boneyard",
+            ) or (scenario_data.is_anomalous_high_school_scenario(scen_key) and z_id == "zone_school_campus"):
                 continue
             z_name = get_session_urban_zone_name(session_id, z_id, z.get("name", ""), scen_key)
             for p in (z.get("primary_locations") or []):

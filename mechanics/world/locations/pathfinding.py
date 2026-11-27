@@ -29,39 +29,47 @@ logger = logging.getLogger(__name__)
 def format_node_hierarchy(session_id: int, node_id: str) -> str:
     """
     Deterministically formats a node_id into a canonical 3-tier location string:
-    'Zone ➔ Facility ➔ Room'.
+    'Zone ➔ Facility ➔ Room' (or 'Realm ➔ Facility ➔ Room' / 'Realm ➔ Realm ➔ Room' for compact/pocket realms).
     """
     if not session_id or not node_id:
         return ""
-    node = db.get_world_node(session_id, node_id)
+    nodes = db.get_session_world_nodes(session_id)
+    if not nodes:
+        return str(node_id)
+    node_map = {n["node_id"]: n for n in nodes if n.get("node_id")}
+    node = node_map.get(node_id)
     if not node:
         return str(node_id)
-    ntype = node.get("node_type", "ROOM")
-    ancestors = db.get_node_ancestors(session_id, node_id)
     from .hierarchy import resolve_default_sublocation
+    from .realms import get_node_hierarchy_roles_in_memory
+
+    ntype = str(node.get("node_type") or "ROOM").upper()
+    roles = get_node_hierarchy_roles_in_memory(node_id, node_map)
+    realm_node = roles.get("realm")
+    zone_node = roles.get("zone")
+    fac_node = roles.get("facility")
 
     if ntype == "ROOM":
-        fac_node = ancestors[0] if ancestors else None
-        zone_node = ancestors[1] if len(ancestors) > 1 else (fac_node if fac_node and fac_node.get("node_type") == "ZONE" else None)
-        z_name = zone_node.get("name") if zone_node else "Main Academy Campus"
-        f_name = fac_node.get("name") if fac_node else "Main Facility"
+        z_name = (zone_node.get("name") if zone_node else (realm_node.get("name") if realm_node else None)) or "Main Academy Campus"
+        f_name = (fac_node.get("name") if fac_node else (realm_node.get("name") if realm_node else None)) or "Main Facility"
         r_name = node.get("name") or ""
         if not r_name or r_name.strip().lower() == "main area":
             r_name = resolve_default_sublocation(f_name, z_name, session_id=session_id)
         return f"{z_name} ➔ {f_name} ➔ {r_name}"
-    elif ntype == "FACILITY":
-        zone_node = ancestors[0] if ancestors else None
-        z_name = zone_node.get("name") if zone_node else "Main Academy Campus"
+    if ntype == "FACILITY":
+        z_name = (zone_node.get("name") if zone_node else (realm_node.get("name") if realm_node else None)) or "Main Academy Campus"
         f_name = node.get("name") or "Main Facility"
-        r_name = resolve_default_sublocation(f_name, z_name, session_id=session_id)
+        child_room = next((n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == node_id and (n.get("name") or "").strip().lower() != "main area"), None)
+        r_name = child_room["name"] if child_room else resolve_default_sublocation(f_name, z_name, session_id=session_id)
         return f"{z_name} ➔ {f_name} ➔ {r_name}"
-    elif ntype == "ZONE":
+    if ntype == "ZONE":
         z_name = node.get("name") or "Main Academy Campus"
-        all_nodes = db.get_session_world_nodes(session_id)
-        fac = next((n for n in all_nodes if n.get("node_type") == "FACILITY" and n.get("parent_id") == node_id), None)
+        fac = next((n for n in nodes if n.get("node_type") == "FACILITY" and n.get("parent_id") == node_id), None)
         f_name = fac["name"] if fac else z_name
         r_name = resolve_default_sublocation(f_name, z_name, session_id=session_id)
         return f"{z_name} ➔ {f_name} ➔ {r_name}"
+    if ntype == "REALM":
+        return db.format_node_tiered_location(session_id, node_id) or (node.get("name") or str(node_id))
     return node.get("name") or str(node_id)
 
 
@@ -136,11 +144,14 @@ def find_spatial_path(
     to_node_id: str,
     include_hidden: bool = False,
     discovered_nodes: Optional[Set[str]] = None,
+    allow_cross_realm: bool = False,
 ) -> List[str]:
     """
     Finds the shortest path of node IDs from from_node_id to to_node_id
     using Dijkstra's algorithm across world_edges plus implicit parent-child transitions.
-    Excludes hidden nodes (is_hidden == 1) unless discovered (A6).
+    Excludes hidden nodes (or nodes inside hidden REALMs) unless discovered (A6).
+    Blocks cross-realm paths unless `allow_cross_realm=True`, and even then traverses
+    cross-realm links strictly via `PORTAL_EDGE_TYPES`.
     Returns an ordered list of node IDs: [from_node_id, ..., to_node_id].
     """
     if not session_id or not from_node_id or not to_node_id:
@@ -149,7 +160,6 @@ def find_spatial_path(
         return [from_node_id]
 
     discovered = set(discovered_nodes or [])
-    # Also check session discovered POIs / unlocked nodes
     with db.get_conn() as conn:
         disc_rows = conn.execute(
             "SELECT node_id, is_dynamic, state_json FROM world_nodes WHERE session_id = ? AND (is_dynamic = 1 OR state_json LIKE '%discovered%')",
@@ -168,32 +178,71 @@ def find_spatial_path(
 
     edges = db.get_session_world_edges(session_id)
     nodes = db.get_session_world_nodes(session_id)
-    node_map = {n["node_id"]: n for n in nodes}
+    node_map = {n["node_id"]: n for n in nodes if n.get("node_id")}
+
+    from .realms import (
+        PORTAL_EDGE_TYPES,
+        get_node_realm_id_in_memory,
+        is_node_or_realm_hidden_in_memory,
+    )
+
+    from_realm = get_node_realm_id_in_memory(from_node_id, node_map)
+    to_realm = get_node_realm_id_in_memory(to_node_id, node_map)
+    if not allow_cross_realm and from_realm and to_realm and from_realm != to_realm:
+        return []
 
     to_node_obj = node_map.get(to_node_id)
-    if is_node_hidden(to_node_obj) and not include_hidden:
+    if (is_node_hidden(to_node_obj) or is_node_or_realm_hidden_in_memory(to_node_id, node_map, discovered)) and not include_hidden:
         if to_node_id not in discovered:
-            # Cannot pathfind to undiscovered secret node (A6)
             return []
 
+    explicit_directed_edges = {
+        (e.get("from_node_id"), e.get("to_node_id"))
+        for e in edges
+        if e.get("from_node_id") and e.get("to_node_id")
+    }
     adj = defaultdict(list)
     for e in edges:
         u = e.get("from_node_id")
         v = e.get("to_node_id")
         w = max(1, int(e.get("travel_minutes") or 2))
+        etype = str(e.get("edge_type") or "")
         if not u or not v:
             continue
-        if str(e.get("edge_type") or "") == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1 and not include_hidden:
+        if etype == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1 and not include_hidden:
+            continue
+        # Skip hard-sealed lockdown portal edges (no key/skill bypass)
+        if (
+            etype in PORTAL_EDGE_TYPES
+            and int(e.get("is_locked") or 0) == 1
+            and not e.get("lock_key_item")
+            and not e.get("skill_check_type")
+            and not include_hidden
+        ):
             continue
 
+        u_realm = get_node_realm_id_in_memory(u, node_map)
+        v_realm = get_node_realm_id_in_memory(v, node_map)
+        if u_realm and v_realm and u_realm != v_realm:
+            if not allow_cross_realm or etype not in PORTAL_EDGE_TYPES:
+                continue
+
         v_node = node_map.get(v)
-        v_hidden = bool(is_node_hidden(v_node) and v not in discovered and not include_hidden)
+        v_hidden = bool(
+            (is_node_hidden(v_node) or is_node_or_realm_hidden_in_memory(v, node_map, discovered))
+            and v not in discovered
+            and not include_hidden
+        )
         if not v_hidden:
             adj[u].append((v, w))
 
-        if e.get("is_bidirectional", 1):
+        if e.get("is_bidirectional", 1) and (v, u) not in explicit_directed_edges:
             u_node = node_map.get(u)
-            u_hidden = bool(is_node_hidden(u_node) and u not in discovered and not include_hidden)
+            u_hidden = bool(
+                (is_node_hidden(u_node) or is_node_or_realm_hidden_in_memory(u, node_map, discovered))
+                and u not in discovered
+                and not include_hidden
+            )
             if not u_hidden:
                 adj[v].append((u, w))
 
@@ -221,7 +270,11 @@ def find_spatial_path(
                 is_ent = bool(n.get("is_entrance") == 1 or (isinstance(s_parsed, dict) and s_parsed.get("is_entrance") == 1) or is_entrance_sublocation(n.get("name") or "") or is_entrance_sublocation(nid or ""))
                 has_any_edge = nid in nodes_with_edges
                 if is_ent or not has_any_edge:
-                    n_hidden = bool(is_node_hidden(n) and nid not in discovered and not include_hidden)
+                    n_hidden = bool(
+                        (is_node_hidden(n) or is_node_or_realm_hidden_in_memory(nid, node_map, discovered))
+                        and nid not in discovered
+                        and not include_hidden
+                    )
                     if not n_hidden:
                         adj[pid].append((nid, 1))
                         adj[nid].append((pid, 1))
@@ -634,17 +687,37 @@ def evaluate_spatial_route(
                 waiting_outside.append(comp)
 
         if waiting_outside:
+            existing_wait = list(session.get("waiting_outside_companions") or [])
+            merged_wait: list[dict] = []
+            seen_wait: set[str] = set()
+            for c_entry in existing_wait + waiting_outside:
+                if not isinstance(c_entry, dict):
+                    continue
+                c_key = str(c_entry.get("name") or c_entry.get("npc_id") or "").strip().lower()
+                if c_key and c_key in seen_wait:
+                    continue
+                if c_key:
+                    seen_wait.add(c_key)
+                merged_wait.append(c_entry)
             names = ", ".join(c.get("name", "Companion") for c in waiting_outside)
             room_name = (dest_node.get("name") if dest_node else "Private Room") or "Private Room"
             stage_directives.append(
                 f"[STAGE DIRECTION — PRIVACY GATE]: {names} wait outside in the hallway while the player enters {room_name}."
             )
-            session["waiting_outside_companions"] = waiting_outside
+            session["waiting_outside_companions"] = merged_wait
             traveling_companions = following_inside
     else:
-        # Returning to public or semi-private space: Auto-rejoin waiting companions (A9)
+        # Returning to public or semi-private space: Auto-rejoin waiting companions (A9),
+        # unless destination realm itself enforces restrict_companions.
+        from mechanics.world.locations.realms import get_realm_rules_for_node
+
+        _dest_r_rules_pf = (
+            get_realm_rules_for_node(session_id, effective_node_id)
+            if (session_id and effective_node_id)
+            else {}
+        )
         previously_waiting = session.get("waiting_outside_companions") or []
-        if previously_waiting:
+        if previously_waiting and not _dest_r_rules_pf.get("restrict_companions"):
             active_companions.extend(previously_waiting)
             traveling_companions = active_companions
             session["waiting_outside_companions"] = []
@@ -698,41 +771,66 @@ def resolve_flee_destination(
 ) -> Tuple[str, str]:
     """
     Deterministically computes the retreat destination when fleeing combat or evicted (A7, A12).
-    - If previous_node_id is valid and the reverse edge is bidirectional, retreats to previous_node_id (A7).
-    - If previous_node_id is missing or the entry edge was strictly one-way (is_bidirectional == 0),
-      cascades to the parent facility entrance or nearest public node (A12).
+    Stays strictly inside the current realm unless retreating directly across an unlocked
+    bidirectional entry portal edge while not in lockdown_until_cleared.
     Returns (retreat_node_id, retreat_location_str).
     """
     if not session_id or not current_node_id:
         return ("", "")
 
+    from .realms import PORTAL_EDGE_TYPES, get_node_realm_id_in_memory, get_realm_rules
+
+    nodes = db.get_session_world_nodes(session_id) or []
+    node_map = {n["node_id"]: n for n in nodes if n.get("node_id")}
+    curr_realm_id = get_node_realm_id_in_memory(current_node_id, node_map)
+    curr_realm_node = node_map.get(curr_realm_id)
+    curr_realm_rules = get_realm_rules(curr_realm_node)
+    in_lockdown = bool(curr_realm_rules.get("exit_mode") == "lockdown_until_cleared" and not curr_realm_rules.get("pacified"))
+
     # 1. Check reverse edge to previous_node_id (A7)
     if previous_node_id and previous_node_id != current_node_id:
         prev_node = db.get_world_node(session_id, previous_node_id)
         if prev_node:
+            prev_realm_id = get_node_realm_id_in_memory(previous_node_id, node_map)
             edge = get_edge_between(session_id, previous_node_id, current_node_id)
-            # If edge was bidirectional, reverse traversal is permitted
-            if edge.get("is_bidirectional", 1) != 0:
+            same_realm = (not curr_realm_id or not prev_realm_id or curr_realm_id == prev_realm_id)
+            portal_escape_ok = (
+                not same_realm
+                and not in_lockdown
+                and str(edge.get("edge_type") or "") in PORTAL_EDGE_TYPES
+                and not int(edge.get("is_locked") or 0)
+            )
+            if edge.get("is_bidirectional", 1) != 0 and (same_realm or portal_escape_ok):
                 loc_str = format_node_hierarchy(session_id, previous_node_id)
                 return (previous_node_id, loc_str)
 
-    # 2. One-way entry edge or missing history: Cascade to parent facility entrance (A12)
+    # 2. One-way entry edge or missing history: Cascade within the same realm (A12)
     curr_node = db.get_world_node(session_id, current_node_id)
     if curr_node:
         parent_id = curr_node.get("parent_id")
-        if parent_id:
-            # Find sibling entrance room under parent facility
-            nodes = db.get_session_world_nodes(session_id)
+        p_node = node_map.get(parent_id) if parent_id else None
+        if parent_id and p_node and str(p_node.get("node_type") or "").upper() != "REALM":
             for n in nodes:
-                if n.get("parent_id") == parent_id and n.get("node_type") == "ROOM":
+                if n.get("parent_id") == parent_id and n.get("node_type") == "ROOM" and n.get("node_id") != current_node_id:
                     nm = n.get("name", "").lower()
-                    if any(ent in nm for ent in ("entrance", "lobby", "foyer", "main hall", "courtyard")):
+                    if any(ent in nm for ent in ("entrance", "lobby", "foyer", "main hall", "courtyard", "landing", "airlock")):
                         return (n["node_id"], format_node_hierarchy(session_id, n["node_id"]))
+            return (parent_id, format_node_hierarchy(session_id, parent_id))
 
-            # Fallback to parent node itself
-            p_node = db.get_world_node(session_id, parent_id)
-            if p_node:
-                return (parent_id, format_node_hierarchy(session_id, parent_id))
+        # Pocket realm or node directly under REALM: retreat to adjacent intra-realm room or entrance
+        edges = db.get_session_world_edges(session_id) or []
+        for e in edges:
+            u, v = e.get("from_node_id"), e.get("to_node_id")
+            nb = v if u == current_node_id else (u if v == current_node_id and e.get("is_bidirectional", 1) != 0 else None)
+            if nb and nb != current_node_id and get_node_realm_id_in_memory(nb, node_map) == curr_realm_id:
+                nb_obj = node_map.get(nb)
+                if nb_obj and str(nb_obj.get("node_type") or "").upper() != "REALM":
+                    return (nb, format_node_hierarchy(session_id, nb))
+        for n in nodes:
+            nid = n.get("node_id")
+            if nid and nid != current_node_id and str(n.get("node_type") or "").upper() == "ROOM":
+                if not curr_realm_id or get_node_realm_id_in_memory(nid, node_map) == curr_realm_id:
+                    return (nid, format_node_hierarchy(session_id, nid))
 
     return (current_node_id, format_node_hierarchy(session_id, current_node_id))
 
@@ -794,13 +892,20 @@ def resolve_safe_open_eviction_destination(
                     return (street_nid, format_node_hierarchy(session_id, street_nid))
             return ("loc_school_gate", f"{school_zone} ➔ School Main Gates ➔ Outside the Locked Entrance")
 
+    from .realms import get_node_realm_id_in_memory, is_node_or_realm_hidden_in_memory
+    all_nodes_for_realm = db.get_session_world_nodes(session_id) or []
+    realm_node_map = {n["node_id"]: n for n in all_nodes_for_realm if n.get("node_id")}
+    start_realm_id = get_node_realm_id_in_memory(start_nid, realm_node_map) if start_nid else ""
+
     def _is_safe_open_public(nid: str) -> bool:
         if not nid or nid == start_nid:
             return False
         n_obj = db.get_world_node(session_id, nid)
-        if not n_obj or n_obj.get("is_hidden"):
+        if not n_obj or n_obj.get("is_hidden") or is_node_or_realm_hidden_in_memory(nid, realm_node_map):
             return False
-        if str(n_obj.get("node_type") or "").upper() == "ZONE":
+        if str(n_obj.get("node_type") or "").upper() in ("ZONE", "REALM"):
+            return False
+        if start_realm_id and get_node_realm_id_in_memory(nid, realm_node_map) != start_realm_id:
             return False
         if str(n_obj.get("privacy_level") or "public").lower() == "private":
             return False
@@ -860,7 +965,8 @@ def resolve_safe_open_eviction_destination(
         for n in all_nodes:
             nid = n.get("node_id")
             pid = n.get("parent_id")
-            if nid and pid:
+            p_obj = realm_node_map.get(pid) if pid else None
+            if nid and pid and str((p_obj or {}).get("node_type") or "").upper() != "REALM" and str(n.get("node_type") or "").upper() != "REALM":
                 adj.setdefault(nid, []).append(pid)
                 adj.setdefault(pid, []).append(nid)
 
@@ -996,7 +1102,7 @@ def match_freeform_spatial_destination(
 
     for n in nodes:
         nid = n["node_id"]
-        if nid == current_node_id:
+        if nid == current_node_id or str(n.get("node_type") or "").upper() == "REALM":
             continue
         n_name = str(n.get("name") or "").strip().lower()
         if not n_name or len(n_name) < 3:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from .constants import *
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from ..core import *
 
 ROMANTIC_MILESTONE_KEYWORDS = (
@@ -148,7 +148,13 @@ def format_dynamic_prompt_directive(partner_name: str, dynamic_val: str) -> str:
         )
 
     # 2. Assertive & Dominant Initiative (Takes physical charge, top, corners/pins partner)
-    if any(kw in d_low for kw in ("proactive", "dominant", "assertive", "forward", "lead", "aggressive", "seductress", "top", "in charge", "bossy", "take charge")):
+    # Exclude explicit submissive / receptive surrender archetypes that share words like "charge" or "lead".
+    _is_submissive_dyn = any(
+        kw in d_low for kw in ("receptive", "yielding", "submissive", "surrender", "bottom", "obedient", "docile", "meek", "compliant", "follows partner")
+    )
+    if (not _is_submissive_dyn) and any(
+        kw in d_low for kw in ("proactive", "dominant", "assertive", "forward", "lead", "aggressive", "seductress", "top", "in charge", "bossy", "take charge")
+    ):
         return (
             f"  * AUTONOMOUS PHYSICAL INITIATIVE ({partner_name} — Assertive/Dominant: {dynamic_val}): "
             f"In romantic, flirtatious, or intimate moments, THEY MAKE THE PHYSICAL MOVE FIRST "
@@ -179,13 +185,25 @@ def format_dynamic_prompt_directive(partner_name: str, dynamic_val: str) -> str:
             f"Format next_choices as how the player receives or directs their attentive devotion."
         )
 
-    # 5. Receptive & Yielding Surrender (Submissive, inviting bodily cues, guiding hands)
+    # 5a. Gentle & Yielding (Soft, unhurried emotional surrender & gentle pacing)
+    if any(kw in d_low for kw in ("gentle & yielding", "tenderly responsive", "trusting surrender")) or (
+        any(kw in d_low for kw in ("gentle", "yielding")) and "eagerly receptive" not in d_low
+    ):
+        return (
+            f"  * AUTONOMOUS INTIMATE RESPONSE ({partner_name} — Gentle & Yielding: {dynamic_val}): "
+            f"{partner_name} thrives on unhurried warmth, tender reassurance, and soft emotional surrender. In intimate moments, they AUTONOMOUSLY nestle closer, "
+            f"lace fingers through yours, lean into unhurried caresses, and melt at gentle whispered praise rather than sudden roughness. "
+            f"WHEN CLIMAXING: If {partner_name} reaches climax first, intercourse DOES NOT stop! Shivering softly, they cling close to your warmth and whisper tenderly as your rhythm continues. "
+            f"Format next_choices around tender affection, steady reassurance, and unhurried closeness."
+        )
+
+    # 5b. Eagerly Receptive / Surrenders Control (Craves firm partner lead & decisive direction)
     if any(kw in d_low for kw in ("receptive", "yielding", "submissive", "surrender", "bottom", "obedient", "docile", "meek", "compliant")):
         return (
-            f"  * AUTONOMOUS INTIMATE RESPONSE ({partner_name} — Receptive & Yielding: {dynamic_val}): "
-            f"{partner_name} craves the player taking complete charge. In intimate moments, they AUTONOMOUSLY display inviting bodily surrender: "
-            f"arching into the player's touch, guiding the player's hands to where they ache to be held, tilting their head to expose their neck, or shivering with breathless anticipation. "
-            f"WHEN CLIMAXING: If {partner_name} reaches climax first, intercourse DOES NOT stop! Trembling from heightened overstimulation, they whimper softly and cling tight, completely surrendering to the player's rhythm. "
+            f"  * AUTONOMOUS INTIMATE RESPONSE ({partner_name} — Eagerly Receptive / Surrenders Control: {dynamic_val}): "
+            f"{partner_name} craves the player taking firm, decisive charge and guiding every beat. In intimate moments, they AUTONOMOUSLY display inviting bodily surrender: "
+            f"arching eagerly into the player's hold, placing the player's hands where they ache to be commanded, tilting their head to expose their neck, or trembling with breathless anticipation. "
+            f"WHEN CLIMAXING: If {partner_name} reaches climax first, intercourse DOES NOT stop! Trembling from heightened overstimulation, they whimper breathlessly and surrender completely to the player's commanding rhythm. "
             f"Format next_choices as the player leading and commanding the encounter."
         )
 
@@ -196,32 +214,117 @@ def format_dynamic_prompt_directive(partner_name: str, dynamic_val: str) -> str:
         f"WHEN CLIMAXING: If {partner_name} reaches climax first, intercourse does not stop—they react authentically while the player continues their rhythm toward their own release."
     )
 
-def format_openness_prompt_directive(partner_name: str, openness_val: str) -> str:
-    """Formats an erotic openness prompt directive for an NPC based on their openness tier."""
+def format_openness_prompt_directive(
+    partner_name: str,
+    openness_val: str,
+    *,
+    demeanor_val: str = "",
+    traits: Optional[List[str]] = None,
+    dynamic_val: str = "",
+    comfort: Optional[Dict[str, Any]] = None,
+    contrast: Optional[Dict[str, Any]] = None,
+    is_nsfw: bool = True,
+) -> str:
+    """Formats an openness/modesty prompt directive composed with Demeanor, traits, With-You Comfort, Contrast, and SFW/NSFW scope."""
     if not openness_val:
         return ""
-    o_low = openness_val.lower()
-    if "prude" in o_low or "modest" in o_low:
-        return (
-            f"  * EROTIC OPENNESS ({partner_name}: Prude / Modest): High modesty barrier. "
-            f"Never initiate unsolicited dirty talk; flustered, blushing, or defensive around crude talk. Requires deep trust/romance."
+    tier = normalize_openness_tier(openness_val)
+    d_low = str(demeanor_val or "").lower()
+    t_low = " ".join(str(t).lower() for t in (traits or []))
+
+    # Demeanor + trait sub-voice composition (so two Prudes or Moderates never sound identical)
+    sub_voice = ""
+    if any(k in d_low for k in ("poised", "articulate", "husky")) or (
+        not d_low and any(k in t_low for k in ("noble", "formal", "stoic", "composed", "dignified"))
+    ):
+        sub_voice = "Express boundaries with cool poise, etiquette, and calm dignity rather than flustered stammering."
+    elif any(k in d_low for k in ("hesitant", "flustered", "stammer")) or (
+        not d_low and any(k in t_low for k in ("shy", "timid", "nervous", "sheltered"))
+    ):
+        sub_voice = "Show warmth through soft blushes, bashful pauses, and earnest, stammered honesty when pressed."
+    elif any(k in d_low for k in ("playful", "bantering", "mischievous")) or (
+        not d_low and any(k in t_low for k in ("playful", "witty", "sarcastic", "teas"))
+    ):
+        sub_voice = "Deflect awkwardness with quick wit, mock-scolding, and teasing banter."
+    elif any(k in d_low for k in ("blunt", "energetic directness")):
+        sub_voice = "State comfort levels plainly and candidly without dodging or sugarcoating."
+    elif any(k in d_low for k in ("soft", "deeply affectionate", "tender")):
+        sub_voice = "Set boundaries gently through heartfelt warmth and earnest romantic sincerity."
+    elif any(k in d_low for k in ("passionate", "vocal", "breathless")):
+        sub_voice = "Carry fervent emotional intensity that guards intimacy closely until the spark feels real."
+
+    c_stage = str((comfort or {}).get("stage") or "guarded").lower()
+    comfort_note = ""
+    if c_stage == "warming_up":
+        comfort_note = (
+            f" WITH-YOU COMFORT (Warming Up): Around bystanders or in public decorum stays intact, "
+            f"but privately with the player {partner_name} is shyly softening their guard and making a personal exception."
         )
-    elif "shameless" in o_low or "lewd" in o_low:
-        return (
-            f"  * EROTIC OPENNESS ({partner_name}: Shameless / Lewd): High erotic openness; "
-            f"zero verbal filter regarding intimacy and desire; speaks candidly and playfully about physical attraction and preferences without shame or bashfulness. "
-            f"This reflects frankness about desires and playful flirtation, NOT malice, hostility, or a history of having had past partners."
+    elif c_stage == "trusting_private":
+        comfort_note = (
+            f" WITH-YOU COMFORT (Trusting in Private): Public decorum still matters around strangers, "
+            f"but behind closed doors with the player their modesty barrier has melted into deep, unguarded trust."
         )
-    elif "bold" in o_low or "uninhibited" in o_low:
-        return (
-            f"  * EROTIC OPENNESS ({partner_name}: Bold / Uninhibited): Sex-positive; "
-            f"comfortable with suggestive innuendos, touch, and flirtatious banter without shame."
+
+    contrast_type = str((contrast or {}).get("archetype") or "").strip().lower()
+    contrast_note = ""
+    if contrast_type == "hidden_fire":
+        if is_nsfw:
+            contrast_note = (
+                f" CONTRAST (Hidden Fire): Outside/at first glance {partner_name} upholds strict modesty, "
+                f"but once private comfort unlocks, their intense underlying dynamic ({dynamic_val or 'hidden drive'}) takes over fiercely behind closed doors."
+            )
+        else:
+            contrast_note = (
+                f" CONTRAST (Hidden Fire): Modest in public decorum, yet surprisingly intense and devoted once genuine private trust is built."
+            )
+    elif contrast_type == "all_talk_tease":
+        if (contrast or {}).get("graduated"):
+            contrast_note = (
+                f" CONTRAST (All-Talk Tease — Confidence Blooming): {partner_name} blends bold teasing banter with growing private assurance earned alongside you."
+            )
+        elif is_nsfw:
+            contrast_note = (
+                f" CONTRAST (All-Talk Tease): {partner_name} talks boldly and drops teasing innuendos effortlessly, "
+                f"but if the player rushes their bluff into direct physical intimacy, they visibly fluster and soften under gentle reassurance."
+            )
+        else:
+            contrast_note = (
+                f" CONTRAST (All-Talk Tease): Bold and shamelessly teasing in casual banter, yet unexpectedly shy and easily flustered when sincere romance gets close."
+            )
+
+    if not is_nsfw:
+        if tier == "prude":
+            base = f"  * ROMANTIC MODESTY & DECORUM ({partner_name}: Prude / Modest): High modesty barrier and careful public decorum; prefers sincere affection over crude humor."
+        elif tier == "shameless":
+            base = f"  * ROMANTIC MODESTY & DECORUM ({partner_name}: Unfiltered & Teasing): Zero verbal filter in playful romance and candid flirting; never fake past partners."
+        elif tier == "bold":
+            base = f"  * ROMANTIC MODESTY & DECORUM ({partner_name}: Bold & Candid): Openly flirtatious, confident with banter and warm touch, unbothered by social embarrassment."
+        else:
+            base = f"  * ROMANTIC MODESTY & DECORUM ({partner_name}: Reserved / Moderate): Balanced decorum; values natural timing and mutual comfort before bold romance."
+        return " ".join(p for p in (base, sub_voice, comfort_note, contrast_note) if p).strip()
+
+    if tier == "prude":
+        base = (
+            f"  * EROTIC OPENNESS ({partner_name}: Prude / Modest): High modesty barrier around public decorum and explicit talk; "
+            f"never initiates crude banter unsolicited and values heartfelt romantic trust."
+        )
+    elif tier == "shameless":
+        base = (
+            f"  * EROTIC OPENNESS ({partner_name}: Shameless / Lewd): Zero verbal filter around intimacy and desire; "
+            f"speaks candidly and playfully about attraction without shame (expresses frankness, NOT malice or fake past partners)."
+        )
+    elif tier == "bold":
+        base = (
+            f"  * EROTIC OPENNESS ({partner_name}: Bold / Uninhibited): Sex-positive and confident; "
+            f"comfortable with suggestive innuendos, touch, and playful banter without shame."
         )
     else:
-        return (
+        base = (
             f"  * EROTIC OPENNESS ({partner_name}: Reserved / Moderate): Balanced intimacy; "
-            f"natural pacing; comfortable with private romance and passion, but values timing and mutual comfort."
+            f"values timing, private decorum, and mutual comfort."
         )
+    return " ".join(p for p in (base, sub_voice, comfort_note, contrast_note) if p).strip()
 
 def format_desires_and_turn_offs_prompt_directive(partner_name: str, desires_val: str = "", turn_offs_val: str = "", dynamic_val: str = "") -> str:
     """Formats behavioral rules for NPC desires/kinks and turn-offs/aversions."""
@@ -328,11 +431,13 @@ def format_body_asset_narrative_directive(
     npc_race: str = "",
     player_appearance: dict = None,
     affinity: int = None,
+    rear_size: str = "",
+    rear_texture: str = "",
     **kwargs
 ) -> str:
     """Formats an authentic narrative, spoken voice, micro-reaction, and tactile touch
-    directive for an NPC's anatomical assets (breasts or pp) based on their 5-tier size,
-    tactile texture, demeanor, and erotic openness. Includes bidirectional player reactions.
+    directive for an NPC's anatomical assets (breasts or pp) and rear/ass based on their
+    5-tier size, tactile texture, demeanor, and erotic openness. Includes bidirectional player reactions.
     """
     if npc_name:
         partner_name = npc_name
@@ -347,6 +452,10 @@ def format_body_asset_narrative_directive(
             asset_size = npc_appearance.get("penis_size" if is_m else "breast_size") or ""
         if not asset_texture:
             asset_texture = npc_appearance.get("asset_texture") or ""
+        if not rear_size:
+            rear_size = npc_appearance.get("rear_size") or ""
+        if not rear_texture:
+            rear_texture = npc_appearance.get("rear_texture") or ""
         if not demeanor:
             demeanor = npc_appearance.get("intimate_demeanor") or npc_appearance.get("demeanor") or ""
         if not openness:
@@ -453,20 +562,98 @@ def format_body_asset_narrative_directive(
             )
     behavior_lines.append(voice_posture)
 
-    # 2. Tactile Touch & Foreplay Sensations
-    effective_tex = asset_texture or extract_asset_texture(asset_size, gender=gender)
+    # 2. Tactile Touch, Motion Flair & Automatic Species Surface
+    from .appearance import (
+        get_species_surface_profile,
+        heal_asset_texture_for_context,
+        roll_dynamic_asset_texture,
+    )
+    eff_gender = "male" if is_male_npc else "female"
+    raw_or_extracted = asset_texture or extract_asset_texture(asset_size, gender=gender)
+    effective_tex = heal_asset_texture_for_context(raw_or_extracted, gender=eff_gender, size_tier=tier)
     if not effective_tex:
-        from .appearance import roll_dynamic_asset_texture
         effective_tex = roll_dynamic_asset_texture(
             seed_val=partner_name or "partner",
-            gender="male" if is_male_npc else "female",
+            gender=eff_gender,
             race=race,
             demeanor=demeanor,
             size_tier=tier,
         )
     if effective_tex:
-        tex_guide = f"- TACTILE SENSATION & TOUCH RESPONSE ({effective_tex}): When the partner touches, cups, caresses, kisses, or squeezes their {asset_label}, the prose MUST emphasize this specific tactile feel ({effective_tex})—describing the exact physical reaction (e.g. yielding warmth molding into palms, perkiness quivering under cold fingertips, burying fingers into soft fur/down, or smooth scales warming against skin)."
+        flair_map = MALE_TEXTURE_NARRATIVE_FLAIR if is_male_npc else FEMALE_TEXTURE_NARRATIVE_FLAIR
+        flair_text = flair_map.get(effective_tex, "")
+        if flair_text:
+            tex_guide = f"- TACTILE SENSATION & MOTION FLAIR ({effective_tex}): {flair_text}"
+        else:
+            tex_guide = (
+                f"- TACTILE SENSATION & MOTION FLAIR ({effective_tex}): When the partner touches, cups, caresses, kisses, or squeezes their {asset_label}, "
+                f"the prose MUST emphasize this specific tactile feel ({effective_tex})."
+            )
         behavior_lines.append(tex_guide)
+
+    surface_profile = get_species_surface_profile(
+        race=race,
+        skin_type=(npc_appearance or {}).get("skin_type", "") if isinstance(npc_appearance, dict) else "",
+    )
+    if surface_profile.get("key") != "natural" and surface_profile.get("label"):
+        surf_prose = surface_profile.get("male_prose" if is_male_npc else "female_prose", "")
+        if surf_prose:
+            behavior_lines.append(
+                f"- SPECIES SURFACE TEXTURE ({surface_profile['label']}): {surf_prose}"
+            )
+
+    from .appearance import (
+        classify_rear_size_tier,
+        extract_rear_texture,
+        heal_rear_texture_for_context,
+        is_feral_rear_excluded,
+    )
+    if rear_size and not is_feral_rear_excluded(race):
+        rear_tier = classify_rear_size_tier(rear_size)
+        raw_or_ext_r_tex = rear_texture or extract_rear_texture(rear_size)
+        eff_r_tex = heal_rear_texture_for_context(raw_or_ext_r_tex, size_tier=rear_tier)
+        r_flair = REAR_TEXTURE_NARRATIVE_FLAIR.get(eff_r_tex, "") if eff_r_tex else ""
+        if r_flair:
+            behavior_lines.append(
+                f"- REAR TACTILE FLAIR ({rear_size}): {r_flair}"
+            )
+        else:
+            behavior_lines.append(
+                f"- REAR CONTOUR FLAVOR ({rear_size}): Convey the visual sway, posture, and touch response of their {rear_size.lower()} rear naturally."
+            )
+
+    if isinstance(npc_appearance, dict) and isinstance(player_appearance, dict):
+        npc_b_likes = set(str(x).strip().lower() for x in (npc_appearance.get("body_likes") or []) if str(x).strip())
+        npc_b_dislikes = set(str(x).strip().lower() for x in (npc_appearance.get("body_dislikes") or []) if str(x).strip())
+        if npc_b_likes or npc_b_dislikes:
+            pl_bb_raw = str(player_appearance.get("breast_size") or "").strip()
+            if pl_bb_raw and pl_bb_raw.lower() not in ("none", "unknown", "n/a", "null"):
+                pl_bb_tier = classify_asset_size_tier(pl_bb_raw, "female")
+                bb_bucket = "smaller" if pl_bb_tier in ("flat", "small") else ("bigger" if pl_bb_tier in ("large", "huge") else "")
+                if bb_bucket:
+                    bb_key = f"{bb_bucket}_bb"
+                    if bb_key in npc_b_likes:
+                        behavior_lines.append(
+                            f"- BODY PREFERENCE ATTRACTION (Player Bust): {partner_name} has a strong weakness for the player's bust proportions—show lingering eye contact, appreciative warmth, and eager touch."
+                        )
+                    elif bb_key in npc_b_dislikes:
+                        behavior_lines.append(
+                            f"- BODY PREFERENCE INDIFFERENCE (Player Bust): {partner_name} feels comparatively lukewarm about the player's bust size, keeping attention smoothly toward other qualities."
+                        )
+            pl_rear_raw = str(player_appearance.get("rear_size") or "").strip()
+            if pl_rear_raw and pl_rear_raw.lower() not in ("none", "unknown", "n/a", "null") and not is_feral_rear_excluded(race):
+                pl_r_tier = classify_rear_size_tier(pl_rear_raw)
+                r_bucket = "smaller" if pl_r_tier in ("flat", "small") else ("bigger" if pl_r_tier in ("large", "huge") else "")
+                if r_bucket:
+                    r_key = f"{r_bucket}_ass"
+                    if r_key in npc_b_likes:
+                        behavior_lines.append(
+                            f"- BODY PREFERENCE ATTRACTION (Player Rear): {partner_name} finds the player's rear silhouette deeply captivating—highlight appreciative glances and lingering palm grips."
+                        )
+                    elif r_key in npc_b_dislikes:
+                        behavior_lines.append(
+                            f"- BODY PREFERENCE INDIFFERENCE (Player Rear): {partner_name} shows restrained interest in the player's rear contours, naturally focusing attention elsewhere."
+                        )
 
     # 3. Lingerie & Undergarment Interaction
     if isinstance(undergarments, dict) and (undergarments.get("bra") or undergarments.get("underwear")):
@@ -551,6 +738,18 @@ def format_body_asset_narrative_directive(
     return f"  * [ANATOMY NARRATIVE & EMOTIONAL REACTION ({partner_name} — {asset_size})]:\n" + "\n".join(f"    {line}" for line in behavior_lines)
 
 
+def get_physique_narrative_flair(physique: str, gender: str = "") -> Dict[str, str]:
+    """Returns gender-aware everyday presence and embrace sensation cues for a canonical physique tier."""
+    canon = normalize_physique(physique) or "Average"
+    g_low = str(gender or "").strip().lower()
+    is_m = is_male_gender(g_low)
+    is_f = is_female_gender(g_low)
+    g_key = "male" if is_m else ("female" if is_f else "neutral")
+    tier_entry = PHYSIQUE_NARRATIVE_FLAIR.get(canon) or PHYSIQUE_NARRATIVE_FLAIR["Average"]
+    flair = tier_entry.get(g_key) or tier_entry["neutral"]
+    return {"presence": flair["presence"], "embrace": flair["embrace"]}
+
+
 def format_stature_and_physique_narrative_directive(
     partner_name: str,
     npc_stature: str = "average",
@@ -574,7 +773,13 @@ def format_stature_and_physique_narrative_directive(
     pl_tier = normalize_stature_tier(player_stature)
 
     stat_display = s_tier.replace("_", " ").title()
-    phys_display = (npc_physique or "Proportionate").strip()
+    raw_phys = (npc_physique or "").strip()
+    phys_display = (
+        heal_physique_for_context(raw_phys, gender=npc_gender, stature=s_tier, race=npc_race)
+        or normalize_physique(raw_phys)
+        or raw_phys
+        or "Average"
+    ).strip()
 
     behavior_lines = []
 
@@ -613,52 +818,14 @@ def format_stature_and_physique_narrative_directive(
             f"creating straightforward eye contact and easy shoulder-to-shoulder alignment."
         )
 
-    # 2. Physique & Tactile Contact Sensations
-    p_low = phys_display.lower()
-    if any(k in p_low for k in ("petite", "delicate")):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Petite & Delicate): {partner_name}'s build is dainty and delicate: slender wrists, light bone structure, and soft yielding skin. "
-            f"Holding them highlights their vulnerable lightness and fragile grace."
-        )
-    elif any(k in p_low for k in ("hourglass", "slender", "lanky")):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Slender / Lithe): {partner_name} has a lithe, slender waist and elegant contours. "
-            f"Hands easily span across their narrow waist or ribs during close embraces, emphasizing their graceful, elongated lines."
-        )
-    elif any(k in p_low for k in ("athletic", "toned")):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Toned & Athletic): {partner_name}'s frame is taut, firm, and athletically sculpted. "
-            f"Defined abdominal and back lines, firm flanks, and athletic poise make every shift of their body feel purposeful and resilient under touch."
-        )
-    elif any(k in p_low for k in ("muscular", "powerful")):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Muscular & Powerful): {partner_name}'s build is dense, heavy, and powerfully muscled. "
-            f"Broad shoulders, thick forearms, and a solid chest impart an immovable, rock-solid physical density when pressed against or held."
-        )
-    elif any(k in p_low for k in ("full-figured", "voluptuous")):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Voluptuous & Bountiful): {partner_name}'s silhouette is rich with lush, bountiful curves; "
-            f"full hips, a soft waist, and plush contours yield with deep, intoxicating softness against their partner in every embrace."
-        )
-    elif any(k in p_low for k in ("thick",)):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Thick & Curvy / Solid): {partner_name}'s frame features heavy, prominent hips, thick thighs, and a substantial, enticing fullness "
-            f"that presses firmly and warmly against their partner, radiating alluring physical presence."
-        )
-    elif any(k in p_low for k in ("stocky",)):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Stocky & Solid): {partner_name}'s frame is stocky, solid, and barrel-chested; "
-            f"their grounded weight and thick frame feel reassuringly sturdy and unyielding under touch."
-        )
-    elif any(k in p_low for k in ("overweight", "heavy", "plump")):
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS (Full-Bodied & Soft): {partner_name}'s build is generously full-bodied, soft, and warmly cushioned; "
-            f"their pillowy physical fullness yields comfortably to touch, radiating deep, cozy physical warmth."
-        )
-    else:
-        behavior_lines.append(
-            f"- PHYSIQUE & EMBRACE SENSATIONS ({phys_display}): {partner_name} possesses a well-proportioned, natural build that provides comfortable warmth and grounded physical contours."
-        )
+    # 2. Physique Everyday Presence (SFW) & Tactile Embrace Sensations (gender-aware)
+    phys_flair = get_physique_narrative_flair(phys_display, gender=npc_gender)
+    behavior_lines.append(
+        f"- PHYSIQUE & EVERYDAY PRESENCE ({phys_display}): {partner_name}: {phys_flair['presence']}"
+    )
+    behavior_lines.append(
+        f"- PHYSIQUE & EMBRACE SENSATIONS ({phys_display}): {partner_name}: {phys_flair['embrace']}"
+    )
 
     # 3. Bidirectional Height Contrast Dynamic (NPC vs Player)
     rank_map = {"miniature": 1, "short": 2, "below_average": 3, "average": 4, "tall": 5, "towering": 6}
@@ -704,7 +871,437 @@ def format_stature_and_physique_narrative_directive(
     return f"  * [PHYSICAL SCALE & STATURE DYNAMICS ({partner_name} — {stat_display} • {phys_display})]:\n" + "\n".join(f"    {line}" for line in behavior_lines)
 
 
-def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "", race: str = "human", scen_key: str = "fantasy", info_level: int = 1, revealed_flags: Dict[str, Any] = None, intimate_profile: Dict[str, Any] = None) -> Dict[str, Any]:
+_ITEM_TAG_RE = re.compile(r"\s*\((?:Physical|Action)\)\s*", re.IGNORECASE)
+_NUM_CHECK_RE = re.compile(r"(?:\d+|%|\bDC\b)", re.IGNORECASE)
+
+
+def strip_internal_item_tags(value: Any) -> Any:
+    """Strips internal '(Physical)' / '(Action)' tags from a string or list of items."""
+    if isinstance(value, (list, tuple)):
+        cleaned: List[str] = []
+        for item in value:
+            s = strip_internal_item_tags(str(item or ""))
+            if s and s.lower() not in ("none", "none (vanilla)", "unknown"):
+                cleaned.append(s)
+        return cleaned
+    text = _ITEM_TAG_RE.sub(" ", str(value or "")).strip()
+    text = re.sub(r"\s+,", ",", text)
+    text = re.sub(r"\s{2,}", " ", text).strip(" ,")
+    return text
+
+
+def _split_clean_items(raw_val: Any) -> List[str]:
+    cleaned = clean_attribute_list_string(raw_val)
+    if not cleaned or cleaned.lower() in ("none", "none (vanilla)", "unknown", ""):
+        return []
+    out: List[str] = []
+    for part in cleaned.split(","):
+        p = part.strip()
+        if p and p.lower() not in ("none", "none (vanilla)", "unknown"):
+            out.append(p)
+    return out
+
+
+def is_act_inexperienced_curiosity(
+    act_label: str,
+    app_dict: Optional[Dict[str, Any]] = None,
+    tracks: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Returns True when a liked act maps to an experience track where the character is still inexperienced."""
+    lbl_low = strip_internal_item_tags(str(act_label or "")).strip().lower()
+    if not lbl_low:
+        return False
+    matched_track: Optional[str] = None
+    for meta in ACT_PREFERENCE_REGISTRY:
+        if not isinstance(meta, dict):
+            continue
+        act_id = str(meta.get("id") or "").strip()
+        reg_lbl = str(meta.get("name") or meta.get("label") or "").strip().lower()
+        if lbl_low == act_id.lower() or lbl_low == reg_lbl or (reg_lbl and reg_lbl in lbl_low):
+            matched_track = ACT_ID_TO_EXPERIENCE_TRACK.get(act_id)
+            break
+    if not matched_track:
+        return False
+    app = app_dict if isinstance(app_dict, dict) else {}
+    trk = tracks if isinstance(tracks, dict) else {}
+    if matched_track == "intercourse":
+        val = str(trk.get("intercourse") or app.get("intercourse_experience") or "virgin").strip().lower()
+        return val in ("virgin", "inexperienced", "unknown", "")
+    val = str(trk.get(matched_track) or app.get(f"{matched_track}_experience") or "inexperienced").strip().lower()
+    return val in ("inexperienced", "unknown", "")
+
+
+def compute_shared_intimacy_stats(
+    contact_dict: Optional[Dict[str, Any]] = None,
+    gameplay_events: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Computes player-shared encounter, partner climax, and 'First Together' track badges from gameplay ledger rows."""
+    c = contact_dict if isinstance(contact_dict, dict) else {}
+    raw_game = list(gameplay_events if gameplay_events is not None else (c.get("gameplay_intimate_events") or []))
+    raw_past = list(c.get("past_intimate_events") or [])
+
+    player_game_evs: List[Dict[str, Any]] = []
+    seen_ev: set[Any] = set()
+    for ev in raw_game:
+        if not isinstance(ev, dict):
+            continue
+        pid = str(ev.get("partner_id") or "").strip().lower()
+        if pid and pid != "player":
+            continue
+        ev_id = ev.get("id")
+        sig = ("id", ev_id) if ev_id is not None else (
+            "sig",
+            int(ev.get("turn_number") or 0),
+            str(ev.get("act_type") or "").strip().lower(),
+            str(ev.get("direction") or "").strip().lower(),
+            str(ev.get("narrative_summary") or "").strip().lower(),
+        )
+        if sig in seen_ev:
+            continue
+        seen_ev.add(sig)
+        player_game_evs.append(ev)
+
+    distinct_turns: set[int] = set()
+    turnless_encounters = 0
+    partner_climaxes = 0
+    game_tracks_done: set[str] = set()
+
+    for ev in player_game_evs:
+        is_phys = bool(ev.get("is_physical", 1))
+        t_num = int(ev.get("turn_number") or 0)
+        if is_phys:
+            if t_num > 0:
+                distinct_turns.add(t_num)
+            else:
+                turnless_encounters += max(1, int(ev.get("count") or 1))
+        partner_climaxes += max(0, int(ev.get("climax_count") or 0))
+        act_t = str(ev.get("act_type") or "").strip().lower()
+        if is_phys and act_t in ("intercourse", "oral", "manual", "anal"):
+            game_tracks_done.add(act_t)
+
+    past_tracks_done: set[str] = set()
+    for pev in raw_past:
+        if not isinstance(pev, dict):
+            continue
+        if not bool(pev.get("is_physical", 1)):
+            continue
+        pact = str(pev.get("act_type") or "").strip().lower()
+        if pact in ("intercourse", "oral", "manual", "anal"):
+            past_tracks_done.add(pact)
+
+    firsts_together: Dict[str, bool] = {}
+    firsts_badges: List[str] = []
+    for trk in ("intercourse", "oral", "manual", "anal"):
+        is_first = bool(trk in game_tracks_done and trk not in past_tracks_done)
+        firsts_together[trk] = is_first
+        if is_first:
+            firsts_badges.append(trk)
+
+    return {
+        "shared_encounters": len(distinct_turns) + turnless_encounters,
+        "partner_climaxes": partner_climaxes,
+        "firsts_together": firsts_together,
+        "firsts_badges": firsts_badges,
+    }
+
+
+def _strip_digits(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", _NUM_CHECK_RE.sub("", str(text or ""))).strip(" :-,;.")
+
+
+def build_intimate_chemistry_summary(
+    npc_contact: Optional[Dict[str, Any]],
+    player_char: Optional[Dict[str, Any]] = None,
+    *,
+    intimate_unlocked: bool = False,
+    revealed_flags: Optional[Dict[str, Any]] = None,
+    discovered_intimate: Optional[Dict[str, set[str]]] = None,
+    discovered_body_prefs: Optional[set[str]] = None,
+    is_nsfw: bool = True,
+    comfort: Optional[Dict[str, Any]] = None,
+    contrast: Optional[Dict[str, Any]] = None,
+    openness_unlocked: bool = False,
+) -> Dict[str, Any]:
+    """Builds a strictly qualitative, zero-number Chemistry & Synergy summary from revealed intimate signals."""
+    if not is_nsfw or not isinstance(npc_contact, dict):
+        return {}
+
+    app = dict(npc_contact.get("appearance") or {})
+    rflags = dict(revealed_flags or {})
+    disc = discovered_intimate if isinstance(discovered_intimate, dict) else {}
+    disc_bp = {str(k).strip().lower() for k in (discovered_body_prefs or set()) if str(k).strip()}
+
+    def _is_unlocked(flag_key: str, cat_key: str) -> bool:
+        return bool(
+            intimate_unlocked
+            or rflags.get(flag_key)
+            or app.get(flag_key)
+            or bool(disc.get(cat_key))
+        )
+
+    def _visible_items(raw_items: List[str], full_flag: str, cat_key: str) -> List[str]:
+        if intimate_unlocked or rflags.get(full_flag) or app.get(full_flag):
+            return [strip_internal_item_tags(x) for x in raw_items if strip_internal_item_tags(x)]
+        known = {strip_internal_item_tags(k).lower() for k in (disc.get(cat_key) or set()) if str(k).strip()}
+        if not known:
+            return []
+        vis: List[str] = []
+        for item in raw_items:
+            clean = strip_internal_item_tags(item)
+            if clean and clean.lower() in known:
+                vis.append(clean)
+        return vis
+
+    raw_spots = _split_clean_items(app.get("sensitive_spots") or app.get("erogenous_zones"))
+    raw_desires = _split_clean_items(app.get("desires_and_kinks") or app.get("turn_ons"))
+    raw_kink = _split_clean_items(app.get("fetishes") or app.get("kinks"))
+    raw_turn_offs = _split_clean_items(app.get("turn_offs") or app.get("aversions") or app.get("dislikes_intimate"))
+    raw_act_likes = _split_clean_items(app.get("act_likes") or app.get("favorite_acts"))
+    raw_act_dislikes = _split_clean_items(app.get("act_dislikes") or app.get("disliked_acts"))
+
+    clean_spots_s, clean_desires_s = partition_sensitivities_and_turn_ons(
+        ", ".join(raw_spots), ", ".join(raw_desires), race=str(npc_contact.get("race") or "human")
+    )
+    vis_spots = _visible_items(_split_clean_items(clean_spots_s), "sensitive_spots_revealed", "sensitive_spot")
+    vis_desires = _visible_items(_split_clean_items(clean_desires_s), "turn_ons_revealed", "desire")
+    vis_kinks = _visible_items(raw_kink, "fetishes_revealed", "kink")
+    vis_turn_offs = _visible_items(raw_turn_offs, "turn_offs_revealed", "turn_off")
+    vis_act_likes = _visible_items(raw_act_likes, "act_preferences_revealed", "act_pref")
+    vis_act_dislikes = _visible_items(raw_act_dislikes, "act_preferences_revealed", "act_pref")
+
+    dyn = str(app.get("intimate_dynamic") or app.get("dynamic") or "").strip() if _is_unlocked("dynamic_revealed", "dynamic") else ""
+    dem = str(app.get("intimate_demeanor") or "").strip() if _is_unlocked("demeanor_revealed", "demeanor") else ""
+    raw_op = app.get("erotic_openness") or app.get("openness") or ""
+    op_known = bool(
+        openness_unlocked
+        or intimate_unlocked
+        or _is_unlocked("openness_revealed", "openness")
+        or bool(disc.get("openness"))
+        or int(npc_contact.get("info_level") or 0) >= 2
+    )
+    eff_contrast = contrast
+    if eff_contrast is None and op_known and dyn and dem:
+        sh_cnt = int((npc_contact.get("shared_intimacy_stats") or {}).get("shared_encounters") or 0)
+        eff_comfort_probe = comfort or compute_with_you_comfort(
+            raw_op or "moderate",
+            relationship_score=int(npc_contact.get("relationship_score", npc_contact.get("score", 0)) or 0),
+            relationship_track=str(npc_contact.get("relationship_track") or npc_contact.get("track") or "platonic"),
+            shared_intimate_count=sh_cnt,
+            is_hostile=(str(npc_contact.get("disposition") or "").lower() == "hostile"),
+        )
+        eff_contrast = resolve_openness_contrast(
+            raw_op or "moderate",
+            dem,
+            dyn,
+            intercourse_experience=str(app.get("intercourse_experience") or ""),
+            shared_intimate_count=sh_cnt,
+            comfort_stage=eff_comfort_probe["stage"],
+        )
+    eff_comfort = comfort
+    if eff_comfort is None and op_known and raw_op:
+        sh_cnt = int((npc_contact.get("shared_intimacy_stats") or {}).get("shared_encounters") or 0)
+        eff_comfort = compute_with_you_comfort(
+            raw_op,
+            relationship_score=int(npc_contact.get("relationship_score", npc_contact.get("score", 0)) or 0),
+            relationship_track=str(npc_contact.get("relationship_track") or npc_contact.get("track") or "platonic"),
+            shared_intimate_count=sh_cnt,
+            is_hostile=(str(npc_contact.get("disposition") or "").lower() == "hostile"),
+            contrast_archetype=(eff_contrast or {}).get("archetype", ""),
+            bluff_crack_active=bool((eff_contrast or {}).get("bluff_crack_active")),
+        )
+
+    # Qualitative Body & Stature Match (zero numbers)
+    body_match: List[str] = []
+    info_lvl = int(npc_contact.get("info_level") or 0)
+    bp_unlocked = _is_unlocked("body_preferences_revealed", "body_pref")
+    height_unlocked = bool(bp_unlocked or info_lvl >= 2)
+    from .generation import normalize_body_preferences
+    raw_b_likes, raw_b_dislikes = normalize_body_preferences(app.get("body_likes"), app.get("body_dislikes"))
+    vis_b_likes = [k for k in raw_b_likes if bp_unlocked or k in disc_bp or (height_unlocked and k in HEIGHT_PREFERENCE_KEYS)]
+    vis_b_dislikes = [k for k in raw_b_dislikes if bp_unlocked or k in disc_bp or (height_unlocked and k in HEIGHT_PREFERENCE_KEYS)]
+
+    p_char = player_char if isinstance(player_char, dict) else {}
+    p_app = dict(p_char.get("appearance") or {}) if isinstance(p_char.get("appearance"), dict) else {}
+    p_gender = str(p_char.get("gender") or p_app.get("gender") or "").strip().lower()
+    p_is_male = is_male_gender(p_gender)
+    p_stature = str(p_char.get("stature") or p_app.get("stature") or "").strip()
+    n_stature = str(npc_contact.get("stature") or app.get("stature") or "").strip()
+    p_height = p_char.get("height_cm") or p_app.get("height_cm")
+    n_height = npc_contact.get("height_cm") or app.get("height_cm")
+    p_race = str(p_char.get("race") or p_app.get("race") or "").strip()
+    n_race = str(npc_contact.get("race") or app.get("race") or "").strip()
+    n_gender = str(npc_contact.get("gender") or app.get("gender") or "").strip()
+    n_name = str(npc_contact.get("name") or "").strip()
+
+    _bp_names = {
+        "bigger_bb": "Curvier / Fuller Bust",
+        "smaller_bb": "Slender / Modest Bust",
+        "bigger_ass": "Fuller Rear",
+        "smaller_ass": "Petite Rear",
+        "taller_partner": "Taller Partner",
+        "shorter_partner": "Shorter Partner",
+    }
+    if p_app or p_stature or p_height is not None:
+        from .appearance import is_feral_rear_excluded
+        from .logic import evaluate_height_preference
+        rel_h = None
+        if vis_b_likes or vis_b_dislikes:
+            try:
+                _p_eval_app = dict(p_app)
+                if p_stature and not _p_eval_app.get("stature"):
+                    _p_eval_app["stature"] = p_stature
+                if p_height is not None and _p_eval_app.get("height_cm") is None:
+                    _p_eval_app["height_cm"] = p_height
+                _n_eval_app = {
+                    "stature": n_stature or str(app.get("stature") or app.get("height") or "average"),
+                    "height_cm": n_height,
+                    "body_likes": vis_b_likes,
+                    "body_dislikes": vis_b_dislikes,
+                    "height_pref_seeded": True,
+                }
+                rel_h = evaluate_height_preference(
+                    _p_eval_app,
+                    _n_eval_app,
+                    npc_gender=n_gender,
+                    npc_race=n_race,
+                    npc_name=n_name,
+                    player_race=p_race,
+                )
+            except Exception:
+                rel_h = None
+        _tp_h = rel_h.get("triggered_pref") if isinstance(rel_h, dict) else None
+        if isinstance(_tp_h, dict) and _tp_h.get("fact_value"):
+            _fv_h = str(_tp_h.get("fact_value") or "")
+            if _tp_h.get("sentiment") == "like":
+                body_match.append("Loves Your Height Contrast" if ("taller" in _fv_h or "shorter" in _fv_h) else "Height Match")
+            elif _tp_h.get("sentiment") == "dislike":
+                body_match.append("Height Contrast Friction")
+
+        if not p_is_male and p_app.get("breast_size"):
+            from .appearance import classify_asset_size_tier
+            b_tier = classify_asset_size_tier(str(p_app.get("breast_size") or ""), gender="female")
+            if "bigger_bb" in vis_b_likes and b_tier in ("large", "very_large", "huge", "hyper"):
+                body_match.append("Attracted to Your Bust")
+            elif "smaller_bb" in vis_b_likes and b_tier in ("flat", "small"):
+                body_match.append("Attracted to Petite Bust")
+            elif ("bigger_bb" in vis_b_dislikes and b_tier in ("large", "very_large", "huge", "hyper")) or (
+                "smaller_bb" in vis_b_dislikes and b_tier in ("flat", "small")
+            ):
+                body_match.append("Bust Preference Mismatch")
+
+        if p_app.get("rear_size") and not is_feral_rear_excluded(p_race) and not is_feral_rear_excluded(n_race):
+            from .appearance import classify_rear_size_tier
+            r_tier = classify_rear_size_tier(str(p_app.get("rear_size") or ""))
+            if "bigger_ass" in vis_b_likes and r_tier in ("large", "very_large", "huge"):
+                body_match.append("Attracted to Your Curves")
+            elif "smaller_ass" in vis_b_likes and r_tier in ("flat", "petite", "small", "slim"):
+                body_match.append("Prefers Slender Build")
+            elif ("bigger_ass" in vis_b_dislikes and r_tier in ("large", "very_large", "huge")) or (
+                "smaller_ass" in vis_b_dislikes and r_tier in ("flat", "petite", "small", "slim")
+            ):
+                body_match.append("Curve Preference Friction")
+    else:
+        for k in vis_b_likes:
+            if k in _bp_names:
+                body_match.append(f"Drawn to {_bp_names[k]}")
+        for k in vis_b_dislikes:
+            if k in _bp_names:
+                body_match.append(f"Cools on {_bp_names[k]}")
+
+    # Act Alignment & Watch Out For
+    act_alignment: List[str] = []
+    for ak in vis_kinks:
+        act_alignment.append(f"Active Kink: {ak}")
+    for al in vis_act_likes:
+        if is_act_inexperienced_curiosity(al, app):
+            act_alignment.append(f"Curious About: {al}")
+        else:
+            act_alignment.append(f"Enjoys {al}")
+    if not vis_act_likes and vis_desires:
+        act_alignment.append(f"Responds to {vis_desires[0]}")
+
+    watch_out: List[str] = []
+    for to in vis_turn_offs:
+        watch_out.append(to)
+    for ad in vis_act_dislikes:
+        watch_out.append(f"Averse to {ad}")
+
+    # Best Approach synthesis (pure prose, zero numbers)
+    approach_parts: List[str] = []
+    if op_known and raw_op:
+        op_tier = normalize_openness_tier(raw_op)
+        c_stage = str((eff_comfort or {}).get("stage") or "guarded")
+        c_arch = str((eff_contrast or {}).get("archetype") or "")
+        c_bluff = bool((eff_contrast or {}).get("bluff_crack_active"))
+        contrast_known = bool(c_arch and (intimate_unlocked or (bool(dem) and bool(dyn))))
+        if contrast_known and c_arch == "all_talk_tease" and c_bluff:
+            approach_parts.append("Match their playful banter, then shift to gentle reassurance in private")
+        elif contrast_known and c_arch == "hidden_fire" and c_stage in ("warming_up", "trusting_private"):
+            approach_parts.append("Give them complete privacy so their hidden intensity can take over")
+        elif op_tier == "prude":
+            if c_stage == "guarded":
+                approach_parts.append("Build genuine romantic trust slowly before escalating")
+            elif c_stage == "warming_up":
+                approach_parts.append("Take a gentle, unhurried private pace as their guard softens")
+            else:
+                approach_parts.append("Keep things warm and deeply private where they trust you")
+        elif op_tier in ("bold", "shameless"):
+            approach_parts.append("Meet their candid spark directly and lean into confident flirting")
+    if dyn:
+        dyn_head = dyn.split("(")[0].strip()
+        if "service" in dyn_head.lower():
+            approach_parts.append("Invite their attentive, giving rhythm")
+        elif "dominant" in dyn_head.lower() or "assertive" in dyn_head.lower():
+            approach_parts.append("Let them set the pace or test their lead")
+        elif "gentle" in dyn_head.lower() and "receptive" not in dyn_head.lower():
+            approach_parts.append("Lead gently with unhurried affection and reassurance")
+        elif "submissive" in dyn_head.lower() or "yielding" in dyn_head.lower() or "receptive" in dyn_head.lower():
+            approach_parts.append("Take a steady, reassuring lead")
+        elif dyn_head:
+            approach_parts.append(f"Lean into their {dyn_head.lower()} style")
+    if vis_spots:
+        approach_parts.append(f"focus foreplay around their {vis_spots[0].lower()}")
+    if vis_kinks:
+        approach_parts.append(f"indulge {vis_kinks[0].lower()}")
+    elif vis_desires:
+        approach_parts.append(f"weave in {vis_desires[0].lower()}")
+
+    best_approach = ""
+    if approach_parts:
+        raw_sentence = ", ".join(approach_parts[:3])
+        raw_sentence = raw_sentence[0].upper() + raw_sentence[1:] + "."
+        best_approach = _strip_digits(raw_sentence)
+
+    clean_body = [_strip_digits(x) for x in body_match if _strip_digits(x)]
+    clean_acts = [_strip_digits(x) for x in act_alignment[:4] if _strip_digits(x)]
+    clean_watch = [_strip_digits(x) for x in watch_out[:4] if _strip_digits(x)]
+
+    has_any = bool(best_approach or clean_body or clean_acts or clean_watch)
+    return {
+        "best_approach": best_approach,
+        "body_match": clean_body,
+        "act_alignment": clean_acts,
+        "watch_out": clean_watch,
+        "has_any": has_any,
+    }
+
+
+def format_intimate_profile_sections(
+    app_dict: Dict[str, Any],
+    gender: str = "",
+    race: str = "human",
+    scen_key: str = "fantasy",
+    info_level: int = 1,
+    revealed_flags: Dict[str, Any] = None,
+    intimate_profile: Dict[str, Any] = None,
+    discovered_body_prefs: Optional[set[str]] = None,
+    discovered_intimate: Optional[Dict[str, set[str]]] = None,
+    *,
+    relationship_score: int = 0,
+    relationship_track: str = "platonic",
+    shared_intimate_count: int = 0,
+    is_hostile: bool = False,
+) -> Dict[str, Any]:
     """Formats intimate profile categorized sections (Anatomy & Experience, Demeanor & Dynamic, Turn-Ons & Desires, Act Preferences) with discovery metadata."""
     app_dict = dict(app_dict or {})
     if intimate_profile and isinstance(intimate_profile, dict):
@@ -728,8 +1325,8 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     intimate_unlocked = (info_level >= 3) or revealed_flags.get("intimate_revealed", False) or revealed_flags.get("all_revealed", False) or app_dict.get("intimate_revealed", False)
 
     raw_g = gender.strip().lower()
-    is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
-    is_female = not is_male
+    is_male = is_male_gender(raw_g)
+    is_female = is_female_gender(raw_g) or (not is_male and raw_g == "")
 
     b_size = app_dict.get("breast_size")
     p_size = app_dict.get("penis_size")
@@ -737,13 +1334,26 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     anatomy_lines = []
     discovered = {}
 
-    from .appearance import fuse_asset_size_and_texture
-    tex_val = app_dict.get("asset_texture") or ""
+    from .appearance import (
+        classify_rear_size_tier,
+        fuse_asset_size_and_texture,
+        fuse_rear_size_and_texture,
+        is_feral_rear_excluded,
+        normalize_asset_texture,
+        normalize_rear_texture,
+        strip_asset_texture_from_size,
+        strip_rear_texture_from_size,
+    )
+    eff_gender = "male" if is_male else "female"
+    tex_val = normalize_asset_texture(app_dict.get("asset_texture") or "", gender=eff_gender)
 
     # 1. Size
     if is_female:
         if b_size:
-            fused_b = fuse_asset_size_and_texture(b_size, tex_val, gender="female") if tex_val else b_size
+            if intimate_unlocked:
+                fused_b = fuse_asset_size_and_texture(b_size, tex_val, gender="female") if tex_val else b_size
+            else:
+                fused_b = strip_asset_texture_from_size(str(b_size), gender="female") or str(b_size)
             anatomy_lines.append(f"• **Breast Size**: {fused_b}")
             discovered["size"] = fused_b
         else:
@@ -757,7 +1367,10 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
             anatomy_lines.append("• **Penis Size**: *Unknown*")
     else:
         if b_size:
-            fused_b = fuse_asset_size_and_texture(b_size, tex_val, gender="female") if tex_val else b_size
+            if intimate_unlocked:
+                fused_b = fuse_asset_size_and_texture(b_size, tex_val, gender="female") if tex_val else b_size
+            else:
+                fused_b = strip_asset_texture_from_size(str(b_size), gender="female") or str(b_size)
             anatomy_lines.append(f"• **Breast Size**: {fused_b}")
             discovered["size"] = fused_b
         if (intimate_unlocked or info_level >= 3) and p_size:
@@ -766,6 +1379,17 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
             discovered["penis_size"] = fused_p
         elif p_size:
             anatomy_lines.append("• **Penis Size**: *Unknown*")
+
+    # 1b. Universal Rear / Ass Silhouette (bare before unlock, fused after; omitted for feral myobu_fox)
+    r_size = app_dict.get("rear_size")
+    if r_size and not is_feral_rear_excluded(race):
+        r_tex_val = normalize_rear_texture(app_dict.get("rear_texture") or "", size_tier=classify_rear_size_tier(str(r_size)))
+        if intimate_unlocked:
+            fused_r = fuse_rear_size_and_texture(str(r_size), r_tex_val) if r_tex_val else str(r_size)
+        else:
+            fused_r = strip_rear_texture_from_size(str(r_size)) or str(r_size)
+        anatomy_lines.append(f"• **Rear**: {fused_r}")
+        discovered["rear_size"] = fused_r
 
     # 2. Intercourse Track
     intercourse = app_dict.get("intercourse_experience") or app_dict.get("predetermined_intercourse") or "virgin"
@@ -852,10 +1476,59 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     openness = app_dict.get("erotic_openness") or app_dict.get("openness")
     if not is_valid_persona_attribute_string(openness):
         openness = None
-    openness_revealed = intimate_unlocked or revealed_flags.get("openness_revealed", False) or app_dict.get("openness_revealed", False) or dynamic_revealed
+    _disc_open_set = set((discovered_intimate or {}).get("openness") or set()) if isinstance(discovered_intimate, dict) else set()
+    openness_revealed = bool(
+        intimate_unlocked
+        or revealed_flags.get("openness_revealed", False)
+        or app_dict.get("openness_revealed", False)
+        or dynamic_revealed
+        or bool(_disc_open_set)
+        or int(info_level or 0) >= 2
+    )
+    eff_shared_cnt = max(0, int(shared_intimate_count or 0))
+    eff_ic_exp = str(app_dict.get("intercourse_experience") or app_dict.get("predetermined_intercourse") or "").strip().lower()
+    _open_tier = normalize_openness_tier(openness) if openness else ""
+    _pre_comfort = compute_with_you_comfort(
+        openness or "moderate",
+        relationship_score=relationship_score,
+        relationship_track=relationship_track,
+        shared_intimate_count=eff_shared_cnt,
+        is_hostile=is_hostile,
+    )
+    _contrast_info = resolve_openness_contrast(
+        openness or "moderate",
+        demeanor or "",
+        dynamic or "",
+        intercourse_experience=eff_ic_exp,
+        shared_intimate_count=eff_shared_cnt,
+        comfort_stage=_pre_comfort["stage"],
+    )
+    _comfort_info = compute_with_you_comfort(
+        openness or "moderate",
+        relationship_score=relationship_score,
+        relationship_track=relationship_track,
+        shared_intimate_count=eff_shared_cnt,
+        is_hostile=is_hostile,
+        contrast_archetype=_contrast_info["archetype"],
+        bluff_crack_active=_contrast_info["bluff_crack_active"],
+    )
+    contrast_revealed = bool(
+        openness
+        and openness_revealed
+        and (intimate_unlocked or (demeanor_revealed and dynamic_revealed))
+        and _contrast_info.get("archetype")
+    )
+
     if openness_revealed and openness:
         open_label = get_erotic_openness_label(openness)
-        dynamic_lines.append(f"• **Openness**: {open_label}")
+        open_line = f"• **Openness**: {open_label}"
+        if _comfort_info.get("show_badge"):
+            open_line += f" • **With-You Comfort**: {_comfort_info['badge_label']}"
+            discovered["with_you_comfort"] = _comfort_info["badge_label"]
+        if contrast_revealed:
+            open_line += f" • **Contrast**: {_contrast_info['label']}"
+            discovered["openness_contrast"] = _contrast_info["label"]
+        dynamic_lines.append(open_line)
         discovered["openness"] = open_label
     else:
         dynamic_lines.append("• **Openness**: *Unknown*")
@@ -870,15 +1543,28 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     # Partition spots and turn-ons to eliminate duplicates and cleanly separate physical spots from action triggers
     clean_spots, clean_turn_ons = partition_sensitivities_and_turn_ons(sensitive_spots, turn_ons, race=race)
 
-    # Fold active kink into desires if not already present
-    if fetishes and fetishes.lower() not in ('none', 'none (vanilla)', 'unknown', ''):
-        if not clean_turn_ons:
-            clean_turn_ons = fetishes
-        elif fetishes.lower() not in clean_turn_ons.lower():
-            clean_turn_ons = f"{clean_turn_ons}, {fetishes}".strip(", ")
-
     sensitive_spots_lines = []
     desires_lines = []
+    disc_int = discovered_intimate if isinstance(discovered_intimate, dict) else {}
+
+    def _disc_set(cat_key: str) -> set[str]:
+        return {
+            strip_internal_item_tags(str(x)).lower()
+            for x in (disc_int.get(cat_key) or set())
+            if str(x).strip()
+        }
+
+    disc_spots_set = _disc_set("sensitive_spot")
+    disc_desires_set = _disc_set("desire")
+    disc_kinks_set = _disc_set("kink")
+    disc_turn_offs_set = _disc_set("turn_off")
+    disc_act_prefs_set = _disc_set("act_pref")
+    disc_under_set = _disc_set("undergarment")
+
+    raw_spot_items = _split_clean_items(clean_spots)
+    raw_desire_only_items = _split_clean_items(clean_turn_ons)
+    raw_kink_items = _split_clean_items(fetishes)
+    raw_turn_off_items = _split_clean_items(turn_offs)
 
     spots_revealed = (
         intimate_unlocked
@@ -892,17 +1578,92 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
         or app_dict.get("turn_ons_revealed", False)
         or app_dict.get("turn_offs_revealed", False)
     )
+    fetishes_revealed = (
+        intimate_unlocked
+        or desires_revealed
+        or revealed_flags.get("fetishes_revealed", False)
+        or app_dict.get("fetishes_revealed", False)
+    )
+
+    # Fold active kink into text desires bullet for backwards compatibility (structured keeps active_kink separate)
+    clean_turn_ons_for_lines = clean_turn_ons
+    if fetishes and fetishes.lower() not in ("none", "none (vanilla)", "unknown", ""):
+        if not clean_turn_ons_for_lines:
+            clean_turn_ons_for_lines = fetishes
+        elif fetishes.lower() not in clean_turn_ons_for_lines.lower():
+            clean_turn_ons_for_lines = f"{clean_turn_ons_for_lines}, {fetishes}".strip(", ")
+
+    structured_spots: List[Dict[str, Any]] = []
+    for _sp in raw_spot_items:
+        _sp_clean = strip_internal_item_tags(_sp)
+        if not _sp_clean:
+            continue
+        if spots_revealed or (_sp_clean.lower() in disc_spots_set) or (_sp.lower() in disc_spots_set):
+            structured_spots.append({"label": _sp_clean, "masked": False})
+        else:
+            structured_spots.append({"label": "???", "masked": True})
+    if not structured_spots and not spots_revealed:
+        structured_spots = [{"label": "???", "masked": True}]
 
     if spots_revealed:
         s_val = clean_spots if clean_spots else "None"
         sensitive_spots_lines.append(f"• **Sensitive Spots**: {s_val}")
         if s_val != "None":
             discovered["sensitive_spots"] = s_val
+    elif disc_spots_set and any(not x["masked"] for x in structured_spots):
+        _part_spots = [x["label"] for x in structured_spots if not x["masked"]]
+        if any(x["masked"] for x in structured_spots):
+            _part_spots.append("???")
+        sensitive_spots_lines.append(f"• **Sensitive Spots**: {', '.join(_part_spots)}")
+        discovered["sensitive_spots"] = ", ".join(x["label"] for x in structured_spots if not x["masked"])
     else:
         sensitive_spots_lines.append("• **Sensitive Spots**: *Unknown*")
 
+    structured_desires: List[Dict[str, Any]] = []
+    for _ds in raw_desire_only_items:
+        _ds_clean = strip_internal_item_tags(_ds)
+        if not _ds_clean:
+            continue
+        if desires_revealed or (_ds_clean.lower() in disc_desires_set) or (_ds.lower() in disc_desires_set):
+            structured_desires.append({"label": _ds_clean, "masked": False})
+        else:
+            structured_desires.append({"label": "???", "masked": True})
+    if not structured_desires and not desires_revealed:
+        structured_desires = [{"label": "???", "masked": True}]
+
+    structured_kink: Optional[Dict[str, Any]] = None
+    if raw_kink_items:
+        _vis_kinks: List[str] = []
+        _has_masked_kink = False
+        for _rk in raw_kink_items:
+            _k_clean = strip_internal_item_tags(_rk)
+            if not _k_clean:
+                continue
+            if fetishes_revealed or (_k_clean.lower() in disc_kinks_set) or (_rk.lower() in disc_kinks_set):
+                if _k_clean not in _vis_kinks:
+                    _vis_kinks.append(_k_clean)
+            else:
+                _has_masked_kink = True
+        if _vis_kinks:
+            _k_lbl = ", ".join(_vis_kinks + (["???"] if _has_masked_kink else []))
+            structured_kink = {"label": _k_lbl, "masked": False}
+        elif _has_masked_kink:
+            structured_kink = {"label": "???", "masked": True}
+
+    structured_turn_offs: List[Dict[str, Any]] = []
+    for _to in raw_turn_off_items:
+        _to_clean = strip_internal_item_tags(_to)
+        if not _to_clean:
+            continue
+        if desires_revealed or (_to_clean.lower() in disc_turn_offs_set) or (_to.lower() in disc_turn_offs_set):
+            structured_turn_offs.append({"label": _to_clean, "masked": False})
+        else:
+            structured_turn_offs.append({"label": "???", "masked": True})
+    if not structured_turn_offs and not desires_revealed:
+        structured_turn_offs = [{"label": "???", "masked": True}]
+
     if desires_revealed:
-        t_val = clean_turn_ons if clean_turn_ons else "None"
+        t_val = clean_turn_ons_for_lines if clean_turn_ons_for_lines else "None"
         to_val = turn_offs if turn_offs else "None"
         desires_lines.append(f"• **Desires & Kinks**: {t_val}")
         desires_lines.append(f"• **Turn-Offs**: {to_val}")
@@ -911,11 +1672,75 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
             discovered["desires_and_kinks"] = t_val
         if to_val != "None":
             discovered["turn_offs"] = to_val
-        if fetishes and fetishes.lower() not in ('none', 'none (vanilla)', 'unknown', ''):
+        if fetishes and fetishes.lower() not in ("none", "none (vanilla)", "unknown", ""):
             discovered["fetishes"] = fetishes
     else:
-        desires_lines.append("• **Desires & Kinks**: *Unknown*")
-        desires_lines.append("• **Turn-Offs**: *Unknown*")
+        _part_des = [x["label"] for x in structured_desires if not x["masked"]]
+        if structured_kink and not structured_kink["masked"]:
+            _part_des.append(structured_kink["label"])
+        if _part_des:
+            _has_hidden_des = any(x["masked"] for x in structured_desires) or bool(structured_kink and structured_kink["masked"])
+            desires_lines.append(f"• **Desires & Kinks**: {', '.join(_part_des + (['???'] if _has_hidden_des else []))}")
+        else:
+            desires_lines.append("• **Desires & Kinks**: *Unknown*")
+
+        _part_to = [x["label"] for x in structured_turn_offs if not x["masked"]]
+        if _part_to:
+            _has_hidden_to = any(x["masked"] for x in structured_turn_offs)
+            desires_lines.append(f"• **Turn-Offs**: {', '.join(_part_to + (['???'] if _has_hidden_to else []))}")
+        else:
+            desires_lines.append("• **Turn-Offs**: *Unknown*")
+
+    _bp_label_map = {
+        "smaller_bb": "Smaller Breasts",
+        "bigger_bb": "Bigger Breasts",
+        "smaller_ass": "Smaller Rear",
+        "bigger_ass": "Bigger Rear",
+        "taller_partner": "Taller Partners",
+        "shorter_partner": "Shorter Partners",
+    }
+    _raw_bp_likes = [
+        str(k).strip().lower()
+        for k in (app_dict.get("body_likes") or [])
+        if str(k).strip().lower() in _bp_label_map
+    ]
+    _raw_bp_dislikes = [
+        str(k).strip().lower()
+        for k in (app_dict.get("body_dislikes") or [])
+        if str(k).strip().lower() in _bp_label_map
+    ]
+    from scenario_data import is_nsfw_scenario as _is_nsfw_fmt
+    if not _is_nsfw_fmt(scen_key):
+        _raw_bp_likes = [k for k in _raw_bp_likes if k in HEIGHT_PREFERENCE_KEYS]
+        _raw_bp_dislikes = [k for k in _raw_bp_dislikes if k in HEIGHT_PREFERENCE_KEYS]
+    _disc_bp = {str(k).strip().lower() for k in (discovered_body_prefs or set()) if str(k).strip()}
+    _bp_unlocked = bool(
+        intimate_unlocked
+        or revealed_flags.get("body_preferences_revealed", False)
+        or app_dict.get("body_preferences_revealed", False)
+    )
+    _height_unlocked = bool(_bp_unlocked or int(info_level or 0) >= 2)
+    if (_bp_unlocked or _height_unlocked or _disc_bp) and not is_feral_rear_excluded(race):
+        _vis_likes = [
+            k for k in _raw_bp_likes
+            if _bp_unlocked or (k in _disc_bp) or (_height_unlocked and k in HEIGHT_PREFERENCE_KEYS)
+        ]
+        _vis_dislikes = [
+            k for k in _raw_bp_dislikes
+            if _bp_unlocked or (k in _disc_bp) or (_height_unlocked and k in HEIGHT_PREFERENCE_KEYS)
+        ]
+        _bp_parts = []
+        if _vis_likes:
+            _bp_parts.append("Likes " + ", ".join(_bp_label_map[k] for k in _vis_likes))
+        if _vis_dislikes:
+            _bp_parts.append("Dislikes " + ", ".join(_bp_label_map[k] for k in _vis_dislikes))
+        if _bp_parts:
+            _bp_str = "; ".join(_bp_parts)
+            desires_lines.append(f"• **Body Preferences**: {_bp_str}")
+            discovered["body_preferences"] = _bp_str
+        elif _bp_unlocked:
+            desires_lines.append("• **Body Preferences**: Neutral")
+            discovered["body_preferences"] = "Neutral"
 
     sensitivity_lines = sensitive_spots_lines + desires_lines
 
@@ -925,18 +1750,60 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     act_dislikes = clean_attribute_list_string(app_dict.get("act_dislikes"))
     act_revealed = intimate_unlocked or revealed_flags.get("act_preferences_revealed", False) or app_dict.get("act_preferences_revealed", False)
 
+    raw_act_like_items = _split_clean_items(act_likes)
+    raw_act_dislike_items = _split_clean_items(act_dislikes)
+
+    structured_act_likes: List[Dict[str, Any]] = []
+    for _al in raw_act_like_items:
+        _al_clean = strip_internal_item_tags(_al)
+        if not _al_clean:
+            continue
+        if act_revealed or (_al_clean.lower() in disc_act_prefs_set) or (_al.lower() in disc_act_prefs_set):
+            structured_act_likes.append({
+                "label": _al_clean,
+                "curious": is_act_inexperienced_curiosity(_al_clean, app_dict),
+                "masked": False,
+            })
+        else:
+            structured_act_likes.append({"label": "???", "curious": False, "masked": True})
+    if not structured_act_likes and not act_revealed:
+        structured_act_likes = [{"label": "???", "curious": False, "masked": True}]
+
+    structured_act_dislikes: List[Dict[str, Any]] = []
+    for _ad in raw_act_dislike_items:
+        _ad_clean = strip_internal_item_tags(_ad)
+        if not _ad_clean:
+            continue
+        if act_revealed or (_ad_clean.lower() in disc_act_prefs_set) or (_ad.lower() in disc_act_prefs_set):
+            structured_act_dislikes.append({"label": _ad_clean, "masked": False})
+        else:
+            structured_act_dislikes.append({"label": "???", "masked": True})
+    if not structured_act_dislikes and not act_revealed:
+        structured_act_dislikes = [{"label": "???", "masked": True}]
+
     if act_revealed and (act_likes or act_dislikes):
-        l_val = act_likes if act_likes else 'None'
-        d_val = act_dislikes if act_dislikes else 'None'
+        l_val = act_likes if act_likes else "None"
+        d_val = act_dislikes if act_dislikes else "None"
         act_lines.append(f"• **Preferred / Likes**: {l_val}")
         act_lines.append(f"• **Aversions / Dislikes**: {d_val}")
-        if l_val != 'None':
+        if l_val != "None":
             discovered["act_likes"] = l_val
-        if d_val != 'None':
+        if d_val != "None":
             discovered["act_dislikes"] = d_val
     else:
-        act_lines.append("• **Preferred / Likes**: *Unknown*")
-        act_lines.append("• **Aversions / Dislikes**: *Unknown*")
+        _part_al = [x["label"] for x in structured_act_likes if not x["masked"]]
+        if _part_al:
+            _has_hidden_al = any(x["masked"] for x in structured_act_likes)
+            act_lines.append(f"• **Preferred / Likes**: {', '.join(_part_al + (['???'] if _has_hidden_al else []))}")
+        else:
+            act_lines.append("• **Preferred / Likes**: *Unknown*")
+
+        _part_ad = [x["label"] for x in structured_act_dislikes if not x["masked"]]
+        if _part_ad:
+            _has_hidden_ad = any(x["masked"] for x in structured_act_dislikes)
+            act_lines.append(f"• **Aversions / Dislikes**: {', '.join(_part_ad + (['???'] if _has_hidden_ad else []))}")
+        else:
+            act_lines.append("• **Aversions / Dislikes**: *Unknown*")
 
     # Undergarments Section
     undergarment_lines = []
@@ -948,9 +1815,10 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
                 "underwear": str(app_dict.get("underwear", "")).strip()
             }
         else:
+            _under_gender = "male" if (is_male or (not is_female and p_size and not b_size)) else gender
             under_dict = generate_procedural_undergarments(
                 seed_str=gender + "_" + race,
-                gender=gender,
+                gender=_under_gender,
                 openness=app_dict.get("erotic_openness") or app_dict.get("openness", "moderate"),
                 dynamic=app_dict.get("intimate_dynamic") or app_dict.get("dynamic", ""),
                 traits=app_dict.get("traits") or []
@@ -967,21 +1835,92 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     bra_val = re.sub(r'\bNude\s*/\s*Beige\b', 'Beige / Skin-Tone', str(under_dict.get("bra", "") or ""), flags=re.I).strip()
     und_val = re.sub(r'\bNude\s*/\s*Beige\b', 'Beige / Skin-Tone', str(under_dict.get("underwear", "") or ""), flags=re.I).strip()
 
-    if is_female:
-        if (underwear_revealed or info_level >= 3) and (bra_val or und_val):
-            undergarment_lines.append(f"• **Bra**: {bra_val or 'None (Bra-less)'}")
-            undergarment_lines.append(f"• **Underwear**: {und_val or 'None (Commando)'}")
-            discovered["bra"] = bra_val or "None (Bra-less)"
-            discovered["underwear"] = und_val or "None (Commando)"
+    bra_known = bool(
+        underwear_revealed
+        or info_level >= 3
+        or "bra" in disc_under_set
+        or (bra_val and any(bra_val.lower() in x or x in bra_val.lower() for x in disc_under_set))
+    )
+    und_known = bool(
+        underwear_revealed
+        or info_level >= 3
+        or "underwear" in disc_under_set
+        or (und_val and any(und_val.lower() in x or x in und_val.lower() for x in disc_under_set))
+    )
+
+    show_bra = is_female or (not is_male and bool(bra_val))
+    if show_bra:
+        if bra_known and (bra_val or underwear_revealed or info_level >= 3):
+            _eff_bra = bra_val or "None (Bra-less)"
+            undergarment_lines.append(f"• **Bra**: {_eff_bra}")
+            discovered["bra"] = _eff_bra
         else:
             undergarment_lines.append("• **Bra**: *Unknown*")
+        if und_known and (und_val or underwear_revealed or info_level >= 3):
+            _eff_und = und_val or "None (Commando)"
+            undergarment_lines.append(f"• **Underwear**: {_eff_und}")
+            discovered["underwear"] = _eff_und
+        else:
             undergarment_lines.append("• **Underwear**: *Unknown*")
     else:
-        if (underwear_revealed or info_level >= 3) and und_val:
+        if und_known and und_val:
             undergarment_lines.append(f"• **Underwear**: {und_val}")
             discovered["underwear"] = und_val
         else:
             undergarment_lines.append("• **Underwear**: *Unknown*")
+
+    structured_body_likes: List[str] = []
+    structured_body_dislikes: List[str] = []
+    if (_bp_unlocked or _height_unlocked or _disc_bp) and not is_feral_rear_excluded(race):
+        structured_body_likes = [
+            k for k in _raw_bp_likes
+            if _bp_unlocked or (k in _disc_bp) or (_height_unlocked and k in HEIGHT_PREFERENCE_KEYS)
+        ]
+        structured_body_dislikes = [
+            k for k in _raw_bp_dislikes
+            if _bp_unlocked or (k in _disc_bp) or (_height_unlocked and k in HEIGHT_PREFERENCE_KEYS)
+        ]
+
+    structured_payload: Dict[str, Any] = {
+        "openness": (
+            {"tier": _open_tier, "label": get_erotic_openness_label(openness), "masked": False}
+            if (openness_revealed and openness)
+            else {"tier": "", "label": "???", "masked": True}
+        ),
+        "with_you_comfort": (
+            {
+                "stage": _comfort_info["stage"],
+                "badge_key": _comfort_info["badge_key"],
+                "badge_label": _comfort_info["badge_label"],
+            }
+            if (openness_revealed and openness and _comfort_info.get("show_badge"))
+            else None
+        ),
+        "openness_contrast": (
+            {
+                "archetype": _contrast_info["archetype"],
+                "label": _contrast_info["label"],
+                "bluff_crack_active": bool(_contrast_info["bluff_crack_active"]),
+                "graduated": bool(_contrast_info["graduated"]),
+            }
+            if contrast_revealed
+            else None
+        ),
+        "sensitive_spots": structured_spots,
+        "desires": structured_desires,
+        "active_kink": structured_kink,
+        "turn_offs": structured_turn_offs,
+        "act_likes": structured_act_likes,
+        "act_dislikes": structured_act_dislikes,
+        "body_likes": structured_body_likes,
+        "body_dislikes": structured_body_dislikes,
+        "undergarments": {
+            "bra": (bra_val or "None (Bra-less)") if (show_bra and bra_known and (bra_val or underwear_revealed or info_level >= 3)) else ("???" if show_bra else ""),
+            "bra_masked": bool(show_bra and not (bra_known and (bra_val or underwear_revealed or info_level >= 3))),
+            "underwear": (und_val or "None (Commando)") if (und_known and (und_val or (show_bra and (underwear_revealed or info_level >= 3)))) else "???",
+            "underwear_masked": not bool(und_known and (und_val or (show_bra and (underwear_revealed or info_level >= 3)))),
+        },
+    }
 
     return {
         "anatomy": anatomy_lines,
@@ -991,14 +1930,16 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
         "desires_and_turn_offs": desires_lines,
         "sensitivities": sensitivity_lines,
         "act_preferences": act_lines,
-        "discovered": discovered
+        "discovered": discovered,
+        "structured": structured_payload,
     }
 
-def format_intimate_profile_lines(app_dict: Dict[str, Any], gender: str = "", race: str = "human", scen_key: str = "fantasy", info_level: int = 1, revealed_flags: Dict[str, Any] = None) -> List[str]:
+def format_intimate_profile_lines(app_dict: Dict[str, Any], gender: str = "", race: str = "human", scen_key: str = "fantasy", info_level: int = 1, revealed_flags: Dict[str, Any] = None, discovered_body_prefs: Optional[set[str]] = None) -> List[str]:
     """Formats intimate profile bullet points (Anatomy & Experience, Demeanor, Dynamic, Undergarments, Turn-Ons, Fetishes, Act Preferences)."""
     sec = format_intimate_profile_sections(
         app_dict, gender=gender, race=race, scen_key=scen_key,
-        info_level=info_level, revealed_flags=revealed_flags
+        info_level=info_level, revealed_flags=revealed_flags,
+        discovered_body_prefs=discovered_body_prefs,
     )
     return sec["anatomy"] + sec["dynamic"] + sec["undergarments"] + sec["sensitivities"] + sec["act_preferences"]
 
@@ -1013,7 +1954,8 @@ def format_persona_embed_fields(app_dict: Dict[str, Any], gender: str = "", race
     h_len = (app_dict.get("hair_length") or "").title()
     h_style = (app_dict.get("hair_style") or "").title()
     stature = (app_dict.get("stature") or "Average").replace("_", " ").title()
-    physique = (app_dict.get("physique") or "").replace("_", " ").title()
+    raw_phys = (app_dict.get("physique") or "").strip()
+    physique = normalize_physique(raw_phys) or raw_phys.replace("_", " ").title()
 
     is_dyed = bool(app_dict.get("is_dyed"))
     coat_val = app_dict.get("coat_color")
@@ -1106,4 +2048,11 @@ def format_persona_embed_fields(app_dict: Dict[str, Any], gender: str = "", race
 
 
 from .appearance import normalize_appearance
-from .logic import get_erotic_openness_label, enforce_intimacy_safeguard_invariants, partition_sensitivities_and_turn_ons
+from .logic import (
+    compute_with_you_comfort,
+    enforce_intimacy_safeguard_invariants,
+    get_erotic_openness_label,
+    normalize_openness_tier,
+    partition_sensitivities_and_turn_ons,
+    resolve_openness_contrast,
+)

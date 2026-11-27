@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional, Tuple
 
 import db
@@ -188,7 +189,32 @@ async def handle_dm_over_limit(
     }
 
 
-def persist_dm_media_item_and_milestone(
+_DM_MEDIA_TAG_RE = re.compile(
+    r"\[Attached\s+(?:Bonus\s+)?(Intimate\s+)?(Photo|Video)\s*:\s*([^\]]+)\]",
+    re.IGNORECASE,
+)
+
+_MEDIA_CAPTION_PREFIXES = (
+    "Attached Bonus Intimate Video:",
+    "Attached Bonus Video:",
+    "Attached Bonus Intimate Photo:",
+    "Attached Bonus Photo:",
+    "Bonus Intimate Video:",
+    "Bonus Video:",
+    "Bonus Intimate Photo:",
+    "Bonus Photo:",
+    "Attached Intimate Video:",
+    "Attached Video:",
+    "Attached Intimate Photo:",
+    "Attached Photo:",
+    "Intimate Video:",
+    "Video:",
+    "Intimate Photo:",
+    "Photo:",
+)
+
+
+def persist_dm_media_items_and_milestone(
     *,
     session: dict[str, Any],
     session_id: int,
@@ -200,59 +226,50 @@ def persist_dm_media_item_and_milestone(
     reply_text: str,
     intent: str,
     current_day: int,
-) -> Tuple[Optional[int], Optional[str]]:
-    """Creates a Digital Media Item and records caption-aware milestone memories when media is received."""
+) -> dict[str, Any]:
+    """Creates Digital Media Item(s) for all DM photo/video tags and records milestone memories."""
     from mechanics.combat.items import create_digital_media_item
 
-    digital_item_id = None
-    media_type_created = None
-    media_type = None
-    media_caption = None
+    parsed_attachments: list[Tuple[str, str]] = []
+    for intimate_kw, kind_kw, raw_cap in _DM_MEDIA_TAG_RE.findall(reply_text or ""):
+        m_type = f"{'nsfw_' if intimate_kw else ''}{'video' if kind_kw.lower() == 'video' else 'photo'}"
+        cap = raw_cap.strip()
+        if cap:
+            parsed_attachments.append((m_type, cap))
 
-    if "[Attached Intimate Video:" in reply_text:
-        media_type = "nsfw_video"
-        media_caption = reply_text.partition("[Attached Intimate Video:")[2].partition("]")[0].strip()
-    elif "[Attached Video:" in reply_text:
-        media_type = "video"
-        media_caption = reply_text.partition("[Attached Video:")[2].partition("]")[0].strip()
-    elif "[Attached Intimate Photo:" in reply_text:
-        media_type = "nsfw_photo"
-        media_caption = reply_text.partition("[Attached Intimate Photo:")[2].partition("]")[0].strip()
-    elif "[Attached Photo:" in reply_text:
-        media_type = "photo"
-        media_caption = reply_text.partition("[Attached Photo:")[2].partition("]")[0].strip()
-    elif intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
-        media_type = "nsfw_video" if "video" in intent else "nsfw_photo"
-        media_caption = reply_text
-    elif intent in ("photo", "video", "photo_ask", "ask_photo"):
-        media_type = "video" if "video" in intent else "photo"
-        media_caption = reply_text
+    if not parsed_attachments:
+        if intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy") and reply_text:
+            fallback_type = "nsfw_video" if "video" in intent else "nsfw_photo"
+            parsed_attachments.append((fallback_type, reply_text))
+        elif intent in ("photo", "video", "photo_ask", "ask_photo") and reply_text:
+            fallback_type = "video" if "video" in intent else "photo"
+            parsed_attachments.append((fallback_type, reply_text))
 
-    if media_type and media_caption:
-        p_uid = player_char.get("user_id") or session.get("user_id") or session.get("owner_id")
+    digital_item_ids: list[int] = []
+    media_types_created: list[str] = []
+    p_uid = player_char.get("user_id") or session.get("user_id") or session.get("owner_id")
+    turn_dm = max(1, len((session or {}).get("history") or []))
+
+    for media_type, media_caption in parsed_attachments:
         if p_uid:
-            digital_item_id = create_digital_media_item(
+            created_id = create_digital_media_item(
                 user_id=p_uid,
                 contact_name=contact_name,
                 media_type=media_type,
                 caption=media_caption,
                 tags=["misc", "digital"],
+                contact_npc_id=npc_id,
             )
-            media_type_created = media_type
+            if created_id:
+                digital_item_ids.append(int(created_id))
+                media_types_created.append(media_type)
 
         clean_cap = media_caption.strip().lstrip("[").rstrip("]").strip()
-        for prefix in [
-            "Attached Intimate Video:",
-            "Attached Video:",
-            "Attached Intimate Photo:",
-            "Attached Photo:",
-            "Intimate Video:",
-            "Video:",
-            "Intimate Photo:",
-            "Photo:",
-        ]:
-            if clean_cap.startswith(prefix):
+        lower_cap = clean_cap.lower()
+        for prefix in _MEDIA_CAPTION_PREFIXES:
+            if lower_cap.startswith(prefix.lower()):
                 clean_cap = clean_cap[len(prefix):].strip()
+                break
 
         if media_type in ("nsfw_video", "intimate_video"):
             media_mem = f"Exchanged intimate video via DM: {contact_name} ({clean_cap})"
@@ -274,7 +291,6 @@ def persist_dm_media_item_and_milestone(
         try:
             from mechanics.social.persona.intimacy.ledger import record_intimate_turn_encounter
 
-            turn_dm = max(1, len((session or {}).get("history") or []))
             dm_ev_tag = f"dm_{media_type}"
             record_intimate_turn_encounter(
                 session_id=session_id,
@@ -293,4 +309,38 @@ def persist_dm_media_item_and_milestone(
         except Exception as _dm_med_err:
             log.warning(f"[phone] Failed to record DM media milestone: {_dm_med_err}")
 
-    return digital_item_id, media_type_created
+    return {
+        "digital_item_id": digital_item_ids[0] if digital_item_ids else None,
+        "digital_item_ids": digital_item_ids,
+        "media_type_created": media_types_created[0] if media_types_created else (parsed_attachments[0][0] if parsed_attachments else None),
+        "media_types_created": media_types_created,
+    }
+
+
+def persist_dm_media_item_and_milestone(
+    *,
+    session: dict[str, Any],
+    session_id: int,
+    npc_id: str,
+    contact: dict[str, Any],
+    contact_name: str,
+    track: str,
+    player_char: dict[str, Any],
+    reply_text: str,
+    intent: str,
+    current_day: int,
+) -> Tuple[Optional[int], Optional[str]]:
+    """Backwards-compatible single-item wrapper for DM media persistence."""
+    res = persist_dm_media_items_and_milestone(
+        session=session,
+        session_id=session_id,
+        npc_id=npc_id,
+        contact=contact,
+        contact_name=contact_name,
+        track=track,
+        player_char=player_char,
+        reply_text=reply_text,
+        intent=intent,
+        current_day=current_day,
+    )
+    return res["digital_item_id"], res["media_type_created"]

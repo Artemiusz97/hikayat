@@ -43,6 +43,7 @@ def _grant_guaranteed_site_gear(
     spec: Mapping[str, Any],
     scen_key: str,
     *,
+    session_id: int | None = None,
     force_relic_spell: bool = False,
     force_tier: int | None = None,
     custom_name: str | None = None,
@@ -122,6 +123,7 @@ def _grant_guaranteed_site_gear(
         effect=eff_str,
         slot_cost=int(styled.get("slot_cost") or 1),
         force=True,
+        session_id=session_id,
     )
     return styled
 
@@ -158,7 +160,7 @@ def evaluate_reclamation_milestones(
     if stab >= 10 and 10 not in claimed:
         claimed.append(10)
         if user_id:
-            db.apply_hp_mp_delta(int(user_id), gold_delta=250)
+            db.apply_hp_mp_delta(int(user_id), gold_delta=250, session_id=int(session_id))
             try:
                 from mechanics.social.factions import update_agent_promotion_reputation
                 update_agent_promotion_reputation(
@@ -179,6 +181,7 @@ def evaluate_reclamation_milestones(
             int(user_id or 0),
             {"site_id": "milestone_36", "element": "aether", "threat_grade": 5},
             scen_key,
+            session_id=int(session_id),
             force_relic_spell=True,
             force_tier=1,
             custom_name="[Anomalous] Warden's Aether Chronometer",
@@ -262,8 +265,8 @@ def complete_site_pacification(
 
     targets = [int(u) for u in (party_user_ids or [eff_uid]) if u]
     for uid in targets:
-        db.apply_hp_mp_delta(uid, gold_delta=gold_gain)
-        db.add_xp(uid, xp_gain)
+        db.apply_hp_mp_delta(uid, gold_delta=gold_gain, session_id=int(session_id))
+        db.add_xp(uid, xp_gain, session_id=int(session_id))
         try:
             from mechanics.social.factions import update_agent_promotion_reputation
             update_agent_promotion_reputation(
@@ -275,7 +278,13 @@ def complete_site_pacification(
         except Exception:
             pass
 
-    reward_item = _grant_guaranteed_site_gear(eff_uid, spec, eff_scen, seed_suffix=f"pacify:{turn_number}")
+    reward_item = _grant_guaranteed_site_gear(
+        eff_uid,
+        spec,
+        eff_scen,
+        session_id=int(session_id) if session_id else None,
+        seed_suffix=f"pacify:{turn_number}",
+    )
     fresh_nodes = db.get_session_world_nodes(int(session_id)) or [] if session_id else []
     unlocked_ms = evaluate_reclamation_milestones(
         int(session_id), eff_uid, scen_key=eff_scen, turn_number=int(turn_number), world_nodes=fresh_nodes
@@ -490,17 +499,23 @@ def resolve_site_harvest_action(
 
     ward_name, ward_desc = _ELEMENT_WARD_REWARDS.get(site_elem, ("Stabilization Flare", "Containment ward flare."))
     if user_id:
-        db.apply_hp_mp_delta(int(user_id), gold_delta=gold_gain)
-        db.add_xp(int(user_id), xp_gain)
+        db.apply_hp_mp_delta(int(user_id), gold_delta=gold_gain, session_id=int(session_id))
+        db.add_xp(int(user_id), xp_gain, session_id=int(session_id))
         for _ in range(mult):
-            db.add_item(int(user_id), name=ward_name, item_type="consumable", effect=ward_desc, slot_cost=1, force=True)
+            db.add_item(int(user_id), name=ward_name, item_type="consumable", effect=ward_desc, slot_cost=1, force=True, session_id=int(session_id))
 
     items_gained_names: list[str] = [ward_name] * mult if user_id else []
     gear_roll = float(force_gear_roll) if force_gear_roll is not None else random.random()
     gear_thresh = 0.30 if is_overdraw else (0.18 if is_crit else 0.12)
     bonus_gear = None
     if gear_roll < gear_thresh:
-        bonus_gear = _grant_guaranteed_site_gear(int(user_id or 0), spec, eff_scen, seed_suffix=f"harvest:{curr_day}")
+        bonus_gear = _grant_guaranteed_site_gear(
+            int(user_id or 0),
+            spec,
+            eff_scen,
+            session_id=int(session_id),
+            seed_suffix=f"harvest:{curr_day}",
+        )
         if isinstance(bonus_gear, dict) and bonus_gear.get("name"):
             items_gained_names.append(str(bonus_gear["name"]))
 

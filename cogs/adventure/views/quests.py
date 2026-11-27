@@ -961,6 +961,32 @@ class ContractDispositionSelect(discord.ui.Select):
         )
 
 
+async def _ensure_bounty_board_access(interaction: discord.Interaction, session_id: int) -> dict | None:
+    session = await adb(db.get_session, session_id)
+    if not session:
+        msg = "Session not found."
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+        return None
+    current_loc = session.get("current_location", "")
+    scen_key = session.get("scenario", "fantasy")
+    from mechanics.world.locations import location_has_bounty_board
+    from mechanics.world.locations.realms import check_realm_comms_available
+
+    if not location_has_bounty_board(current_loc, scen_key=scen_key):
+        comms = await adb(check_realm_comms_available, session_id, session.get("current_node_id"))
+        if not comms.get("available"):
+            msg = f"📵 {comms.get('reason') or 'No notice board or live realm signal is available here.'}"
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return None
+    return session
+
+
 class BountySelect(discord.ui.Select):
     def __init__(self, session_id: int, bounties: list[dict], haggle_advance: bool = False):
         options = []
@@ -980,13 +1006,15 @@ class BountySelect(discord.ui.Select):
         self.haggle_advance = haggle_advance
 
     async def callback(self, interaction: discord.Interaction):
+        session = await _ensure_bounty_board_access(interaction, self.session_id)
+        if session is None:
+            return
         quest_id = self.values[0]
         quest = await adb(db.get_quest_by_id, self.session_id, quest_id)
         if not quest or quest.get("status") != "Available":
             await interaction.response.send_message("That bounty is no longer available.", ephemeral=True)
             return
 
-        session = await adb(db.get_session, self.session_id) or {"id": self.session_id}
         import scenario_data
         if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
             from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility
@@ -1066,11 +1094,19 @@ class BountyBoardView(SessionRestrictedView):
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _refresh_board(self, interaction: discord.Interaction):
+        session = await _ensure_bounty_board_access(interaction, self.session_id)
+        if session is None:
+            return
         await interaction.response.defer()
-        new_bounties = await game_engine.generate_bounty_board(self.session, force_refresh=True)
-        embed = _build_bounty_board_embed(self.session, new_bounties)
-        view = BountyBoardView(self.session, new_bounties, haggle_advance=self.haggle_advance)
-        await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
+        async with distributed_session_lock(self.session_id):
+            fresh_sess = await _ensure_bounty_board_access(interaction, self.session_id)
+            if fresh_sess is None:
+                return
+            self.session = fresh_sess
+            new_bounties = await game_engine.generate_bounty_board(fresh_sess, force_refresh=True)
+            embed = _build_bounty_board_embed(fresh_sess, new_bounties)
+            view = BountyBoardView(fresh_sess, new_bounties, haggle_advance=self.haggle_advance)
+            await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
     async def _open_quest_log(self, interaction: discord.Interaction):
         view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Main Quest")

@@ -10,7 +10,7 @@ import json
 import time
 import logging
 
-from .core import get_conn
+from .core import UnitOfWork, get_conn
 
 log = logging.getLogger("hikayat.db.memory")
 
@@ -525,64 +525,65 @@ def finalize_turn_memory(
 
     all_bullets: list[str] = []
     chunk_step = max(1, int(RAW_HISTORY_LIMIT))
-    existing_descs = {
-        str(c.get("description") or "").strip().lower()
-        for c in get_active_commitments(session_id, limit=50)
-    }
-
-    for offset in range(0, len(slice_turns), chunk_step):
-        chunk = slice_turns[offset : offset + chunk_step]
-        if not chunk:
-            continue
-        c_start = overall_turn_start + offset
-        c_end = min(int(target_turn), c_start + len(chunk) - 1)
-        is_last_chunk = (offset + chunk_step) >= len(slice_turns)
-
-        digest_res = build_deterministic_arc_digest(chunk)
-        bullets, commitments = format_digest_bullets_and_commitments(digest_res)
-
-        merged_entities: list[str] = []
-        extra_npcs = list(present_npcs or []) if is_last_chunk else []
-        for ent in list(digest_res.get("entities") or []) + extra_npcs:
-            clean_e = str(ent or "").strip()
-            if clean_e and clean_e.lower() not in {"none", "player", "hero"} and clean_e not in merged_entities:
-                merged_entities.append(clean_e)
-
-        merged_quests: list[str] = []
-        extra_qids = list(active_quest_ids or []) if is_last_chunk else []
-        for qid in list(digest_res.get("quest_ids") or []) + extra_qids:
-            clean_q = str(qid or "").strip()
-            if clean_q and clean_q not in merged_quests:
-                merged_quests.append(clean_q)
-
-        fallback_loc = current_location if is_last_chunk else ""
-        loc_raw = str(digest_res.get("location_tag") or fallback_loc or "").strip()
-        loc_tag = loc_raw.split("➔")[-1].strip() if "➔" in loc_raw else loc_raw
-
-        if bullets:
-            append_chapter_digest(
-                session_id=session_id,
-                turn_start=c_start,
-                turn_end=c_end,
-                bullets=bullets,
-                entities=merged_entities,
-                location_tag=loc_tag,
-                quest_ids=merged_quests,
-            )
-            all_bullets.extend(bullets)
-
-        if commitments:
-            fresh_commits = []
-            for c in commitments:
-                desc_key = str(c.get("description") or "").strip().lower()
-                if desc_key and desc_key not in existing_descs:
-                    existing_descs.add(desc_key)
-                    fresh_commits.append(c)
-            if fresh_commits:
-                bulk_add_commitments(session_id, fresh_commits, turn_number=c_end)
-
     turn_end = int(target_turn)
-    with get_conn() as conn:
+
+    with UnitOfWork() as conn:
+        existing_descs = {
+            str(c.get("description") or "").strip().lower()
+            for c in get_active_commitments(session_id, limit=50)
+        }
+
+        for offset in range(0, len(slice_turns), chunk_step):
+            chunk = slice_turns[offset : offset + chunk_step]
+            if not chunk:
+                continue
+            c_start = overall_turn_start + offset
+            c_end = min(int(target_turn), c_start + len(chunk) - 1)
+            is_last_chunk = (offset + chunk_step) >= len(slice_turns)
+
+            digest_res = build_deterministic_arc_digest(chunk)
+            bullets, commitments = format_digest_bullets_and_commitments(digest_res)
+
+            merged_entities: list[str] = []
+            extra_npcs = list(present_npcs or []) if is_last_chunk else []
+            for ent in list(digest_res.get("entities") or []) + extra_npcs:
+                clean_e = str(ent or "").strip()
+                if clean_e and clean_e.lower() not in {"none", "player", "hero"} and clean_e not in merged_entities:
+                    merged_entities.append(clean_e)
+
+            merged_quests: list[str] = []
+            extra_qids = list(active_quest_ids or []) if is_last_chunk else []
+            for qid in list(digest_res.get("quest_ids") or []) + extra_qids:
+                clean_q = str(qid or "").strip()
+                if clean_q and clean_q not in merged_quests:
+                    merged_quests.append(clean_q)
+
+            fallback_loc = current_location if is_last_chunk else ""
+            loc_raw = str(digest_res.get("location_tag") or fallback_loc or "").strip()
+            loc_tag = loc_raw.split("➔")[-1].strip() if "➔" in loc_raw else loc_raw
+
+            if bullets:
+                append_chapter_digest(
+                    session_id=session_id,
+                    turn_start=c_start,
+                    turn_end=c_end,
+                    bullets=bullets,
+                    entities=merged_entities,
+                    location_tag=loc_tag,
+                    quest_ids=merged_quests,
+                )
+                all_bullets.extend(bullets)
+
+            if commitments:
+                fresh_commits = []
+                for c in commitments:
+                    desc_key = str(c.get("description") or "").strip().lower()
+                    if desc_key and desc_key not in existing_descs:
+                        existing_descs.add(desc_key)
+                        fresh_commits.append(c)
+                if fresh_commits:
+                    bulk_add_commitments(session_id, fresh_commits, turn_number=c_end)
+
         conn.execute(
             "UPDATE sessions SET last_digested_turn = ? WHERE id = ?",
             (turn_end, session_id),

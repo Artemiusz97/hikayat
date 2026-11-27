@@ -79,6 +79,8 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
     low = f"{z_id} {p_id} {name}".lower()
     from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
     p_low = str(p_id or "").strip().lower()
+    if p_low in ("fac_kitsune_guest_villa", "fac_bunian_guest_house", "fac_ghoul_guest_manor"):
+        return "residential"
     if p_low in ALL_STATIC_RESIDENTIAL_FACILITY_IDS or p_low.startswith((
         "fac_npc_res_", "sub_npc_", "sub_walkup_", "sub_agency_res_",
         "sub_temple_res_", "sub_agency_unit_", "sub_temple_cell_",
@@ -86,6 +88,15 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
         "sub_townhouse_", "sub_condo_", "sub_bungalow_", "sub_villa_", "sub_mansion_",
     )):
         return "residential"
+    if p_low.startswith(("loc_crossroads_", "sub_crossroads_")) or p_low in (
+        "loc_kitsune_foxfire_onsen", "sub_kitsune_tea_veranda",
+        "sub_ghoul_curio_morgue", "loc_ghoul_carrion_tavern", "sub_ghoul_wake_lounge",
+    ):
+        return "commercial"
+    if z_id in ("zone_spirit_wilds", "zone_spirit_peaks", "zone_spirit_mire", "zone_spirit_boneyard") or p_low.startswith((
+        "loc_wilds_", "sub_wilds_", "loc_peaks_", "sub_peaks_", "loc_mire_", "sub_mire_", "loc_boneyard_", "sub_boneyard_",
+    )):
+        return "wilderness"
     if p_low in ("loc_private_hq_1", "loc_private_hq_2", "loc_agency_hq", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq"):
         return "civic"
     if "student council" in low:
@@ -171,7 +182,7 @@ def infer_is_transit_hub(
 
     if node_type == "ROOM":
         # Folklore veil rooms remain non-transit until spiritual attunement unlocks them.
-        if meta.get("veil_village_key") or p_low.startswith(("sub_kitsune_", "sub_bunian_", "loc_kitsune_", "loc_bunian_")):
+        if meta.get("veil_village_key") or p_low.startswith(("sub_kitsune_", "sub_bunian_", "sub_ghoul_", "loc_kitsune_", "loc_bunian_", "loc_ghoul_")):
             return 0
         if "is_transit_hub" in meta and meta["is_transit_hub"] is not None:
             return 1 if meta["is_transit_hub"] else 0
@@ -454,453 +465,659 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
 
     existing_nodes = db.get_session_world_nodes(session_id)
     if existing_nodes:
+        if not db.is_in_readonly_uow():
+            from .realms import ensure_default_realm_wrapper
+            ensure_default_realm_wrapper(session_id, scenario_key)
         return
 
     with db.UnitOfWork():
         _seed_session_spatial_graph_tx(session_id, scenario_key=scenario_key, char_name=char_name)
 
 
+def _seed_facility_and_rooms_tx(
+    *,
+    session_id: int,
+    parent_node_id: str,
+    zone_id_for_infer: str,
+    parent_category: str,
+    primary: dict,
+    scenario_key: str,
+    char_name: str,
+    names_ctx: dict[str, str],
+    transit_hubs: list[str],
+    facility_entrance_map: dict[str, str],
+    container_facility_nodes: list[str],
+    seeded_node_realm: dict[str, str],
+    realm_id: str,
+) -> None:
+    """Seeds one FACILITY node, its child ROOM nodes, and internal doors/hallways."""
+    p_id = primary.get("id") or f"fac_{_slugify(primary.get('name', 'facility'))}"
+    if p_id == "fac_suburbs_townhouse":
+        from mechanics.social.origin_mode import is_student_operative
+        if not is_student_operative(session_id):
+            return
+    raw_primary_name = str(primary.get("name") or "Main Area")
+    primary_name = raw_primary_name
+
+    classroom_name = names_ctx["classroom_name"]
+    athletics_name = names_ctx["athletics_name"]
+    commons_name = names_ctx["commons_name"]
+    arts_name = names_ctx["arts_name"]
+    abandoned_name = names_ctx["abandoned_name"]
+    agency_hq_name = names_ctx["agency_hq_name"]
+    agency_res_name = names_ctx["agency_res_name"]
+    player_house = names_ctx["player_house"]
+    park_name = names_ctx["park_name"]
+    cafe_name = names_ctx["cafe_name"]
+    arcade_name = names_ctx["arcade_name"]
+    ripperdoc_name = names_ctx["ripperdoc_name"]
+    player_desk = names_ctx["player_desk"]
+
+    if classroom_name and (primary_name == "Homeroom Classroom" or p_id == "loc_homeroom"):
+        primary_name = classroom_name
+    elif primary_name == "School Grounds & Athletics":
+        primary_name = athletics_name or "Varsity Athletic Directorate & Gymnasium"
+    elif p_id == "bld_school_commons" or primary_name == "Student Commons & Central Plaza":
+        primary_name = commons_name or "Student Commons & Central Plaza"
+    elif primary_name == "Cultural Arts & Student Union":
+        primary_name = arts_name or "Cultural & Student Clubroom Wing"
+    elif p_id == "bld_abandoned_school" or primary_name == "Abandoned Old Campus Building":
+        primary_name = abandoned_name or "Abandoned Old Campus Building"
+    elif p_id == "loc_agency_hq" or "{session_agency_hq}" in primary_name:
+        primary_name = agency_hq_name
+    elif p_id == "fac_agency_residence" or primary_name == "Public Agency Residential Hall" or "{session_agency_residence}" in primary_name:
+        primary_name = agency_res_name
+    elif primary_name == "Player's House" or p_id == "loc_player_house":
+        from .realty_catalog import is_anomalous_realty_scenario
+        from mechanics.social.origin_mode import is_student_operative
+        primary_name = "Tree-Lined Suburban House" if (is_anomalous_realty_scenario(scenario_key) and not is_student_operative(session_id)) else player_house
+    elif park_name and (primary_name == "Neighborhood Park" or p_id == "loc_local_park"):
+        primary_name = park_name
+    elif primary_name in ("Local Café", "Sunny Days Café") or p_id == "loc_cafe":
+        primary_name = cafe_name
+    elif primary_name in ("Game Arcade", "Pixel Paradise Arcade") or p_id == "loc_arcade":
+        primary_name = arcade_name
+    elif primary_name == "Ripperdoc Clinic" or p_id == "loc_ripperdoc_clinic":
+        primary_name = ripperdoc_name
+    elif primary_name == "Friend's House" or p_id == "loc_friend_house":
+        return
+
+    from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
+    if is_urban_anomalous_scenario(scenario_key) and not (
+        str(zone_id_for_infer or "").startswith("zone_spirit_")
+        or str(parent_node_id or "").startswith("zone_spirit_")
+        or p_id.startswith(("loc_hidden_", "loc_kitsune_", "loc_bunian_", "loc_ghoul_", "loc_crossroads_", "loc_wilds_", "loc_peaks_", "loc_mire_", "loc_boneyard_", "fac_kitsune_", "fac_bunian_", "fac_ghoul_"))
+    ) and p_id not in ALL_STATIC_RESIDENTIAL_FACILITY_IDS:
+        primary_name = get_session_urban_facility_name(session_id, zone_id_for_infer, p_id, primary_name, scenario_key, char_name)
+    true_primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
+    if primary.get("is_hidden") and primary.get("mundane_name"):
+        primary_name = resolve_session_location_tokens(session_id, str(primary["mundane_name"]), scenario_key, char_name)
+    else:
+        primary_name = true_primary_name
+
+    p_seed_meta = {
+        k: primary[k]
+        for k in (
+            "privacy_level", "is_discreet", "is_private_intimate", "is_enclosed",
+            "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only",
+            "is_hidden", "discovered", "veil_village_key", "veil_token_item",
+            "is_anomalous", "mundane_name", "is_faction_hq", "is_minor_club_hq",
+            "has_bounty_board", "has_merchant_shop", "is_transit_hub",
+            "club_tier", "faction_name",
+        )
+        if k in primary
+    }
+    if primary.get("is_hidden"):
+        p_seed_meta["true_name"] = true_primary_name
+        p_seed_meta["started_hidden"] = True
+    p_category = infer_node_category(zone_id_for_infer, p_id, raw_primary_name, parent_category=parent_category)
+    p_privacy = infer_node_privacy("FACILITY", p_id, raw_primary_name, explicit_meta=p_seed_meta)
+    p_enclosed = infer_is_enclosed("FACILITY", p_id, raw_primary_name)
+    p_transit = infer_is_transit_hub("FACILITY", zone_id_for_infer, p_id, raw_primary_name, explicit_meta=p_seed_meta)
+    p_access = infer_access_tier("FACILITY", zone_id_for_infer, p_id, raw_primary_name, p_category, primary.get("access_tier", ""), explicit_meta=p_seed_meta)
+    p_curfew_start, p_curfew_end = infer_curfew_window("FACILITY", zone_id_for_infer, p_id, raw_primary_name, p_category, primary.get("curfew_start_min"), primary.get("curfew_end_min"))
+    if p_transit:
+        transit_hubs.append(p_id)
+
+    fac_atmosphere = infer_facility_atmosphere(
+        p_id, primary_name, zone_id_for_infer, primary,
+        session_id=session_id, scenario_key=scenario_key, char_name=char_name
+    )
+
+    db.save_world_node(
+        session_id=session_id,
+        node_id=p_id,
+        parent_id=parent_node_id,
+        name=primary_name,
+        node_type="FACILITY",
+        category=p_category,
+        privacy_level=p_privacy,
+        is_enclosed=p_enclosed,
+        is_transit_hub=p_transit,
+        access_tier=p_access,
+        curfew_start_min=p_curfew_start,
+        curfew_end_min=p_curfew_end,
+        atmosphere=fac_atmosphere,
+        is_dynamic=0,
+        state_json=p_seed_meta if p_seed_meta else None
+    )
+    container_facility_nodes.append(p_id)
+    seeded_node_realm[p_id] = realm_id
+
+    raw_subs = primary.get("sub_locations") or []
+    subs = get_facility_contextual_sublocations(primary_name, raw_subs)
+
+    room_nodes: list[str] = []
+    entrance_node_id = None
+    room_access_map: dict[str, str] = {}
+    room_locked_map: dict[str, bool] = {}
+    room_parent_sub_map: dict[str, Any] = {}
+
+    for sub in subs:
+        s_id = sub.get("id") or f"sub_{_slugify(raw_primary_name)}_{_slugify(sub.get('name', 'room'))}"
+        raw_sub_name = str(sub.get("name") or "Main Area")
+        sub_name = raw_sub_name
+
+        if classroom_name and (sub_name == "Homeroom Classroom" or s_id == "loc_homeroom"):
+            sub_name = classroom_name
+        elif (sub_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in raw_primary_name.lower()):
+            sub_name = player_desk
+        elif is_urban_anomalous_scenario(scenario_key) and s_id.startswith(("loc_hq_", "sub_priv1_", "sub_priv2_")):
+            sub_z_id = "zone_agency_hq" if s_id.startswith("loc_hq_") else zone_id_for_infer
+            sub_name = get_session_urban_facility_name(session_id, sub_z_id, s_id, sub_name, scenario_key, char_name)
+        sub_name = resolve_session_location_tokens(session_id, sub_name, scenario_key, char_name)
+
+        is_child_or_discreet = bool(sub.get("parent_sub_id")) or sub.get("privacy_level") in ("private", "semi_private")
+        if (sub.get("is_entrance") or is_entrance_sublocation(raw_sub_name)) and not entrance_node_id and not is_child_or_discreet:
+            entrance_node_id = s_id
+
+        s_seed_meta = {
+            k: sub[k]
+            for k in (
+                "privacy_level", "is_discreet", "is_private_intimate", "is_enclosed",
+                "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive",
+                "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key",
+                "veil_token_item", "is_anomalous", "is_faction_hq", "is_minor_club_hq",
+                "has_bounty_board", "has_merchant_shop", "is_transit_hub",
+                "club_tier", "faction_name",
+            )
+            if k in sub
+        }
+        if "is_enclosed" in sub:
+            s_seed_meta["is_enclosed"] = sub["is_enclosed"]
+        if sub.get("is_hidden"):
+            s_seed_meta["started_hidden"] = True
+        s_effective_meta = {
+            **s_seed_meta,
+            "is_anomalous": bool(s_seed_meta.get("is_anomalous") or p_seed_meta.get("is_anomalous")),
+        }
+        s_privacy = infer_node_privacy("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta) or p_privacy
+        s_access = infer_access_tier("ROOM", zone_id_for_infer, s_id, raw_sub_name, p_category, sub.get("access_tier", ""), explicit_meta=s_effective_meta)
+        p_sub_parent = sub.get("parent_sub_id")
+        if s_access == "open" and not s_effective_meta["is_anomalous"]:
+            parent_sub_access = room_access_map.get(p_sub_parent) if p_sub_parent else None
+            if parent_sub_access in ("restricted", "private"):
+                s_access = parent_sub_access
+            elif p_access in ("restricted", "private"):
+                s_access = p_access
+        s_curfew_start, s_curfew_end = infer_curfew_window("ROOM", zone_id_for_infer, s_id, raw_sub_name, p_category, sub.get("curfew_start_min"), sub.get("curfew_end_min"))
+        if s_curfew_start is None and p_curfew_start is not None and not p_id.startswith("bld_school_") and p_id not in (
+            "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+            "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+        ):
+            s_curfew_start, s_curfew_end = p_curfew_start, p_curfew_end
+
+        mega_complex_ids = {
+            "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+            "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+            "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
+        }
+        if "is_enclosed" in s_seed_meta and s_seed_meta["is_enclosed"] is not None:
+            s_enclosed = int(bool(s_seed_meta["is_enclosed"]))
+        elif p_id.startswith("bld_school_") or p_id in mega_complex_ids:
+            s_enclosed = infer_is_enclosed("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta)
+        else:
+            r_enc = infer_is_enclosed("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta)
+            if r_enc == 0:
+                s_enclosed = 0
+            elif any(k in f"{s_id} {raw_sub_name}".lower() for k in ("cabin interior", "boathouse", "storage shed", "changing cabanas", "underpass")):
+                s_enclosed = 1
+            else:
+                s_enclosed = p_enclosed
+
+        room_access_map[s_id] = s_access
+        room_locked_map[s_id] = bool(sub.get("is_locked", False))
+        room_parent_sub_map[s_id] = sub.get("parent_sub_id")
+
+        s_transit = infer_is_transit_hub("ROOM", zone_id_for_infer, s_id, raw_sub_name, explicit_meta=s_seed_meta)
+        if s_transit:
+            transit_hubs.append(s_id)
+
+        room_sensory = resolve_session_location_tokens(
+            session_id,
+            str(sub.get("sensory") or sub.get("atmosphere") or "").strip(),
+            scenario_key,
+            char_name,
+        )
+
+        db.save_world_node(
+            session_id=session_id,
+            node_id=s_id,
+            parent_id=p_id,
+            name=sub_name,
+            node_type="ROOM",
+            category=p_category,
+            privacy_level=s_privacy,
+            is_enclosed=s_enclosed,
+            is_transit_hub=s_transit,
+            access_tier=s_access,
+            curfew_start_min=s_curfew_start,
+            curfew_end_min=s_curfew_end,
+            atmosphere=room_sensory,
+            is_dynamic=0,
+            state_json=s_seed_meta if s_seed_meta else None
+        )
+        room_nodes.append(s_id)
+        seeded_node_realm[s_id] = realm_id
+
+    if not entrance_node_id and room_nodes:
+        non_child_candidates = [r for r in room_nodes if not room_parent_sub_map.get(r)]
+        entrance_node_id = non_child_candidates[0] if non_child_candidates else room_nodes[0]
+    if entrance_node_id:
+        facility_entrance_map[p_id] = entrance_node_id
+        db.save_world_edge(session_id, p_id, entrance_node_id, travel_minutes=1, edge_type="door")
+
+    is_mega_complex = p_id in {
+        "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+        "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+        "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
+    }
+    ent_to_room_mins = 3 if is_mega_complex else 1
+    room_to_room_mins = 3 if is_mega_complex else 2
+    room_edge_type = "hallway" if is_mega_complex else "door"
+
+    for r_id in room_nodes:
+        if r_id != entrance_node_id:
+            p_sub = room_parent_sub_map.get(r_id)
+            if p_sub and (p_sub not in room_nodes or p_sub == r_id):
+                log.warning("Invalid parent_sub_id '%s' for room '%s' in facility '%s'; falling back to entrance.", p_sub, r_id, p_id)
+                p_sub = None
+
+            if p_sub:
+                is_edge_locked = 1 if room_locked_map.get(r_id) else 0
+                check_type = "AGI" if is_edge_locked else ""
+                check_dc = 12 if is_edge_locked else 0
+                db.save_world_edge(session_id, p_sub, r_id, travel_minutes=1, edge_type="door", is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
+            else:
+                is_edge_locked = 1 if room_locked_map.get(r_id) else 0
+                check_type = "AGI" if is_edge_locked else ""
+                check_dc = 12 if is_edge_locked else 0
+                db.save_world_edge(session_id, entrance_node_id, r_id, travel_minutes=ent_to_room_mins, edge_type=room_edge_type, is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
+
+    interior_rooms = [r for r in room_nodes if r != entrance_node_id and not room_parent_sub_map.get(r)]
+    for i in range(len(interior_rooms)):
+        for j in range(i + 1, len(interior_rooms)):
+            db.save_world_edge(session_id, interior_rooms[i], interior_rooms[j], travel_minutes=room_to_room_mins, edge_type=room_edge_type)
+
+
 def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_school_drama", char_name: str = "") -> None:
     if db.get_session_world_nodes(session_id):
         return
 
-    scen_data = get_scenario_seed_data(scenario_key)
-    zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
-    if not zones:
-        return
+    from .realms import DEFAULT_REALM_RULES, PORTAL_EDGE_TYPES
 
-    school_name = get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    classroom_name = get_session_classroom_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    player_desk = get_session_player_desk_name(session_id, char_name=char_name) if is_school_scenario(scenario_key) else ""
-    player_house = get_session_player_house_name(session_id, char_name=char_name, scenario_key=scenario_key)
-    park_name = get_session_park_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    cafe_name = get_session_cafe_name(session_id, scenario_key)
-    arcade_name = get_session_arcade_name(session_id, scenario_key)
-    commercial_name = get_session_commercial_district_name(session_id, scenario_key)
-    residential_name = get_session_residential_neighborhood_name(session_id, scenario_key)
-    ripperdoc_name = get_session_ripperdoc_name(session_id, scenario_key)
-    kingdom_name = get_session_kingdom_name(session_id, scenario_key)
-    forest_name = get_session_forest_name(session_id, scenario_key)
-    ancient_forest_name = get_session_ancient_forest_name(session_id, scenario_key)
-    mountain_name = get_session_mountain_name(session_id, scenario_key)
-    desert_name = get_session_desert_name(session_id, scenario_key)
-    swamp_name = get_session_swamp_name(session_id, scenario_key)
-    plains_name = get_session_plains_name(session_id, scenario_key)
-    harbor_name = get_session_harbor_name(session_id, scenario_key)
-    tundra_name = get_session_tundra_name(session_id, scenario_key)
-    volcano_name = get_session_volcano_name(session_id, scenario_key)
-    shadowlands_name = get_session_shadowlands_name(session_id, scenario_key)
-    caves_name = get_session_caves_name(session_id, scenario_key)
-    chasm_name = get_session_chasm_name(session_id, scenario_key)
-    dungeon_name = get_session_dungeon_name(session_id, scenario_key)
-    cyber_city = get_session_cyber_city_name(session_id, scenario_key)
-    airship_name = get_session_airship_name(session_id, scenario_key)
-    station_name = get_session_station_name(session_id)
-    seaside_name = get_session_seaside_name(session_id, scenario_key)
-    rec_park_name = get_session_recreation_park_name(session_id, scenario_key)
-    athletics_name = get_session_athletics_complex_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    commons_name = get_session_student_commons_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    arts_name = get_session_cultural_arts_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-    agency_hq_name = get_session_agency_hq_name(session_id, scenario_key)
-    agency_res_name = get_session_agency_residence_name(session_id, scenario_key)
+    scen_data = get_scenario_seed_data(scenario_key)
+    realms = list(scen_data.get("realms") or [])
+    realm_portals = list(scen_data.get("realm_portals") or [])
+    if not realms:
+        raw_zones = list(scen_data.get("zones") or [])
+        if not raw_zones:
+            return
+        realms = [{
+            "id": f"realm_{_slugify(scenario_key or 'world')}_primary",
+            "name": "World",
+            "realm_kind": "world",
+            "is_primary_realm": True,
+            "zones": raw_zones,
+        }]
+
+    names_ctx = {
+        "school_name": get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "classroom_name": get_session_classroom_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "player_desk": get_session_player_desk_name(session_id, char_name=char_name) if is_school_scenario(scenario_key) else "",
+        "player_house": get_session_player_house_name(session_id, char_name=char_name, scenario_key=scenario_key),
+        "park_name": get_session_park_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "cafe_name": get_session_cafe_name(session_id, scenario_key),
+        "arcade_name": get_session_arcade_name(session_id, scenario_key),
+        "commercial_name": get_session_commercial_district_name(session_id, scenario_key),
+        "residential_name": get_session_residential_neighborhood_name(session_id, scenario_key),
+        "ripperdoc_name": get_session_ripperdoc_name(session_id, scenario_key),
+        "kingdom_name": get_session_kingdom_name(session_id, scenario_key),
+        "forest_name": get_session_forest_name(session_id, scenario_key),
+        "ancient_forest_name": get_session_ancient_forest_name(session_id, scenario_key),
+        "mountain_name": get_session_mountain_name(session_id, scenario_key),
+        "desert_name": get_session_desert_name(session_id, scenario_key),
+        "swamp_name": get_session_swamp_name(session_id, scenario_key),
+        "plains_name": get_session_plains_name(session_id, scenario_key),
+        "harbor_name": get_session_harbor_name(session_id, scenario_key),
+        "tundra_name": get_session_tundra_name(session_id, scenario_key),
+        "volcano_name": get_session_volcano_name(session_id, scenario_key),
+        "shadowlands_name": get_session_shadowlands_name(session_id, scenario_key),
+        "caves_name": get_session_caves_name(session_id, scenario_key),
+        "chasm_name": get_session_chasm_name(session_id, scenario_key),
+        "dungeon_name": get_session_dungeon_name(session_id, scenario_key),
+        "cyber_city": get_session_cyber_city_name(session_id, scenario_key),
+        "airship_name": get_session_airship_name(session_id, scenario_key),
+        "station_name": get_session_station_name(session_id),
+        "seaside_name": get_session_seaside_name(session_id, scenario_key),
+        "rec_park_name": get_session_recreation_park_name(session_id, scenario_key),
+        "athletics_name": get_session_athletics_complex_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "commons_name": get_session_student_commons_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "arts_name": get_session_cultural_arts_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "abandoned_name": get_session_abandoned_campus_name(session_id, scenario_key) if is_school_scenario(scenario_key) else "",
+        "agency_hq_name": get_session_agency_hq_name(session_id, scenario_key),
+        "agency_res_name": get_session_agency_residence_name(session_id, scenario_key),
+    }
+
+    school_name = names_ctx["school_name"]
+    athletics_name = names_ctx["athletics_name"]
+    commons_name = names_ctx["commons_name"]
+    arts_name = names_ctx["arts_name"]
+    abandoned_name = names_ctx["abandoned_name"]
+    kingdom_name = names_ctx["kingdom_name"]
+    ancient_forest_name = names_ctx["ancient_forest_name"]
+    forest_name = names_ctx["forest_name"]
+    mountain_name = names_ctx["mountain_name"]
+    desert_name = names_ctx["desert_name"]
+    swamp_name = names_ctx["swamp_name"]
+    plains_name = names_ctx["plains_name"]
+    harbor_name = names_ctx["harbor_name"]
+    tundra_name = names_ctx["tundra_name"]
+    volcano_name = names_ctx["volcano_name"]
+    shadowlands_name = names_ctx["shadowlands_name"]
+    caves_name = names_ctx["caves_name"]
+    chasm_name = names_ctx["chasm_name"]
+    dungeon_name = names_ctx["dungeon_name"]
+    cyber_city = names_ctx["cyber_city"]
+    airship_name = names_ctx["airship_name"]
+    station_name = names_ctx["station_name"]
+    seaside_name = names_ctx["seaside_name"]
+    rec_park_name = names_ctx["rec_park_name"]
+    commercial_name = names_ctx["commercial_name"]
+    residential_name = names_ctx["residential_name"]
 
     transit_hubs: list[str] = []
     facility_entrance_map: dict[str, str] = {}
     zone_gateway_map: dict[str, str] = {}
+    zone_to_realm: dict[str, str] = {}
+    seeded_node_realm: dict[str, str] = {}
+    seeded_realm_rules: list[tuple[str, str, dict[str, Any]]] = []
 
-    for zone in zones:
-        z_id = zone.get("id") or f"zone_{_slugify(zone.get('name', 'region'))}"
-        raw_zone_name = str(zone.get("name") or "World Region")
-        zone_name = raw_zone_name
+    for realm in realms:
+        r_id = str(realm.get("id") or f"realm_{_slugify(realm.get('name', 'world'))}")
+        r_raw_name = str(realm.get("name") or "World")
+        r_name = resolve_session_location_tokens(session_id, r_raw_name, scenario_key, char_name)
+        r_rules = dict(DEFAULT_REALM_RULES)
+        for rk in DEFAULT_REALM_RULES:
+            if rk in realm and realm[rk] is not None:
+                r_rules[rk] = realm[rk]
+        is_hidden_r = bool(r_rules.get("is_hidden"))
+        if "discovered" not in realm:
+            r_rules["discovered"] = not is_hidden_r
+        r_rules["started_hidden"] = is_hidden_r
 
-        if school_name and (zone_name in ("Main Academy Campus", "Main Academy Building") or z_id == "zone_school_main"):
-            zone_name = school_name
-        elif z_id == "zone_school_athletics" or zone_name == "School Grounds & Athletics":
-            zone_name = athletics_name or "School Grounds & Athletics"
-        elif z_id == "zone_school_commons" or zone_name == "Student Commons & Central Plaza":
-            zone_name = commons_name or "Student Commons & Central Plaza"
-        elif z_id == "zone_school_arts" or zone_name == "Cultural Arts & Student Union":
-            zone_name = arts_name or "Cultural Arts & Student Union"
-        elif z_id == "zone_abandoned_school" or zone_name == "Abandoned Old Campus Building":
-            zone_name = abandoned_name or "Abandoned Old Campus Building"
-        elif z_id in ("zone_capital_city", "zone_capital_city_isekai") or zone_name == "Capital City":
-            zone_name = f"Royal Capital of {kingdom_name}"
-        elif z_id in ("zone_ancient_woods", "zone_ancient_woods_isekai") or zone_name == "Ancient Woods":
-            zone_name = ancient_forest_name
-        elif z_id in ("zone_woodlands_forest", "zone_woodlands_forest_isekai") or zone_name == "Woodlands & Forest":
-            zone_name = forest_name
-        elif z_id in ("zone_mountain_range", "zone_mountain_range_isekai") or zone_name == "High Mountain Range":
-            zone_name = mountain_name
-        elif z_id in ("zone_desert_dunes", "zone_desert_dunes_isekai") or zone_name == "Desert Dunes & Oasis":
-            zone_name = desert_name
-        elif z_id in ("zone_swamp_marshes", "zone_swamp_marshes_isekai") or zone_name == "Swamp & Marshes":
-            zone_name = swamp_name
-        elif z_id in ("zone_central_plains", "zone_central_plains_isekai") or zone_name == "Central Farmlands & Plains":
-            zone_name = plains_name
-        elif z_id in ("zone_coastal_harbor", "zone_coastal_harbor_isekai") or zone_name == "Coastal Harbor Town":
-            zone_name = harbor_name
-        elif z_id in ("zone_frozen_tundra", "zone_frozen_tundra_isekai") or zone_name == "Frozen Snow & Tundra":
-            zone_name = tundra_name
-        elif z_id in ("zone_volcanic_ashlands", "zone_volcanic_ashlands_isekai") or zone_name == "Volcanic Ashlands":
-            zone_name = volcano_name
-        elif z_id in ("zone_cursed_shadowlands", "zone_cursed_shadowlands_isekai") or zone_name == "Cursed Shadowlands":
-            zone_name = shadowlands_name
-        elif z_id in ("zone_cave_network", "zone_deep_caves", "zone_deep_caves_isekai") or zone_name == "Deep Cave Network":
-            zone_name = caves_name
-        elif z_id in ("zone_underworld_chasm", "zone_underworld_chasm_isekai") or zone_name == "Underworld Chasm":
-            zone_name = chasm_name
-        elif z_id in ("zone_ancient_dungeon", "zone_ancient_dungeon_isekai") or zone_name == "Ancient Dungeon Complex":
-            zone_name = dungeon_name
-        elif zone_name == "City Center & Megacorp Plaza":
-            zone_name = f"{cyber_city} - City Center"
-        elif zone_name == "Downtown Commercial Core":
-            zone_name = f"{cyber_city} - Downtown"
-        elif z_id == "zone_slums_lower_wards" or zone_name == "Slums & Lower Wards":
-            zone_name = f"{cyber_city} - Slums & Wards"
-        elif z_id == "zone_airship_cruiser" or zone_name == "Grand Zeppelin Cruiser":
-            zone_name = airship_name
-        elif z_id == "zone_orbital_station" or zone_name == "Central Orbital Station":
-            zone_name = station_name
-        elif z_id == "zone_seaside_bay" or zone_name == "Seaside & Coastal Bay":
-            zone_name = seaside_name
-        elif z_id in ("zone_mountain_park", "zone_recreational_park") or zone_name in ("Recreational Mountain Park", "Recreational Park"):
-            zone_name = rec_park_name
-        elif z_id == "zone_commercial" or zone_name == "Commercial District" or ((z_id == "zone_downtown" or zone_name == "Downtown") and is_school_scenario(scenario_key)):
-            zone_name = commercial_name
-        elif z_id == "zone_residential" or zone_name == "Residential Neighborhood":
-            zone_name = residential_name
-
-        if is_urban_anomalous_scenario(scenario_key):
-            zone_name = get_session_urban_zone_name(session_id, z_id, zone_name, scenario_key)
-        zone_name = resolve_session_location_tokens(session_id, zone_name, scenario_key, char_name)
-
-        atmosphere = ""
-        if "theme" in zone or "features" in zone:
-            atmosphere = json.dumps({
-                "theme": resolve_session_location_tokens(session_id, zone.get("theme", ""), scenario_key, char_name),
-                "features": resolve_session_location_tokens(session_id, zone.get("features", ""), scenario_key, char_name),
-                "sensory": resolve_session_location_tokens(session_id, zone.get("sensory", zone.get("atmosphere", "")), scenario_key, char_name)
-            })
-
-        is_zone_hub = bool(zone.get("is_hub"))
-        z_category = infer_node_category(z_id, "", raw_zone_name)
-        z_access = infer_access_tier("ZONE", z_id, z_id, raw_zone_name, z_category, zone.get("access_tier", ""))
-        z_curfew_start, z_curfew_end = infer_curfew_window("ZONE", z_id, z_id, raw_zone_name, z_category, zone.get("curfew_start_min"), zone.get("curfew_end_min"))
-
-        # 1. Insert Zone Node
+        # Rule 3: REALM node strictly carries atmosphere=""
         db.save_world_node(
             session_id=session_id,
-            node_id=z_id,
+            node_id=r_id,
             parent_id=None,
-            name=zone_name,
-            node_type="ZONE",
-            category=z_category,
+            name=r_name,
+            node_type="REALM",
+            category="realm",
             privacy_level="public",
             is_enclosed=0,
-            is_transit_hub=infer_is_transit_hub("ZONE", z_id, "", raw_zone_name, is_zone_hub),
-            access_tier=z_access,
-            curfew_start_min=z_curfew_start,
-            curfew_end_min=z_curfew_end,
-            atmosphere=atmosphere,
-            is_dynamic=0
+            is_transit_hub=0,
+            access_tier="open",
+            curfew_start_min=None,
+            curfew_end_min=None,
+            atmosphere="",
+            is_dynamic=0,
+            state_json=r_rules,
         )
+        seeded_node_realm[r_id] = r_id
+        seeded_realm_rules.append((r_id, r_name, r_rules))
 
-        zone_facility_nodes: list[str] = []
+        r_zones = list(realm.get("zones") or [])
+        if r_zones and r_rules.get("is_primary_realm", True):
+            r_zones = inject_anomalous_faction_hq_facilities(r_zones, session_id=session_id, scenario_key=scenario_key)
 
-        for primary in zone.get("primary_locations") or []:
-            p_id = primary.get("id") or f"fac_{_slugify(primary.get('name', 'facility'))}"
-            if p_id == "fac_suburbs_townhouse":
-                from mechanics.social.origin_mode import is_student_operative
-                if not is_student_operative(session_id):
-                    continue
-            raw_primary_name = str(primary.get("name") or "Main Area")
-            primary_name = raw_primary_name
+        # Case A: Standard REALM -> ZONE -> FACILITY -> ROOM
+        for zone in r_zones:
+            z_id = zone.get("id") or f"zone_{_slugify(zone.get('name', 'region'))}"
+            raw_zone_name = str(zone.get("name") or "World Region")
+            zone_name = raw_zone_name
 
-            if classroom_name and (primary_name == "Homeroom Classroom" or p_id == "loc_homeroom"):
-                primary_name = classroom_name
-            elif primary_name == "School Grounds & Athletics":
-                primary_name = athletics_name or "Varsity Athletic Directorate & Gymnasium"
-            elif p_id == "bld_school_commons" or primary_name == "Student Commons & Central Plaza":
-                primary_name = commons_name or "Student Commons & Central Plaza"
-            elif primary_name == "Cultural Arts & Student Union":
-                primary_name = arts_name or "Cultural & Student Clubroom Wing"
-            elif p_id == "bld_abandoned_school" or primary_name == "Abandoned Old Campus Building":
-                primary_name = abandoned_name or "Abandoned Old Campus Building"
-            elif p_id == "loc_agency_hq" or "{session_agency_hq}" in primary_name:
-                primary_name = agency_hq_name
-            elif p_id == "fac_agency_residence" or primary_name == "Public Agency Residential Hall" or "{session_agency_residence}" in primary_name:
-                primary_name = agency_res_name
-            elif primary_name == "Player's House" or p_id == "loc_player_house":
-                from .realty_catalog import is_anomalous_realty_scenario
-                from mechanics.social.origin_mode import is_student_operative
-                primary_name = "Tree-Lined Suburban House" if (is_anomalous_realty_scenario(scenario_key) and not is_student_operative(session_id)) else player_house
-            elif park_name and (primary_name == "Neighborhood Park" or p_id == "loc_local_park"):
-                primary_name = park_name
-            elif primary_name in ("Local Café", "Sunny Days Café") or p_id == "loc_cafe":
-                primary_name = cafe_name
-            elif primary_name in ("Game Arcade", "Pixel Paradise Arcade") or p_id == "loc_arcade":
-                primary_name = arcade_name
-            elif primary_name == "Ripperdoc Clinic" or p_id == "loc_ripperdoc_clinic":
-                primary_name = ripperdoc_name
-            elif primary_name == "Friend's House" or p_id == "loc_friend_house":
-                continue
+            if school_name and (zone_name in ("Main Academy Campus", "Main Academy Building") or z_id == "zone_school_main"):
+                zone_name = school_name
+            elif z_id == "zone_school_athletics" or zone_name == "School Grounds & Athletics":
+                zone_name = athletics_name or "School Grounds & Athletics"
+            elif z_id == "zone_school_commons" or zone_name == "Student Commons & Central Plaza":
+                zone_name = commons_name or "Student Commons & Central Plaza"
+            elif z_id == "zone_school_arts" or zone_name == "Cultural Arts & Student Union":
+                zone_name = arts_name or "Cultural Arts & Student Union"
+            elif z_id == "zone_abandoned_school" or zone_name == "Abandoned Old Campus Building":
+                zone_name = abandoned_name or "Abandoned Old Campus Building"
+            elif z_id in ("zone_capital_city", "zone_capital_city_isekai") or zone_name == "Capital City":
+                zone_name = f"Royal Capital of {kingdom_name}"
+            elif z_id in ("zone_ancient_woods", "zone_ancient_woods_isekai") or zone_name == "Ancient Woods":
+                zone_name = ancient_forest_name
+            elif z_id in ("zone_woodlands_forest", "zone_woodlands_forest_isekai") or zone_name == "Woodlands & Forest":
+                zone_name = forest_name
+            elif z_id in ("zone_mountain_range", "zone_mountain_range_isekai") or zone_name == "High Mountain Range":
+                zone_name = mountain_name
+            elif z_id in ("zone_desert_dunes", "zone_desert_dunes_isekai") or zone_name == "Desert Dunes & Oasis":
+                zone_name = desert_name
+            elif z_id in ("zone_swamp_marshes", "zone_swamp_marshes_isekai") or zone_name == "Swamp & Marshes":
+                zone_name = swamp_name
+            elif z_id in ("zone_central_plains", "zone_central_plains_isekai") or zone_name == "Central Farmlands & Plains":
+                zone_name = plains_name
+            elif z_id in ("zone_coastal_harbor", "zone_coastal_harbor_isekai") or zone_name == "Coastal Harbor Town":
+                zone_name = harbor_name
+            elif z_id in ("zone_frozen_tundra", "zone_frozen_tundra_isekai") or zone_name == "Frozen Snow & Tundra":
+                zone_name = tundra_name
+            elif z_id in ("zone_volcanic_ashlands", "zone_volcanic_ashlands_isekai") or zone_name == "Volcanic Ashlands":
+                zone_name = volcano_name
+            elif z_id in ("zone_cursed_shadowlands", "zone_cursed_shadowlands_isekai") or zone_name == "Cursed Shadowlands":
+                zone_name = shadowlands_name
+            elif z_id in ("zone_cave_network", "zone_deep_caves", "zone_deep_caves_isekai") or zone_name == "Deep Cave Network":
+                zone_name = caves_name
+            elif z_id in ("zone_underworld_chasm", "zone_underworld_chasm_isekai") or zone_name == "Underworld Chasm":
+                zone_name = chasm_name
+            elif z_id in ("zone_ancient_dungeon", "zone_ancient_dungeon_isekai") or zone_name == "Ancient Dungeon Complex":
+                zone_name = dungeon_name
+            elif zone_name == "City Center & Megacorp Plaza":
+                zone_name = f"{cyber_city} - City Center"
+            elif zone_name == "Downtown Commercial Core":
+                zone_name = f"{cyber_city} - Downtown"
+            elif z_id == "zone_slums_lower_wards" or zone_name == "Slums & Lower Wards":
+                zone_name = f"{cyber_city} - Slums & Wards"
+            elif z_id == "zone_airship_cruiser" or zone_name == "Grand Zeppelin Cruiser":
+                zone_name = airship_name
+            elif z_id == "zone_orbital_station" or zone_name == "Central Orbital Station":
+                zone_name = station_name
+            elif z_id == "zone_seaside_bay" or zone_name == "Seaside & Coastal Bay":
+                zone_name = seaside_name
+            elif z_id in ("zone_mountain_park", "zone_recreational_park") or zone_name in ("Recreational Mountain Park", "Recreational Park"):
+                zone_name = rec_park_name
+            elif z_id == "zone_commercial" or zone_name == "Commercial District" or ((z_id == "zone_downtown" or zone_name == "Downtown") and is_school_scenario(scenario_key)):
+                zone_name = commercial_name
+            elif z_id == "zone_residential" or zone_name == "Residential Neighborhood":
+                zone_name = residential_name
 
-            from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
-            if is_urban_anomalous_scenario(scenario_key) and p_id not in ALL_STATIC_RESIDENTIAL_FACILITY_IDS:
-                primary_name = get_session_urban_facility_name(session_id, z_id, p_id, primary_name, scenario_key, char_name)
-            true_primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
-            if primary.get("is_hidden") and primary.get("mundane_name"):
-                primary_name = resolve_session_location_tokens(session_id, str(primary["mundane_name"]), scenario_key, char_name)
-            else:
-                primary_name = true_primary_name
+            if r_id == "realm_veiled_spirit_world" and z_id in ("zone_spirit_kitsune", "zone_spirit_bunian", "zone_spirit_ghoul"):
+                from .folklore_spirit_naming import ensure_session_spirit_procedural_names
+                _proc_names = ensure_session_spirit_procedural_names(session_id, persist_db=True, sync_world_nodes=False)
+                _v_key_proc = {"zone_spirit_kitsune": "kitsune", "zone_spirit_bunian": "bunian", "zone_spirit_ghoul": "ghoul"}[z_id]
+                zone_name = str((_proc_names.get(_v_key_proc) or {}).get("zone_title") or zone_name)
+            elif is_urban_anomalous_scenario(scenario_key) and not z_id.startswith("zone_spirit_"):
+                zone_name = get_session_urban_zone_name(session_id, z_id, zone_name, scenario_key)
+            zone_name = resolve_session_location_tokens(session_id, zone_name, scenario_key, char_name)
 
-            p_seed_meta = {
-                k: primary[k]
-                for k in (
-                    "privacy_level", "is_discreet", "is_private_intimate", "is_enclosed",
-                    "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only",
-                    "is_hidden", "discovered", "veil_village_key", "veil_token_item",
-                    "is_anomalous", "mundane_name", "is_faction_hq", "is_minor_club_hq",
-                    "has_bounty_board", "has_merchant_shop", "is_transit_hub",
-                    "club_tier", "faction_name",
-                )
-                if k in primary
+            atmosphere = ""
+            if "theme" in zone or "features" in zone:
+                atmosphere = json.dumps({
+                    "theme": resolve_session_location_tokens(session_id, zone.get("theme", ""), scenario_key, char_name),
+                    "features": resolve_session_location_tokens(session_id, zone.get("features", ""), scenario_key, char_name),
+                    "sensory": resolve_session_location_tokens(session_id, zone.get("sensory", zone.get("atmosphere", "")), scenario_key, char_name)
+                })
+
+            is_zone_hub = bool(zone.get("is_hub"))
+            z_category = infer_node_category(z_id, "", raw_zone_name)
+            z_access = infer_access_tier("ZONE", z_id, z_id, raw_zone_name, z_category, zone.get("access_tier", ""))
+            z_curfew_start, z_curfew_end = infer_curfew_window("ZONE", z_id, z_id, raw_zone_name, z_category, zone.get("curfew_start_min"), zone.get("curfew_end_min"))
+            z_state_meta = {
+                k: zone[k]
+                for k in ("is_hidden", "discovered", "is_frontier", "is_hub", "veil_village_key")
+                if k in zone
             }
-            if primary.get("is_hidden"):
-                p_seed_meta["true_name"] = true_primary_name
-            p_category = infer_node_category(z_id, p_id, raw_primary_name, parent_category=z_category)
-            p_privacy = infer_node_privacy("FACILITY", p_id, raw_primary_name, explicit_meta=p_seed_meta)
-            p_enclosed = infer_is_enclosed("FACILITY", p_id, raw_primary_name)
-            p_transit = infer_is_transit_hub("FACILITY", z_id, p_id, raw_primary_name, explicit_meta=p_seed_meta)
-            p_access = infer_access_tier("FACILITY", z_id, p_id, raw_primary_name, p_category, primary.get("access_tier", ""), explicit_meta=p_seed_meta)
-            p_curfew_start, p_curfew_end = infer_curfew_window("FACILITY", z_id, p_id, raw_primary_name, p_category, primary.get("curfew_start_min"), primary.get("curfew_end_min"))
-            if p_transit:
-                transit_hubs.append(p_id)
+            if z_state_meta.get("is_hidden"):
+                z_state_meta.setdefault("discovered", False)
+                z_state_meta["started_hidden"] = True
 
-            fac_atmosphere = infer_facility_atmosphere(
-                p_id, primary_name, z_id, primary,
-                session_id=session_id, scenario_key=scenario_key, char_name=char_name
-            )
-
-            # 2. Insert Facility Node
             db.save_world_node(
                 session_id=session_id,
-                node_id=p_id,
-                parent_id=z_id,
-                name=primary_name,
-                node_type="FACILITY",
-                category=p_category,
-                privacy_level=p_privacy,
-                is_enclosed=p_enclosed,
-                is_transit_hub=p_transit,
-                access_tier=p_access,
-                curfew_start_min=p_curfew_start,
-                curfew_end_min=p_curfew_end,
-                atmosphere=fac_atmosphere,
+                node_id=z_id,
+                parent_id=r_id,
+                name=zone_name,
+                node_type="ZONE",
+                category=z_category,
+                privacy_level="public",
+                is_enclosed=0,
+                is_transit_hub=infer_is_transit_hub("ZONE", z_id, "", raw_zone_name, is_zone_hub),
+                access_tier=z_access,
+                curfew_start_min=z_curfew_start,
+                curfew_end_min=z_curfew_end,
+                atmosphere=atmosphere,
                 is_dynamic=0,
-                state_json=p_seed_meta if p_seed_meta else None
+                state_json=z_state_meta if z_state_meta else None,
             )
-            zone_facility_nodes.append(p_id)
+            zone_to_realm[z_id] = r_id
+            seeded_node_realm[z_id] = r_id
 
-            # 3. Insert Room Nodes
-            raw_subs = primary.get("sub_locations") or []
-            subs = get_facility_contextual_sublocations(primary_name, raw_subs)
-
-            room_nodes: list[str] = []
-            entrance_node_id = None
-            room_access_map: dict[str, str] = {}
-            room_locked_map: dict[str, bool] = {}
-            room_parent_sub_map: dict[str, Any] = {}
-
-            for sub in subs:
-                s_id = sub.get("id") or f"sub_{_slugify(raw_primary_name)}_{_slugify(sub.get('name', 'room'))}"
-                raw_sub_name = str(sub.get("name") or "Main Area")
-                sub_name = raw_sub_name
-
-                if classroom_name and (sub_name == "Homeroom Classroom" or s_id == "loc_homeroom"):
-                    sub_name = classroom_name
-                elif (sub_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in raw_primary_name.lower()):
-                    sub_name = player_desk
-                elif is_urban_anomalous_scenario(scenario_key) and s_id.startswith(("loc_hq_", "sub_priv1_", "sub_priv2_")):
-                    sub_z_id = "zone_agency_hq" if s_id.startswith("loc_hq_") else z_id
-                    sub_name = get_session_urban_facility_name(session_id, sub_z_id, s_id, sub_name, scenario_key, char_name)
-                sub_name = resolve_session_location_tokens(session_id, sub_name, scenario_key, char_name)
-
-                is_child_or_discreet = bool(sub.get("parent_sub_id")) or sub.get("privacy_level") in ("private", "semi_private")
-                if (sub.get("is_entrance") or is_entrance_sublocation(raw_sub_name)) and not entrance_node_id and not is_child_or_discreet:
-                    entrance_node_id = s_id
-
-                s_seed_meta = {
-                    k: sub[k]
-                    for k in (
-                        "privacy_level", "is_discreet", "is_private_intimate", "is_enclosed",
-                        "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive",
-                        "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key",
-                        "veil_token_item", "is_anomalous", "is_faction_hq", "is_minor_club_hq",
-                        "has_bounty_board", "has_merchant_shop", "is_transit_hub",
-                        "club_tier", "faction_name",
-                    )
-                    if k in sub
-                }
-                s_effective_meta = {
-                    **s_seed_meta,
-                    "is_anomalous": bool(s_seed_meta.get("is_anomalous") or p_seed_meta.get("is_anomalous")),
-                }
-                s_privacy = infer_node_privacy("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta) or p_privacy
-                s_access = infer_access_tier("ROOM", z_id, s_id, raw_sub_name, p_category, sub.get("access_tier", ""), explicit_meta=s_effective_meta)
-                p_sub_parent = sub.get("parent_sub_id")
-                if s_access == "open" and not s_effective_meta["is_anomalous"]:
-                    parent_sub_access = room_access_map.get(p_sub_parent) if p_sub_parent else None
-                    if parent_sub_access in ("restricted", "private"):
-                        s_access = parent_sub_access
-                    elif p_access in ("restricted", "private"):
-                        s_access = p_access
-                s_curfew_start, s_curfew_end = infer_curfew_window("ROOM", z_id, s_id, raw_sub_name, p_category, sub.get("curfew_start_min"), sub.get("curfew_end_min"))
-                if s_curfew_start is None and p_curfew_start is not None and not p_id.startswith("bld_school_") and p_id not in (
-                    "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
-                    "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
-                ):
-                    s_curfew_start, s_curfew_end = p_curfew_start, p_curfew_end
-
-                mega_complex_ids = {
-                    "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
-                    "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
-                    "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
-                }
-                if "is_enclosed" in s_seed_meta and s_seed_meta["is_enclosed"] is not None:
-                    s_enclosed = int(bool(s_seed_meta["is_enclosed"]))
-                elif p_id.startswith("bld_school_") or p_id in mega_complex_ids:
-                    s_enclosed = infer_is_enclosed("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta)
-                else:
-                    r_enc = infer_is_enclosed("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta)
-                    if r_enc == 0:
-                        s_enclosed = 0
-                    elif any(k in f"{s_id} {raw_sub_name}".lower() for k in ("cabin interior", "boathouse", "storage shed", "changing cabanas", "underpass")):
-                        s_enclosed = 1
-                    else:
-                        s_enclosed = p_enclosed
-
-                room_access_map[s_id] = s_access
-                room_locked_map[s_id] = bool(sub.get("is_locked", False))
-                room_parent_sub_map[s_id] = sub.get("parent_sub_id")
-
-                s_transit = infer_is_transit_hub("ROOM", z_id, s_id, raw_sub_name, explicit_meta=s_seed_meta)
-                if s_transit:
-                    transit_hubs.append(s_id)
-
-                room_sensory = resolve_session_location_tokens(
-                    session_id,
-                    str(sub.get("sensory") or sub.get("atmosphere") or "").strip(),
-                    scenario_key,
-                    char_name,
-                )
-
-                db.save_world_node(
+            zone_facility_nodes: list[str] = []
+            for primary in zone.get("primary_locations") or []:
+                _seed_facility_and_rooms_tx(
                     session_id=session_id,
-                    node_id=s_id,
-                    parent_id=p_id,
-                    name=sub_name,
-                    node_type="ROOM",
-                    category=p_category,
-                    privacy_level=s_privacy,
-                    is_enclosed=s_enclosed,
-                    is_transit_hub=s_transit,
-                    access_tier=s_access,
-                    curfew_start_min=s_curfew_start,
-                    curfew_end_min=s_curfew_end,
-                    atmosphere=room_sensory,
-                    is_dynamic=0,
-                    state_json=s_seed_meta if s_seed_meta else None
+                    parent_node_id=z_id,
+                    zone_id_for_infer=z_id,
+                    parent_category=z_category,
+                    primary=primary,
+                    scenario_key=scenario_key,
+                    char_name=char_name,
+                    names_ctx=names_ctx,
+                    transit_hubs=transit_hubs,
+                    facility_entrance_map=facility_entrance_map,
+                    container_facility_nodes=zone_facility_nodes,
+                    seeded_node_realm=seeded_node_realm,
+                    realm_id=r_id,
                 )
-                room_nodes.append(s_id)
 
-            if not entrance_node_id and room_nodes:
-                non_child_candidates = [r for r in room_nodes if not room_parent_sub_map.get(r)]
-                entrance_node_id = non_child_candidates[0] if non_child_candidates else room_nodes[0]
-            if entrance_node_id:
-                facility_entrance_map[p_id] = entrance_node_id
+            is_vessel_zone = z_id in ("zone_airship_cruiser", "zone_starship_vanguard")
+            if z_id == "zone_agency_hq":
+                intra_fac_mins, intra_ent_mins, e_type = 3, 3, "hallway"
+            elif is_vessel_zone:
+                intra_fac_mins, intra_ent_mins, e_type = 3, 2, "hallway"
+            else:
+                intra_fac_mins, intra_ent_mins, e_type = 5, 4, "pathway"
 
-            # Connect Facility to Entrance Room (all external traffic funnels into the entrance threshold)
-            if entrance_node_id:
-                db.save_world_edge(session_id, p_id, entrance_node_id, travel_minutes=1, edge_type="door")
+            has_agency_hq_in_cc = (
+                z_id == "zone_city_center"
+                and len(zone_facility_nodes) >= 2
+                and zone_facility_nodes[0] == "loc_agency_hq"
+            )
+            hub_fac_idx = 1 if has_agency_hq_in_cc else 0
 
-            is_mega_complex = p_id in {
-                "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
-                "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
-                "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
-            }
-            ent_to_room_mins = 3 if is_mega_complex else 1
-            room_to_room_mins = 3 if is_mega_complex else 2
-            room_edge_type = "hallway" if is_mega_complex else "door"
+            if has_agency_hq_in_cc:
+                db.save_world_edge(session_id, zone_facility_nodes[0], zone_facility_nodes[1], travel_minutes=10, edge_type="transit")
+                ent_hq = facility_entrance_map.get(zone_facility_nodes[0])
+                ent_cc = facility_entrance_map.get(zone_facility_nodes[1])
+                if ent_hq and ent_cc:
+                    db.save_world_edge(session_id, ent_hq, ent_cc, travel_minutes=10, edge_type="transit")
 
-            # Connect Entrance Room to standard interior rooms (or connect child sub-room to parent_sub_id)
-            for r_id in room_nodes:
-                if r_id != entrance_node_id:
-                    p_sub = room_parent_sub_map.get(r_id)
-                    if p_sub and (p_sub not in room_nodes or p_sub == r_id):
-                        log.warning("Invalid parent_sub_id '%s' for room '%s' in facility '%s'; falling back to entrance.", p_sub, r_id, p_id)
-                        p_sub = None
+            for i in range(hub_fac_idx, len(zone_facility_nodes)):
+                for j in range(i + 1, len(zone_facility_nodes)):
+                    if j == i + 1 or zone_facility_nodes[hub_fac_idx] in (zone_facility_nodes[i], zone_facility_nodes[j]):
+                        db.save_world_edge(session_id, zone_facility_nodes[i], zone_facility_nodes[j], travel_minutes=intra_fac_mins, edge_type=e_type)
+                        ent_i = facility_entrance_map.get(zone_facility_nodes[i])
+                        ent_j = facility_entrance_map.get(zone_facility_nodes[j])
+                        if ent_i and ent_j:
+                            db.save_world_edge(session_id, ent_i, ent_j, travel_minutes=intra_ent_mins, edge_type=e_type)
 
-                    if p_sub:
-                        is_edge_locked = 1 if room_locked_map.get(r_id) else 0
-                        check_type = "AGI" if is_edge_locked else ""
-                        check_dc = 12 if is_edge_locked else 0
-                        db.save_world_edge(session_id, p_sub, r_id, travel_minutes=1, edge_type="door", is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
-                    else:
-                        is_edge_locked = 1 if room_locked_map.get(r_id) else 0
-                        check_type = "AGI" if is_edge_locked else ""
-                        check_dc = 12 if is_edge_locked else 0
-                        db.save_world_edge(session_id, entrance_node_id, r_id, travel_minutes=ent_to_room_mins, edge_type=room_edge_type, is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
+            if zone_facility_nodes:
+                gw_node = zone_facility_nodes[hub_fac_idx]
+                zone_gateway_map[z_id] = gw_node
+                if not any(f in transit_hubs for f in zone_facility_nodes):
+                    transit_hubs.append(gw_node)
 
-            # Connect standard interior rooms to each other (excluding rooms with parent_sub_id)
-            interior_rooms = [r for r in room_nodes if r != entrance_node_id and not room_parent_sub_map.get(r)]
-            for i in range(len(interior_rooms)):
-                for j in range(i + 1, len(interior_rooms)):
-                    db.save_world_edge(session_id, interior_rooms[i], interior_rooms[j], travel_minutes=room_to_room_mins, edge_type=room_edge_type)
-
-        # Connect Facilities within the same zone to adjacent facilities
-        is_vessel_zone = z_id in ("zone_airship_cruiser", "zone_starship_vanguard")
-        if z_id == "zone_agency_hq":
-            intra_fac_mins, intra_ent_mins, e_type = 3, 3, "hallway"
-        elif is_vessel_zone:
-            intra_fac_mins, intra_ent_mins, e_type = 3, 2, "hallway"
-        else:
-            intra_fac_mins, intra_ent_mins, e_type = 5, 4, "pathway"
-
-        has_agency_hq_in_cc = (
-            z_id == "zone_city_center"
-            and len(zone_facility_nodes) >= 2
-            and zone_facility_nodes[0] == "loc_agency_hq"
-        )
-        hub_fac_idx = 1 if has_agency_hq_in_cc else 0
-
-        if has_agency_hq_in_cc:
-            # Connect Agency HQ (index 0) to City Center Metro Transit Terminal (index 1) with 10-min transit link
-            db.save_world_edge(session_id, zone_facility_nodes[0], zone_facility_nodes[1], travel_minutes=10, edge_type="transit")
-            ent_hq = facility_entrance_map.get(zone_facility_nodes[0])
-            ent_cc = facility_entrance_map.get(zone_facility_nodes[1])
-            if ent_hq and ent_cc:
-                db.save_world_edge(session_id, ent_hq, ent_cc, travel_minutes=10, edge_type="transit")
-
-        for i in range(hub_fac_idx, len(zone_facility_nodes)):
-            for j in range(i + 1, len(zone_facility_nodes)):
-                # If zone has a hub facility (e.g. gates, lobby, or courtyard), connect all facilities to that hub
-                # or connect sequential facilities
-                if j == i + 1 or zone_facility_nodes[hub_fac_idx] in (zone_facility_nodes[i], zone_facility_nodes[j]):
-                    db.save_world_edge(session_id, zone_facility_nodes[i], zone_facility_nodes[j], travel_minutes=intra_fac_mins, edge_type=e_type)
-                    # Connect entrances directly between adjacent facilities so characters walk entrance-to-entrance
-                    ent_i = facility_entrance_map.get(zone_facility_nodes[i])
-                    ent_j = facility_entrance_map.get(zone_facility_nodes[j])
+        # Case B: Compact REALM -> FACILITY -> ROOM (no Zone required)
+        compact_facs: list[str] = []
+        for primary in realm.get("primary_locations") or []:
+            _seed_facility_and_rooms_tx(
+                session_id=session_id,
+                parent_node_id=r_id,
+                zone_id_for_infer=r_id,
+                parent_category="vessel" if r_rules.get("is_mobile_vessel") else "civic",
+                primary=primary,
+                scenario_key=scenario_key,
+                char_name=char_name,
+                names_ctx=names_ctx,
+                transit_hubs=transit_hubs,
+                facility_entrance_map=facility_entrance_map,
+                container_facility_nodes=compact_facs,
+                seeded_node_realm=seeded_node_realm,
+                realm_id=r_id,
+            )
+        for i in range(len(compact_facs)):
+            for j in range(i + 1, len(compact_facs)):
+                if j == i + 1 or i == 0:
+                    db.save_world_edge(session_id, compact_facs[i], compact_facs[j], travel_minutes=2, edge_type="hallway")
+                    ent_i = facility_entrance_map.get(compact_facs[i])
+                    ent_j = facility_entrance_map.get(compact_facs[j])
                     if ent_i and ent_j:
-                        db.save_world_edge(session_id, ent_i, ent_j, travel_minutes=intra_ent_mins, edge_type=e_type)
+                        db.save_world_edge(session_id, ent_i, ent_j, travel_minutes=2, edge_type="hallway")
 
-        # Ensure at least one facility per zone acts as an inter-zone transit connection point
-        if zone_facility_nodes:
-            gw_node = zone_facility_nodes[hub_fac_idx]
-            zone_gateway_map[z_id] = gw_node
-            if not any(f in transit_hubs for f in zone_facility_nodes):
-                transit_hubs.append(gw_node)
+        # Case C: Pocket REALM -> ROOM (no Zone, no Facility)
+        pocket_rooms: list[str] = []
+        for idx, sub in enumerate(realm.get("sub_locations") or []):
+            s_id = str(sub.get("id") or f"sub_{_slugify(r_id)}_{idx}")
+            s_name = resolve_session_location_tokens(session_id, str(sub.get("name") or f"Chamber {idx + 1}"), scenario_key, char_name)
+            s_atm = resolve_session_location_tokens(session_id, str(sub.get("sensory") or sub.get("atmosphere") or ""), scenario_key, char_name)
+            s_state = {
+                k: sub[k]
+                for k in ("is_entrance", "is_anomalous", "props", "privacy_level", "is_enclosed", "is_hidden")
+                if k in sub
+            }
+            if "is_entrance" not in s_state and idx == 0:
+                s_state["is_entrance"] = 1
+            db.save_world_node(
+                session_id=session_id,
+                node_id=s_id,
+                parent_id=r_id,
+                name=s_name,
+                node_type="ROOM",
+                category="anomaly",
+                privacy_level=str(sub.get("privacy_level") or "public"),
+                is_enclosed=int(bool(sub.get("is_enclosed", 1))),
+                is_transit_hub=0,
+                access_tier=str(sub.get("access_tier") or "open"),
+                atmosphere=s_atm,
+                is_dynamic=0,
+                state_json=s_state or None,
+            )
+            pocket_rooms.append(s_id)
+            seeded_node_realm[s_id] = r_id
+        for i in range(len(pocket_rooms) - 1):
+            db.save_world_edge(session_id, pocket_rooms[i], pocket_rooms[i + 1], travel_minutes=2, edge_type="hallway")
 
     # Connect Transit Hubs across zones using Genre-Weighted Transit Graphs
     scen_low = str(scenario_key or "").lower()
@@ -949,10 +1166,40 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             ("zone_eastern_sanctuary", "zone_woods_reserve", 15),
         ]
         for z_a, z_b, mins in urban_district_edges:
+            if zone_to_realm.get(z_a) != zone_to_realm.get(z_b):
+                continue
             gw_a = zone_gateway_map.get(z_a) or ("loc_agency_hq" if z_a == "zone_agency_hq" else None)
             gw_b = zone_gateway_map.get(z_b) or ("loc_agency_hq" if z_b == "zone_agency_hq" else None)
             if gw_a and gw_b and gw_a != gw_b:
                 db.save_world_edge(session_id, gw_a, gw_b, travel_minutes=mins, edge_type="transit")
+                connected_zones.add(z_a)
+                connected_zones.add(z_b)
+
+        # Spirit Realm inter-zone topology: Dusk Confluence bridges all 3 enclaves (10m) and all 4 frontier biomes (8m),
+        # plus the 4-biome frontier perimeter ring (10m) and enclave-adjacent trails (9m).
+        spirit_zone_edges = [
+            ("zone_spirit_kitsune", "zone_spirit_crossroads", 10, "pathway"),
+            ("zone_spirit_bunian", "zone_spirit_crossroads", 10, "pathway"),
+            ("zone_spirit_ghoul", "zone_spirit_crossroads", 10, "pathway"),
+            ("zone_spirit_crossroads", "zone_spirit_wilds", 8, "pathway"),
+            ("zone_spirit_crossroads", "zone_spirit_peaks", 8, "pathway"),
+            ("zone_spirit_crossroads", "zone_spirit_mire", 8, "pathway"),
+            ("zone_spirit_crossroads", "zone_spirit_boneyard", 8, "pathway"),
+            ("zone_spirit_peaks", "zone_spirit_wilds", 10, "pathway"),
+            ("zone_spirit_wilds", "zone_spirit_mire", 10, "pathway"),
+            ("zone_spirit_mire", "zone_spirit_boneyard", 10, "pathway"),
+            ("zone_spirit_boneyard", "zone_spirit_peaks", 10, "pathway"),
+            ("zone_spirit_kitsune", "zone_spirit_peaks", 9, "pathway"),
+            ("zone_spirit_bunian", "zone_spirit_mire", 9, "pathway"),
+            ("zone_spirit_ghoul", "zone_spirit_boneyard", 9, "pathway"),
+        ]
+        for z_a, z_b, mins, edge_kind in spirit_zone_edges:
+            if zone_to_realm.get(z_a) != "realm_veiled_spirit_world" or zone_to_realm.get(z_b) != "realm_veiled_spirit_world":
+                continue
+            gw_a = zone_gateway_map.get(z_a)
+            gw_b = zone_gateway_map.get(z_b)
+            if gw_a and gw_b and gw_a != gw_b:
+                db.save_world_edge(session_id, gw_a, gw_b, travel_minutes=mins, edge_type=edge_kind)
                 connected_zones.add(z_a)
                 connected_zones.add(z_b)
 
@@ -1058,6 +1305,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             ("zone_swamp_marshes", "zone_cursed_shadowlands", 120, "pathway"),
             ("zone_desert_dunes", "zone_volcanic_ashlands", 120, "pathway"),
             ("zone_cave_network", "zone_underworld_chasm", 120, "pathway"),
+            ("zone_ancient_dungeon", "zone_cave_network", 60, "pathway"),
             ("zone_cursed_shadowlands", "zone_ancient_dungeon", 90, "pathway"),
             ("zone_cursed_shadowlands", "zone_underworld_chasm", 150, "pathway"),
             # Isekai Fantasy (60-120m guild roads & frontier marches)
@@ -1091,6 +1339,8 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             ("zone_toxic_swamp", "zone_irradiated_crater", 120, "pathway"),
         ]
         for z_a, z_b, mins, edge_kind in genre_zone_edges_table:
+            if zone_to_realm.get(z_a) != zone_to_realm.get(z_b):
+                continue
             gw_a = zone_gateway_map.get(z_a)
             gw_b = zone_gateway_map.get(z_b)
             if gw_a and gw_b and gw_a != gw_b:
@@ -1098,22 +1348,136 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                 connected_zones.add(z_a)
                 connected_zones.add(z_b)
 
-    # Fallback connectivity guarantee for any custom/dynamic zone not in static tables
+    # Fallback connectivity guarantee ONLY within the same realm (never auto-wire across realms)
     is_modern_or_tech = any(
         k in scen_low
         for k in ("school", "slice_of_life", "cyberpunk", "steampunk", "sci_fi", "space", "anomalous", "urban")
     )
     fallback_mins = 25 if is_modern_or_tech else 90
     fallback_edge_type = "transit" if is_modern_or_tech else "pathway"
-    all_zone_ids = list(zone_gateway_map.keys())
-    if len(all_zone_ids) >= 2:
-        anchor_z = next((z for z in all_zone_ids if z in connected_zones), all_zone_ids[0])
+    zones_by_realm: dict[str, list[str]] = {}
+    for z_id_item in zone_gateway_map:
+        r_owner = zone_to_realm.get(z_id_item, "")
+        zones_by_realm.setdefault(r_owner, []).append(z_id_item)
+    for r_owner, realm_z_ids in zones_by_realm.items():
+        if len(realm_z_ids) < 2:
+            continue
+        anchor_z = next((z for z in realm_z_ids if z in connected_zones), realm_z_ids[0])
         anchor_gw = zone_gateway_map[anchor_z]
-        for z_other in all_zone_ids:
+        for z_other in realm_z_ids:
             if z_other != anchor_z and z_other not in connected_zones:
                 other_gw = zone_gateway_map[z_other]
                 if other_gw and other_gw != anchor_gw:
                     db.save_world_edge(session_id, anchor_gw, other_gw, travel_minutes=fallback_mins, edge_type=fallback_edge_type)
+
+    # Explicit Cross-Realm Portal Edges
+    for p_spec in realm_portals:
+        u_nid = str(p_spec.get("from_node_id") or "").strip()
+        v_nid = str(p_spec.get("to_node_id") or "").strip()
+        p_etype = str(p_spec.get("edge_type") or "planar_portal").strip()
+        if not u_nid or not v_nid or p_etype not in PORTAL_EDGE_TYPES:
+            continue
+        if u_nid not in seeded_node_realm or v_nid not in seeded_node_realm:
+            continue
+        is_bidir = int(p_spec.get("is_bidirectional", 1))
+        is_locked = int(p_spec.get("is_locked", 0))
+        t_mins = max(1, int(p_spec.get("travel_minutes") or 10))
+        db.save_world_edge(
+            session_id=session_id,
+            from_node_id=u_nid,
+            to_node_id=v_nid,
+            travel_minutes=t_mins,
+            edge_type=p_etype,
+            is_bidirectional=is_bidir,
+            is_locked=is_locked,
+            lock_key_item=str(p_spec.get("lock_key_item") or ""),
+            skill_check_type=str(p_spec.get("skill_check_type") or ""),
+            skill_check_dc=int(p_spec.get("skill_check_dc") or 0),
+        )
+        u_realm = seeded_node_realm.get(u_nid, "")
+        v_realm = seeded_node_realm.get(v_nid, "")
+        is_hid_p = bool(p_spec.get("is_hidden_portal"))
+        req_exp = bool(p_spec.get("require_explicit_portal_unlock"))
+        v_key = str(p_spec.get("veil_village_key") or "").strip()
+        sp_only = bool(p_spec.get("spirit_side_unlock_only"))
+        default_icon = "⛩️" if p_etype == "leyline_spirit_passage" else ("🚀" if p_etype in ("ftl_jump", "shuttle_route") else "🌀")
+        u_portal_entry = {
+            "target_realm_id": v_realm,
+            "label": str(p_spec.get("label") or ""),
+            "icon": str(p_spec.get("icon") or default_icon),
+            "is_hidden_portal": is_hid_p,
+            "started_hidden_portal": is_hid_p,
+            "visible_when_target_hidden": bool(p_spec.get("visible_when_target_hidden", not is_hid_p)),
+            "is_locked": bool(is_locked),
+        }
+        if req_exp:
+            u_portal_entry["require_explicit_portal_unlock"] = True
+        if v_key:
+            u_portal_entry["veil_village_key"] = v_key
+        if sp_only:
+            u_portal_entry["spirit_side_unlock_only"] = True
+        u_st = db.get_world_node_state(session_id, u_nid)
+        u_portals = dict(u_st.get("portals") or {})
+        u_portals[v_nid] = u_portal_entry
+        db.update_world_node_state(session_id, u_nid, {"portals": u_portals})
+        if is_bidir:
+            v_portal_entry = {
+                "target_realm_id": u_realm,
+                "label": str(p_spec.get("return_label") or ""),
+                "icon": str(p_spec.get("icon") or default_icon),
+                "is_hidden_portal": is_hid_p,
+                "started_hidden_portal": is_hid_p,
+                "visible_when_target_hidden": bool(p_spec.get("visible_when_target_hidden", not is_hid_p)),
+                "is_locked": bool(is_locked),
+            }
+            if req_exp:
+                v_portal_entry["require_explicit_portal_unlock"] = True
+            if v_key:
+                v_portal_entry["veil_village_key"] = v_key
+            if sp_only:
+                v_portal_entry["spirit_side_unlock_only"] = True
+            v_st = db.get_world_node_state(session_id, v_nid)
+            v_portals = dict(v_st.get("portals") or {})
+            v_portals[u_nid] = v_portal_entry
+            db.update_world_node_state(session_id, v_nid, {"portals": v_portals})
+
+    # Mobile Vessel Initial Dock Edges
+    realm_name_by_id = {r_id: r_name for r_id, r_name, _ in seeded_realm_rules}
+    for r_id, r_name, r_rules in seeded_realm_rules:
+        if not r_rules.get("is_mobile_vessel"):
+            continue
+        airlock_id = str(r_rules.get("airlock_node_id") or "").strip()
+        docked_nid = str(r_rules.get("docked_node_id") or "").strip()
+        docked_rid = str(r_rules.get("docked_realm_id") or "").strip()
+        if not airlock_id or not docked_nid or airlock_id not in seeded_node_realm or docked_nid not in seeded_node_realm:
+            continue
+        db.save_world_edge(
+            session_id=session_id,
+            from_node_id=airlock_id,
+            to_node_id=docked_nid,
+            travel_minutes=5,
+            edge_type="shuttle_route",
+            is_bidirectional=1,
+        )
+        docked_r_name = realm_name_by_id.get(docked_rid, docked_rid)
+        a_st = db.get_world_node_state(session_id, airlock_id)
+        a_portals = dict(a_st.get("portals") or {})
+        a_portals[docked_nid] = {
+            "target_realm_id": docked_rid,
+            "label": f"🚀 Disembark to {docked_r_name}",
+            "icon": "🚀",
+            "is_hidden_portal": False,
+        }
+        db.update_world_node_state(session_id, airlock_id, {"portals": a_portals})
+        d_st = db.get_world_node_state(session_id, docked_nid)
+        d_portals = dict(d_st.get("portals") or {})
+        d_portals[airlock_id] = {
+            "target_realm_id": r_id,
+            "label": f"🚀 Board {r_name}",
+            "icon": "🚀",
+            "is_hidden_portal": False,
+        }
+        db.update_world_node_state(session_id, docked_nid, {"portals": d_portals})
 
 
 def migrate_session_to_spatial_graph(session_id: int) -> dict[str, Any]:
@@ -1129,6 +1493,8 @@ def migrate_session_to_spatial_graph(session_id: int) -> dict[str, Any]:
     scenario_key = s_row["scenario"] or "high_school_drama"
     db.set_session_schema_epoch(session_id, 2)
     ensure_session_spatial_graph_seeded(session_id, scenario_key=scenario_key)
+    from .realms import ensure_default_realm_wrapper
+    ensure_default_realm_wrapper(session_id, scenario_key)
 
     nodes = db.get_session_world_nodes(session_id)
     if not nodes:

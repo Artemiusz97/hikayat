@@ -186,11 +186,13 @@ def resolve_node_id_in_memory(
     nodes_by_id: Mapping[str, dict[str, Any]],
     prefer_facility: bool = True,
     cache: dict[tuple[str, bool], str] | None = None,
+    preferred_realm_id: str = "",
 ) -> str:
     loc_clean = str(location_str or "").strip()
     if not loc_clean or not nodes_by_id:
         return ""
-    c_key = (loc_clean, prefer_facility)
+    eff_pref_realm = str(preferred_realm_id or "").strip()
+    c_key = (f"{eff_pref_realm}::{loc_clean}" if eff_pref_realm else loc_clean, prefer_facility)
     if cache is not None and c_key in cache:
         return cache[c_key]
 
@@ -212,7 +214,14 @@ def resolve_node_id_in_memory(
         parts = [p.strip() for p in re.split(r"\s*(?:➔|->|>|/)\s*", loc_clean) if p.strip()]
         leaf_name = parts[-1].lower() if parts else ""
         prim_name = parts[1].lower() if len(parts) >= 2 else (parts[0].lower() if parts else "")
-        nodes = list(nodes_by_id.values())
+        all_nodes = list(nodes_by_id.values())
+        if eff_pref_realm:
+            from mechanics.world.locations.realms import get_node_realm_id_in_memory
+            pref_pool = [n for n in all_nodes if get_node_realm_id_in_memory(str(n.get("node_id") or ""), nodes_by_id) == eff_pref_realm]
+            other_pool = [n for n in all_nodes if get_node_realm_id_in_memory(str(n.get("node_id") or ""), nodes_by_id) != eff_pref_realm]
+            nodes = pref_pool + other_pool
+        else:
+            nodes = all_nodes
 
         prim_node: dict[str, Any] | None = None
         if prim_name:

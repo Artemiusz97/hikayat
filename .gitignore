@@ -19,6 +19,7 @@ tests/
 icon/
 pytest.ini
 run_tests.bat
+launchers/run_tests.bat
 requirements-dev.txt
 scripts/run_tests.py
 scripts/simulate_*.py
@@ -56,11 +57,14 @@ Thumbs.db
 *.sqlite3
 *.db.bak
 backups/
+data/backups/
 hikayat_sim_*.db
 *_hikayat_sim.db
 
 # Scratch & Temporary Scripts
 scratch/
+.local/
+logs/
 
 # Generated Media / Scene Artwork
 data/generated_images/

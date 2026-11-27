@@ -121,6 +121,106 @@ async def run_pre_turn_phase(
             if sleep_mode == "nap" and explicit_skip > 0:
                 is_nap, nap_dur = True, explicit_skip
 
+            def _scale_realm_minutes(minutes: int, scale: float) -> int:
+                if minutes <= 0 or scale <= 0.0:
+                    return 0
+                if scale == 1.0:
+                    return int(minutes)
+                return max(1, int(round(float(minutes) * float(scale))))
+
+            realm_time_scale = 1.0
+            if session_id_val:
+                try:
+                    from mechanics.world.locations.realms import (
+                        get_node_realm_id_in_memory,
+                        get_node_realm_in_memory,
+                        get_realm_rules,
+                    )
+                    rows_clk = db.get_session_world_nodes(session_id_val) or []
+                    nmap_clk = {str(r["node_id"]): dict(r) for r in rows_clk if r.get("node_id")}
+                    curr_nid_clk = str(session.get("current_node_id") or "").strip()
+                    prev_nid_clk = str(session.get("previous_node_id") or "").strip()
+                    scale_nid_clk = curr_nid_clk
+                    if is_movement and prev_nid_clk and curr_nid_clk and prev_nid_clk != curr_nid_clk:
+                        prev_rid_clk = get_node_realm_id_in_memory(prev_nid_clk, nmap_clk)
+                        curr_rid_clk = get_node_realm_id_in_memory(curr_nid_clk, nmap_clk)
+                        if prev_rid_clk and curr_rid_clk and prev_rid_clk != curr_rid_clk:
+                            scale_nid_clk = prev_nid_clk
+                    r_node_clk = get_node_realm_in_memory(scale_nid_clk, nmap_clk) if scale_nid_clk else None
+                    if r_node_clk:
+                        ts_val = get_realm_rules(r_node_clk).get("time_scale", 1.0)
+                        realm_time_scale = max(0.0, float(ts_val if ts_val is not None else 1.0))
+                except (NameError, UnboundLocalError, ImportError, TypeError):
+                    raise
+                except Exception:
+                    realm_time_scale = 1.0
+
+            if realm_time_scale <= 0.0:
+                if session_id_val and is_sleep and sleep_ctx.get("can_sleep", False):
+                    rec_ratio = float(sleep_ctx.get("recovery_ratio", 1.0))
+                    surf_lbl = sleep_ctx.get("surface_label", "Bed")
+                    _staged_time_op = {
+                        "op": "sleep",
+                        "scen_key": scen_key,
+                        "recovery_ratio": rec_ratio,
+                        "surface_label": surf_lbl,
+                        "party_uids": party_uids,
+                        "freeze_clock": True,
+                    }
+                    _pre_turn_sleep_info = {
+                        "session_id": session_id_val,
+                        "new_day": prev_day,
+                        "new_minute": prev_min,
+                        "clock_display": format_clock(prev_min),
+                        "day_name": get_day_of_week(prev_day),
+                        "fatigue_cleared": [],
+                        "hp_restored": True,
+                        "mp_restored": True,
+                        "recovery_ratio": rec_ratio,
+                        "surface_label": surf_lbl,
+                    }
+                elif session_id_val and is_nap and sleep_ctx.get("can_sleep", False):
+                    rec_ratio = float(sleep_ctx.get("recovery_ratio", 1.0))
+                    surf_lbl = sleep_ctx.get("surface_label", "Bed")
+                    _staged_time_op = {
+                        "op": "nap",
+                        "nap_minutes": nap_dur,
+                        "clock_minutes": 0,
+                        "recovery_ratio": rec_ratio,
+                        "surface_label": surf_lbl,
+                        "party_uids": party_uids,
+                        "freeze_clock": True,
+                    }
+                    _pre_turn_sleep_info = {
+                        "session_id": session_id_val,
+                        "new_day": prev_day,
+                        "new_minute": prev_min,
+                        "clock_display": format_clock(prev_min),
+                        "day_name": get_day_of_week(prev_day),
+                        "nap_minutes": nap_dur,
+                        "recovery_ratio": rec_ratio,
+                        "surface_label": surf_lbl,
+                    }
+                else:
+                    # Temporal isolation: freeze current_day / current_minute so outside deadlines never tick
+                    _staged_time_op = {"op": "advance", "delta_minutes": 0, "party_uids": party_uids}
+                    _pre_turn_time_info = {
+                        "session_id": session_id_val,
+                        "old_day": prev_day,
+                        "new_day": prev_day,
+                        "old_minute": prev_min,
+                        "new_minute": prev_min,
+                        "days_elapsed": 0,
+                        "minutes_elapsed": 0,
+                        "day_rolled_over": False,
+                        "fatigue_applied": [],
+                    }
+                session["current_day"] = prev_day
+                session["current_minute"] = prev_min
+                session["_staged_time_op"] = _staged_time_op
+                ctx.clock.staged_time_op = _staged_time_op
+                return
+
             if not session_id_val:
                 if is_sleep:
                     session["current_day"] = prev_day + 1
@@ -147,8 +247,15 @@ async def run_pre_turn_phase(
                 wake_m = int(get_scenario_wake_minute(scen_key))
                 if sleep_ctx.get("can_sleep", False):
                     rec_ratio = float(sleep_ctx.get("recovery_ratio", 1.0))
-                    new_day = prev_day + 1 if prev_min >= wake_m else prev_day
-                    new_min = wake_m
+                    if realm_time_scale != 1.0:
+                        raw_sl_min = (wake_m - prev_min) if wake_m > prev_min else (1440 - prev_min + wake_m)
+                        scaled_sl_min = _scale_realm_minutes(raw_sl_min, realm_time_scale)
+                        new_day = prev_day + ((prev_min + scaled_sl_min) // 1440)
+                        new_min = (prev_min + scaled_sl_min) % 1440
+                    else:
+                        scaled_sl_min = None
+                        new_day = prev_day + 1 if prev_min >= wake_m else prev_day
+                        new_min = wake_m
                     surf_lbl = sleep_ctx.get("surface_label", "Bed")
                     _staged_time_op = {
                         "op": "sleep",
@@ -157,6 +264,8 @@ async def run_pre_turn_phase(
                         "surface_label": surf_lbl,
                         "party_uids": party_uids,
                     }
+                    if scaled_sl_min is not None:
+                        _staged_time_op["override_clock_minutes"] = scaled_sl_min
                     _pre_turn_sleep_info = {
                         "session_id": session_id_val,
                         "new_day": new_day,
@@ -173,6 +282,7 @@ async def run_pre_turn_phase(
                     session["current_minute"] = new_min
                 else:
                     wait_minutes = (wake_m - prev_min) if wake_m > prev_min else (1440 - prev_min + wake_m)
+                    wait_minutes = _scale_realm_minutes(wait_minutes, realm_time_scale)
                     new_day = prev_day + ((prev_min + wait_minutes) // 1440)
                     new_min = (prev_min + wait_minutes) % 1440
                     _staged_time_op = {"op": "advance", "delta_minutes": wait_minutes, "party_uids": party_uids}
@@ -190,14 +300,16 @@ async def run_pre_turn_phase(
                     session["current_day"] = new_day
                     session["current_minute"] = new_min
             elif is_nap:
-                new_day = prev_day + ((prev_min + nap_dur) // 1440)
-                new_min = (prev_min + nap_dur) % 1440
+                clock_nap_dur = _scale_realm_minutes(nap_dur, realm_time_scale)
+                new_day = prev_day + ((prev_min + clock_nap_dur) // 1440)
+                new_min = (prev_min + clock_nap_dur) % 1440
                 if sleep_ctx.get("can_sleep", False):
                     rec_ratio = float(sleep_ctx.get("recovery_ratio", 1.0))
                     surf_lbl = sleep_ctx.get("surface_label", "Bed")
                     _staged_time_op = {
                         "op": "nap",
                         "nap_minutes": nap_dur,
+                        "clock_minutes": clock_nap_dur,
                         "recovery_ratio": rec_ratio,
                         "surface_label": surf_lbl,
                         "party_uids": party_uids,
@@ -209,11 +321,12 @@ async def run_pre_turn_phase(
                         "clock_display": format_clock(new_min),
                         "day_name": get_day_of_week(new_day),
                         "nap_minutes": nap_dur,
+                        "clock_minutes": clock_nap_dur,
                         "recovery_ratio": rec_ratio,
                         "surface_label": surf_lbl,
                     }
                 else:
-                    _staged_time_op = {"op": "advance", "delta_minutes": nap_dur, "party_uids": party_uids}
+                    _staged_time_op = {"op": "advance", "delta_minutes": clock_nap_dur, "party_uids": party_uids}
                     _pre_turn_time_info = {
                         "session_id": session_id_val,
                         "old_day": prev_day,
@@ -221,14 +334,15 @@ async def run_pre_turn_phase(
                         "old_minute": prev_min,
                         "new_minute": new_min,
                         "days_elapsed": new_day - prev_day,
-                        "minutes_elapsed": nap_dur,
+                        "minutes_elapsed": clock_nap_dur,
                         "day_rolled_over": new_day > prev_day,
                         "fatigue_applied": [],
                     }
                 session["current_day"] = new_day
                 session["current_minute"] = new_min
             elif explicit_skip > 0 or sleep_mode == "wait":
-                skip_m = explicit_skip if explicit_skip > 0 else 60
+                raw_skip_m = explicit_skip if explicit_skip > 0 else 60
+                skip_m = _scale_realm_minutes(raw_skip_m, realm_time_scale)
                 new_day = prev_day + ((prev_min + skip_m) // 1440)
                 new_min = (prev_min + skip_m) % 1440
                 _staged_time_op = {"op": "advance", "delta_minutes": skip_m, "party_uids": party_uids}
@@ -263,6 +377,8 @@ async def run_pre_turn_phase(
                         is_combat=is_combat_active,
                         session_id=session_id_val,
                     )
+                if realm_time_scale != 1.0:
+                    time_delta = _scale_realm_minutes(time_delta, realm_time_scale)
                 new_day = prev_day + ((prev_min + time_delta) // 1440)
                 new_min = (prev_min + time_delta) % 1440
                 _staged_time_op = {"op": "advance", "delta_minutes": time_delta, "party_uids": party_uids}
@@ -688,7 +804,11 @@ async def run_pre_turn_phase(
                                 }
                                 eq_by_uid[_p_uid] = {slot: _by_slot.get(slot) for slot in _cd_eq.EQUIPMENT_SLOTS}
                             else:
-                                eq_by_uid[_p_uid] = db.get_equipment(_p_uid) or {}
+                                eq_by_uid[_p_uid] = db.get_equipment(
+                                    _p_uid,
+                                    char=_p_char,
+                                    session_id=session.get("id") if isinstance(session, dict) else None,
+                                ) or {}
                 ctx.combat.preloaded_equipment_by_uid = eq_by_uid
                 if isinstance(session, dict):
                     session["_preloaded_equipment_by_uid"] = eq_by_uid
@@ -1122,6 +1242,8 @@ async def run_pre_turn_phase(
                 session["_active_quest_encounter"] = _q_enc_meta
                 ctx.combat.active_quest_encounter = _q_enc_meta
                 new_partners = []
+                if cast_plan is not None:
+                    cast_plan.dialogue_partners = []
                 _in_dialogue_mode = False
                 _names = ", ".join(m["name"] for m in _spawned_units if m.get("name"))
                 party_names_str = ", ".join(
@@ -1203,6 +1325,8 @@ async def run_pre_turn_phase(
             ambush_monsters = list(new_monsters)
             # Break peaceful 1-on-1 dialogue lock when an ambush interrupts the scene
             new_partners = []
+            if cast_plan is not None:
+                cast_plan.dialogue_partners = []
             _in_dialogue_mode = False
             names = ", ".join(m["name"] for m in new_monsters if m.get("name"))
             party_names_str = ", ".join(

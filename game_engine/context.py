@@ -11,7 +11,30 @@ from mechanics.social.factions import (
     get_npc_affiliation_chance,
 )
 from mechanics.social.relationships import format_llm_relationship_context
-from mechanics.social.persona import format_persona_summary
+from mechanics.social.persona import (
+    FEMALE_TEXTURE_NARRATIVE_FLAIR,
+    MALE_TEXTURE_NARRATIVE_FLAIR,
+    PROTAGONIST_STATURE_SPATIAL_FLAIR,
+    REAR_TEXTURE_NARRATIVE_FLAIR,
+    classify_asset_size_tier,
+    classify_rear_size_tier,
+    extract_rear_texture,
+    format_persona_summary,
+    fuse_asset_size_and_texture,
+    fuse_rear_size_and_texture,
+    get_physique_narrative_flair,
+    get_species_surface_profile,
+    heal_asset_texture_for_context,
+    heal_physique_for_context,
+    heal_rear_texture_for_context,
+    is_female_gender,
+    is_feral_rear_excluded,
+    is_male_gender,
+    normalize_asset_texture,
+    normalize_stature_tier,
+    strip_asset_texture_from_size,
+    strip_rear_texture_from_size,
+)
 from mechanics.social.races import format_race_display
 from mechanics.world.locations import format_llm_location_context, is_location_engine_enabled
 from .core import *
@@ -51,15 +74,15 @@ def _coerce_status_labels(raw_status: Any) -> list[str]:
     return [lbl for lbl in labels if lbl]
 
 
-def _character_sheet_text(char: dict, inventory: list) -> str:
-    if inventory is not None:
-        equipment = {
-            item["slot"]: item
-            for item in inventory
-            if isinstance(item, dict) and item.get("equipped") and item.get("slot")
-        }
-    else:
-        equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
+def _character_sheet_text(char: dict, inventory: list | None = None) -> str:
+    inventory_list = inventory if isinstance(inventory, list) else []
+    equipment = {
+        item["slot"]: item
+        for item in inventory_list
+        if isinstance(item, dict) and item.get("equipped") and item.get("slot")
+    }
+    if not equipment and not inventory_list and char.get("user_id"):
+        equipment = db.get_equipment(char.get("user_id", 0), char=char)
     from mechanics.combat.items.tags import is_narrative_item
     equip_items = []
     for slot, item in equipment.items():
@@ -67,7 +90,7 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
             n_tag = " [Narrative Item]" if is_narrative_item(item) else ""
             equip_items.append(f"{slot}: {item['name']}{n_tag}")
     equipped_text = "; ".join(equip_items) or "nothing"
-    carried = [i["name"] for i in inventory if isinstance(i, dict) and not i.get("equipped")]
+    carried = [i["name"] for i in inventory_list if isinstance(i, dict) and not i.get("equipped")]
     from mechanics.system.input_sanitizer import sanitize_character_name, wrap_custom_lore
     class_line = sanitize_character_name(char.get("char_class") or char.get("class", "Adventurer"), max_len=60, fallback="Adventurer")
     if char.get("class_description"):
@@ -84,9 +107,8 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
     
     # Pronoun & Gender Canon
     gender_raw = str(char.get("gender") or "Male").strip()
-    g_low = gender_raw.lower()
-    is_male = any(kw in g_low for kw in ("male", "man", "boy", "lord", "he", "him")) and not any(kw in g_low for kw in ("female", "woman", "girl", "lady", "she", "her"))
-    is_female = any(kw in g_low for kw in ("female", "woman", "girl", "lady", "she", "her")) or (not is_male and "fem" in g_low)
+    is_male = is_male_gender(gender_raw)
+    is_female = is_female_gender(gender_raw)
     
     if is_male:
         gender_line = f" | Gender: {gender_raw}"
@@ -127,20 +149,69 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
     app = app or {}
     
     anatomy_line = ""
-    if is_male:
-        p_size = app.get("penis_size")
-        tex = app.get("asset_texture")
-        p_desc = f"{p_size or 'Proportional'}"
-        if tex:
-            p_desc += f" ({tex})"
-        anatomy_line = f"Anatomy: Phallus: {p_desc}. (STRICTLY MALE: Has NO female breasts. NEVER describe him having female breasts or feminine intimate anatomy.)"
-    elif is_female:
-        b_size = app.get("breast_size")
-        tex = app.get("asset_texture")
-        b_desc = f"{b_size or 'Proportional'}"
-        if tex:
-            b_desc += f" ({tex})"
-        anatomy_line = f"Anatomy: Breasts: {b_desc}. (STRICTLY FEMALE: Has NO phallus. NEVER describe her having a penis.)"
+    scen_str = str(char.get("scenario") or "").strip()
+    raw_tex_val = str(app.get("asset_texture") or "").strip()
+    is_nsfw_char = scenario_data.is_nsfw_scenario(scen_str) if scen_str else bool(raw_tex_val or str(app.get("rear_texture") or "").strip())
+
+    has_p = bool(app.get("penis_size") and str(app.get("penis_size")).strip().lower() not in ("none", "unknown", "n/a", ""))
+    has_b = bool(app.get("breast_size") and str(app.get("breast_size")).strip().lower() not in ("none", "unknown", "n/a", ""))
+
+    if is_male or (not is_female and has_p and not has_b):
+        anat_track = "male"
+        raw_sz = str(app.get("penis_size") or "Proportional").strip()
+    else:
+        anat_track = "female"
+        raw_sz = str(app.get("breast_size") or "Proportional").strip()
+
+    if is_male or is_female or has_p or has_b or is_nsfw_char:
+        stripped_sz = strip_asset_texture_from_size(raw_sz, gender=anat_track) or raw_sz
+        if is_nsfw_char:
+            sz_tier = classify_asset_size_tier(raw_sz, gender=anat_track)
+            norm_tex = heal_asset_texture_for_context(
+                raw_tex_val or normalize_asset_texture(raw_sz, gender=anat_track, size_tier=sz_tier),
+                gender=anat_track,
+                size_tier=sz_tier,
+            )
+            fused_desc = fuse_asset_size_and_texture(stripped_sz, norm_tex, gender=anat_track) if norm_tex else stripped_sz
+            flair_map = MALE_TEXTURE_NARRATIVE_FLAIR if anat_track == "male" else FEMALE_TEXTURE_NARRATIVE_FLAIR
+            flair_txt = flair_map.get(norm_tex, "") if norm_tex else ""
+            surf_prof = get_species_surface_profile(race=raw_race, skin_type=str(app.get("skin_type") or ""))
+            surf_txt = ""
+            if surf_prof.get("key") != "natural" and surf_prof.get("label"):
+                surf_prose = surf_prof.get("male_prose" if anat_track == "male" else "female_prose", "")
+                if surf_prose:
+                    surf_txt = f" Species Surface ({surf_prof['label']}): {surf_prose}"
+            tactile_cue = f" Tactile Feel ({norm_tex}): {flair_txt}" if flair_txt else ""
+        else:
+            fused_desc = stripped_sz
+            tactile_cue = ""
+            surf_txt = ""
+
+        rear_cue = ""
+        if is_nsfw_char and not is_feral_rear_excluded(raw_race):
+            raw_rear = str(app.get("rear_size") or "").strip()
+            if raw_rear and raw_rear.lower() not in ("none", "unknown", "n/a", ""):
+                r_tier = classify_rear_size_tier(raw_rear)
+                stripped_r = strip_rear_texture_from_size(raw_rear) or raw_rear
+                raw_r_tex = str(app.get("rear_texture") or extract_rear_texture(raw_rear) or "").strip()
+                norm_r_tex = heal_rear_texture_for_context(raw_r_tex, size_tier=r_tier) if raw_r_tex else ""
+                fused_r = fuse_rear_size_and_texture(stripped_r, norm_r_tex) if norm_r_tex else stripped_r
+                r_flair = REAR_TEXTURE_NARRATIVE_FLAIR.get(norm_r_tex, "") if norm_r_tex else ""
+                rear_cue = f" Rear: {fused_r}." + (f" Rear Tactile ({norm_r_tex}): {r_flair}" if r_flair else "")
+
+        if is_male:
+            anatomy_line = (
+                f"Anatomy: Phallus: {fused_desc}.{tactile_cue}{surf_txt}{rear_cue} "
+                f"(STRICTLY MALE: Has NO female breasts. NEVER describe him having female breasts or feminine intimate anatomy.)"
+            )
+        elif is_female:
+            anatomy_line = (
+                f"Anatomy: Breasts: {fused_desc}.{tactile_cue}{surf_txt}{rear_cue} "
+                f"(STRICTLY FEMALE: Has NO phallus. NEVER describe her having a penis.)"
+            )
+        else:
+            anat_word = "Phallus" if anat_track == "male" else "Breasts"
+            anatomy_line = f"Anatomy: {anat_word}: {fused_desc}.{tactile_cue}{surf_txt}{rear_cue}".strip()
 
     status_labels = _coerce_status_labels(char.get("status_effects"))
     status_str = ", ".join(status_labels) if status_labels else "None"
@@ -150,21 +221,41 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
     if char.get("temp_hp"):
         hp_line += f" (+{char['temp_hp']} Temp Barrier)"
         
-    # Physical Scale & Build Tracking
-    pl_stature = (app.get("stature") or app.get("height") or "average").replace("_", " ").title()
-    pl_physique = (app.get("physique") or "").replace("_", " ").title()
-    build_desc = f"Stature: {pl_stature}"
-    if pl_physique:
-        build_desc += f" | Physique: {pl_physique}"
-    build_line = f"Physical Build: {build_desc}. (Incorporate the protagonist's physical scale, height, and build into scene narration and physical interactions.)"
+    # Physical Scale & Build Tracking (skip humanoid build/stature directives for feral kitsune:myobu_fox)
+    build_line = ""
+    if not is_feral_rear_excluded(raw_race):
+        raw_stature = app.get("stature") or app.get("height") or "average"
+        pl_stature_norm = normalize_stature_tier(str(raw_stature))
+        pl_stature = pl_stature_norm.replace("_", " ").title()
+        raw_phys = str(app.get("physique") or "").strip()
+        pl_physique = (
+            heal_physique_for_context(raw_phys, gender=gender_raw, stature=pl_stature_norm, race=raw_race)
+            or raw_phys.replace("_", " ").title()
+        ).strip()
+        build_desc = f"Stature: {pl_stature}"
+        if pl_physique:
+            build_desc += f" | Physique: {pl_physique}"
+        phys_flair = get_physique_narrative_flair(pl_physique or "Average", gender=gender_raw)
+        phys_label_disp = pl_physique or "Average"
+        spatial_extra = PROTAGONIST_STATURE_SPATIAL_FLAIR.get(pl_stature_norm, "")
+        build_extra = f" Build Presence ({phys_label_disp}): {phys_flair['presence']}"
+        if spatial_extra:
+            build_extra += f" Spatial Scale: {spatial_extra}"
+        if is_nsfw_char and phys_flair.get("embrace"):
+            build_extra += f" Close-Contact Feel: {phys_flair['embrace']}"
+        build_line = (
+            f"Physical Build: {build_desc}.{build_extra} "
+            f"(Incorporate the protagonist's physical scale, height, and build into scene narration and physical interactions.)"
+        )
 
     safe_char_name = sanitize_character_name(char.get('name', 'Hero'), max_len=60, fallback='Hero')
     lines = [
         f"Name: {safe_char_name}{race_line} | Class: {class_line} | Level: {char.get('level', 1)}{gender_line}",
         pronoun_rule,
         biology_rule,
-        build_line,
     ]
+    if build_line:
+        lines.append(build_line)
     if anatomy_line:
         lines.append(anatomy_line)
     if char.get("attribute") and char.get("combat_archetype") and char.get("ability_medium"):
@@ -188,7 +279,7 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
         f"INT {char.get('int_', 5)} | AGI {char.get('agi', 5)} | LUK {char.get('luk', 5)}",
         f"{hp_line} | MP: {char.get('mp', 30)}/{char.get('max_mp', 30)} | Gold: {char.get('gold', 50)}",
         f"Status effects: {status_str}",
-        f"Inventory capacity: {len(inventory)}/{inventory_capacity(str_val)} slots",
+        f"Inventory capacity: {len(inventory_list)}/{inventory_capacity(str_val)} slots",
         f"Equipped: {equipped_text}",
         f"Carried: {', '.join(carried) or 'nothing'}"
     ])
@@ -1006,17 +1097,36 @@ def _scene_context_text(session_id: int, current_location: str,
                 details.append(
                     "Form: Quadruped multi-tailed Myōbu Spirit Fox wreathed in foxfire; speaks clearly in an ethereal spirit-voice, wears no human garments, and remains non-romantic until shifted into humanoid guise"
                 )
+            elif race_low_present in ("ghoul:canid", "ghoul_canid"):
+                canid_sp_label = str(p_bi.get("canid_species") or "striped_hyena").replace("_", " ")
+                details.append(
+                    f"Form: Quadruped nocturnal Al-Ghūl spirit-canid ({canid_sp_label}) wearing only a pack collar and zero human garments; speaks in a low raspy spirit-voice and remains strictly non-romantic until shifted into humanoid guise"
+                )
+            elif race_low_present in ("ghoul:humanoid", "ghoul"):
+                details.append(
+                    "Form & Romance Guardrail: Pale near-human Al-Ghūl with subtle elongated canines, unaffected by daylight, wearing dark-tailored modern attire; keep any romance cleanly dark gothic-vampiric (velvet shadows, silver moonlight, cold night wind, intense devotion) with ZERO corpse, rotting flesh, cannibalism, or morgue-gore imagery"
+                )
             if p_bi.get("secret_crush_on_pc") and str((c_data_present or {}).get("track") or "platonic").strip().lower() == "platonic":
                 details.append(
                     "Demeanor Cue: Harbors a quiet, courtly secret attraction toward the player at first sight—shows warm stolen glances, gentle poise, and shy fascination without acting like an already-confessed lover"
                 )
-            if p_bi.get("is_daytime_wanderer"):
+            if p_bi.get("predatory_fascination_on_pc") and str((c_data_present or {}).get("track") or "platonic").strip().lower() == "platonic":
+                details.append(
+                    "Demeanor Cue: Exhibits a darkly playful, predatory fascination and cool aristocratic curiosity toward the player from first sight—unbothered by the Ossuary Council's cold distrust, without acting like an already-confessed lover"
+                )
+            if p_bi.get("is_daytime_wanderer") or p_bi.get("is_ghoul_city_wanderer"):
                 curr_mod_min = int(session.get("current_minute", 480) if isinstance(session, dict) else 480) % 1440
                 loc_str_now = str(current_location or "")
                 curr_nid_now = str(session.get("current_node_id") or "") if isinstance(session, dict) else ""
+                from mechanics.world.locations.folklore_spirit_realm import is_node_in_spirit_realm
                 from mechanics.world.locations.folklore_veil import VEILED_INNER_ROOM_IDS
                 in_inner_enclave = bool(
-                    curr_nid_now in (set(VEILED_INNER_ROOM_IDS["kitsune"]) | set(VEILED_INNER_ROOM_IDS["bunian"]))
+                    (curr_nid_now and is_node_in_spirit_realm(session_id, curr_nid_now))
+                    or curr_nid_now in (
+                        set(VEILED_INNER_ROOM_IDS.get("kitsune", ()))
+                        | set(VEILED_INNER_ROOM_IDS.get("bunian", ()))
+                        | set(VEILED_INNER_ROOM_IDS.get("ghoul", ()))
+                    )
                     or any(
                         tok in loc_str_now
                         for tok in (
@@ -1032,10 +1142,30 @@ def _scene_context_text(session_id: int, current_location: str,
                             "Istana Seri Kayangan",
                             "Pusaka Artisan Hall",
                             "Moonlit Cempaka",
+                            "Pale Ossuary",
+                            "Ashen Cypress",
+                            "Ossuary Court",
+                            "Heir's Obsidian",
+                            "Formalin & Bone-Relic",
+                            "Cold-Slab Embalming",
+                            "Black-Velvet Wake",
+                            "Ash-Pit Pack",
+                            "Silent Columbarium",
+                            "Cypress Mausoleum",
+                            "Al-Ghūl",
+                            "Majlis al-Gh",
+                            "Dar al-Kafan",
+                            "Al-Qabr",
+                            "Al-Maqbara",
+                            "Sunken Mausoleum",
                         )
                     )
                 )
-                if 540 <= curr_mod_min < 1020 and not in_inner_enclave:
+                _is_ghoul_wanderer = bool(
+                    p_bi.get("is_ghoul_city_wanderer")
+                    or race_low_present in ("ghoul:humanoid", "ghoul", "ghoul:canid", "ghoul_canid")
+                )
+                if (_is_ghoul_wanderer or 540 <= curr_mod_min < 1020) and not in_inner_enclave:
                     glamour_tell = str(p_bi.get("glamour_tell") or "a subtle otherworldly tell beneath polite traveller attire").strip()
                     details.append(f"Glamour Disguise: Wearing polite human traveller glamour in public save for a subtle tell ({glamour_tell})")
             extra = (" (" + "; ".join(details) + ")") if details else ""
@@ -1136,6 +1266,12 @@ def _scene_context_text(session_id: int, current_location: str,
     if party_npcs:
         comp_strs = [f"{c['name']} (Lvl {c.get('level', 1)} {c.get('role', 'Companion')})" for c in party_npcs]
         lines.append("Active Party Companions traveling with party: " + "; ".join(comp_strs))
+        _vouch_nid = str((session.get("current_node_id") if isinstance(session, dict) else "") or world.get("current_node_id") or "")
+        if session_id and _vouch_nid:
+            from mechanics.social.folklore_ghoul import build_rival_companion_enclave_banter
+            _vouch_cue = build_rival_companion_enclave_banter(int(session_id), _vouch_nid, party_npcs)
+            if _vouch_cue:
+                lines.append(_vouch_cue)
 
     # Add active contact relationships if mechanic is enabled for this scenario
     if scenario_data.is_mechanic_enabled(scen_key, "contact_list") or scenario_data.is_mechanic_enabled(scen_key, "relationship_meter"):
@@ -1275,7 +1411,7 @@ def _scene_context_text(session_id: int, current_location: str,
         try:
             member_ids = session.get("turn_order", []) if session else []
             if member_ids:
-                char = db.get_character(member_ids[0])
+                char = db.get_character(member_ids[0], session_id=session.get("id"))
                 if char:
                     player_faction_id = char.get("joined_faction_id", "") or ""
                     player_rank = char.get("faction_rank", 0) or 0

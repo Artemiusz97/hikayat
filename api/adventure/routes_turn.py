@@ -24,9 +24,9 @@ from ..deps import (
     RetryAdventureRequest,
     ToggleNonLethalRequest,
     ToggleStealthRequest,
-    _serializable_action,
     logger,
     manager,
+    serializable_action,
 )
 from .in_flight import (
     _IN_FLIGHT_TURN_TASKS,
@@ -44,6 +44,7 @@ from .in_flight import (
 from .enrichment import (
     _trigger_scene_image_broadcast,
     enrich_session_for_client,
+    heal_session_before_projection,
 )
 
 router = APIRouter()
@@ -58,13 +59,14 @@ async def _execute_action_locked(
     pre_locked: bool = False,
 ) -> dict | None:
     lock_ctx = nullcontext() if pre_locked else distributed_session_lock(req.session_id)
+    _turn_id = (in_flight_entry or {}).get("turn_id")
     async with lock_ctx:
         if not check_in_flight_guard(req.session_id, in_flight_entry, pre_locked=pre_locked):
             return None
         session_row = await adb(db.get_session, req.session_id)
         if not session_row:
             await fail_or_broadcast_error(
-                req.session_id, 404, "Session not found", broadcast_error=broadcast_error
+                req.session_id, 404, "Session not found", broadcast_error=broadcast_error, turn_id=_turn_id
             )
             return None
         session, verified_uid = await verify_session_participant(
@@ -73,14 +75,14 @@ async def _execute_action_locked(
         eff_uid = verified_uid or req.user_id
         if session["status"] != "active":
             await fail_or_broadcast_error(
-                req.session_id, 400, "Session is not active", broadcast_error=broadcast_error
+                req.session_id, 400, "Session is not active", broadcast_error=broadcast_error, turn_id=_turn_id
             )
             return None
 
         char = await adb(db.get_character, eff_uid)
         if not char:
             await fail_or_broadcast_error(
-                req.session_id, 404, "Character not found", broadcast_error=broadcast_error
+                req.session_id, 404, "Character not found", broadcast_error=broadcast_error, turn_id=_turn_id
             )
             return None
 
@@ -152,6 +154,7 @@ async def _execute_action_locked(
                     "session_id": req.session_id,
                     "error": str(e),
                     "status_code": 400,
+                    **({"turn_id": _turn_id} if _turn_id else {}),
                 })
                 return None
             raise HTTPException(status_code=400, detail=str(e))
@@ -162,7 +165,7 @@ async def _execute_action_locked(
         mode = session["mode"]
         is_started_fn = lambda: False
         flush_buffer = None
-        safe_action = _serializable_action(action)
+        safe_action = serializable_action(action)
         if in_flight_entry is not None:
             in_flight_entry["action"] = safe_action
 
@@ -234,7 +237,7 @@ async def _execute_action_locked(
                 })
                 return {"status": "waiting_for_party", "locked_picks": locked_cnt, "total": len(party)}
             if broadcast_error or is_started_fn():
-                _record_last_turn_error(req.session_id, str(e), turn_id=(in_flight_entry or {}).get("turn_id"))
+                _record_last_turn_error(req.session_id, str(e), turn_id=_turn_id)
                 err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
                 await manager.broadcast(req.session_id, {
                     "type": "STREAM_ERROR",
@@ -242,6 +245,7 @@ async def _execute_action_locked(
                     "error": str(e),
                     "status_code": 400,
                     "session": err_sess,
+                    **({"turn_id": _turn_id} if _turn_id else {}),
                 })
             if broadcast_error:
                 return None
@@ -257,7 +261,7 @@ async def _execute_action_locked(
                 msg = f"Engine failed to resolve the turn: {str(e)}"
                 status_code = 500
             if broadcast_error or is_started_fn():
-                _record_last_turn_error(req.session_id, msg, turn_id=(in_flight_entry or {}).get("turn_id"))
+                _record_last_turn_error(req.session_id, msg, turn_id=_turn_id)
                 err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
                 await manager.broadcast(req.session_id, {
                     "type": "STREAM_ERROR",
@@ -266,6 +270,7 @@ async def _execute_action_locked(
                     "status_code": status_code,
                     "fallback_reason": reason,
                     "session": err_sess,
+                    **({"turn_id": _turn_id} if _turn_id else {}),
                 })
             if broadcast_error:
                 return None
@@ -273,7 +278,18 @@ async def _execute_action_locked(
 
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
         fresh_session = await adb(db.get_session, req.session_id)
-        fresh_session = await adb(enrich_session_for_client, fresh_session, eff_uid)
+        if isinstance(fresh_session, dict):
+            fresh_session = dict(fresh_session)
+            pre_roster = await adb(heal_session_before_projection, fresh_session, req.session_id)
+            fresh_session = await adb(
+                enrich_session_for_client,
+                fresh_session,
+                eff_uid,
+                pre_agent_roster=pre_roster,
+                pre_healed=True,
+            )
+        else:
+            fresh_session = await adb(enrich_session_for_client, fresh_session, eff_uid)
         if isinstance(fresh_session, dict):
             fresh_session["in_flight_turn"] = None
 
@@ -284,7 +300,8 @@ async def _execute_action_locked(
             "last_action": safe_action,
             "xp_gained": turn_response.xp_gained,
             "levels_gained": turn_response.levels_gained,
-            "sync_timestamp": time.time()
+            "sync_timestamp": time.time(),
+            **({"turn_id": _turn_id} if _turn_id else {}),
         })
 
         if fresh_session.get("image_gen_enabled"):
@@ -511,6 +528,7 @@ async def _execute_retry_narration_locked(
     session_row: dict[str, Any] | None = None,
 ) -> dict | None:
     lock_ctx = nullcontext() if pre_locked else distributed_session_lock(req.session_id)
+    _turn_id = (in_flight_entry or {}).get("turn_id")
     async with lock_ctx:
         if not check_in_flight_guard(req.session_id, in_flight_entry, pre_locked=pre_locked):
             return None
@@ -518,7 +536,7 @@ async def _execute_retry_narration_locked(
             session_row = await adb(db.get_session, req.session_id)
         if not session_row:
             await fail_or_broadcast_error(
-                req.session_id, 404, "Session not found", broadcast_error=broadcast_error
+                req.session_id, 404, "Session not found", broadcast_error=broadcast_error, turn_id=_turn_id
             )
             return None
 
@@ -590,7 +608,7 @@ async def _execute_retry_narration_locked(
                 msg = f"Failed to retry scene: {str(e)}"
                 status_code = 500
             if broadcast_error or is_started_fn():
-                _record_last_turn_error(req.session_id, msg, turn_id=(in_flight_entry or {}).get("turn_id"))
+                _record_last_turn_error(req.session_id, msg, turn_id=_turn_id)
                 err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
                 await manager.broadcast(req.session_id, {
                     "type": "STREAM_ERROR",
@@ -599,6 +617,7 @@ async def _execute_retry_narration_locked(
                     "status_code": status_code,
                     "fallback_reason": reason,
                     "session": err_sess,
+                    **({"turn_id": _turn_id} if _turn_id else {}),
                 })
             if broadcast_error:
                 return None
@@ -622,6 +641,7 @@ async def _execute_retry_narration_locked(
             "type": msg_type,
             "session": enriched_session,
             "sync_timestamp": time.time(),
+            **({"turn_id": _turn_id} if _turn_id else {}),
         })
 
         if enriched_session.get("image_gen_enabled"):
@@ -652,6 +672,7 @@ async def _execute_opening_retry_locked(
     pre_locked: bool = False,
 ) -> dict | None:
     lock_ctx = nullcontext() if pre_locked else distributed_session_lock(req.session_id)
+    _turn_id = (in_flight_entry or {}).get("turn_id")
     async with lock_ctx:
         if not check_in_flight_guard(req.session_id, in_flight_entry, pre_locked=pre_locked):
             return None
@@ -660,7 +681,7 @@ async def _execute_opening_retry_locked(
             session_row = await adb(db.get_session, req.session_id)
         if not session_row:
             await fail_or_broadcast_error(
-                req.session_id, 404, "Session not found", broadcast_error=broadcast_error
+                req.session_id, 404, "Session not found", broadcast_error=broadcast_error, turn_id=_turn_id
             )
             return None
 
@@ -759,7 +780,7 @@ async def _execute_opening_retry_locked(
                     logger.warning("Failed restoring Turn-0 retry state for session %s: %s", req.session_id, restore_err)
             msg = f"Failed to retry opening scene: {str(e)}"
             if broadcast_error:
-                _record_last_turn_error(req.session_id, msg, turn_id=(in_flight_entry or {}).get("turn_id"))
+                _record_last_turn_error(req.session_id, msg, turn_id=_turn_id)
                 err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
                 await manager.broadcast(req.session_id, {
                     "type": "STREAM_ERROR",
@@ -767,6 +788,7 @@ async def _execute_opening_retry_locked(
                     "error": msg,
                     "status_code": 500,
                     "session": err_sess,
+                    **({"turn_id": _turn_id} if _turn_id else {}),
                 })
                 return None
             raise HTTPException(status_code=500, detail=msg)
@@ -781,6 +803,7 @@ async def _execute_opening_retry_locked(
             "type": "NEW_SCENE",
             "session": enriched_session,
             "sync_timestamp": time.time(),
+            **({"turn_id": _turn_id} if _turn_id else {}),
         })
         return {"success": True, "session": enriched_session}
 
@@ -792,6 +815,7 @@ async def _execute_retry_dispatch_locked(
     in_flight_entry: dict[str, Any] | None = None,
     broadcast_error: bool = False,
 ) -> dict | None:
+    _turn_id = (in_flight_entry or {}).get("turn_id")
     async with distributed_session_lock(req.session_id):
         if not check_in_flight_guard(req.session_id, in_flight_entry):
             return None
@@ -799,7 +823,7 @@ async def _execute_retry_dispatch_locked(
         session_row = await adb(db.get_session, req.session_id)
         if not session_row:
             await fail_or_broadcast_error(
-                req.session_id, 404, "Session not found", broadcast_error=broadcast_error
+                req.session_id, 404, "Session not found", broadcast_error=broadcast_error, turn_id=_turn_id
             )
             return None
 
@@ -880,7 +904,9 @@ async def cancel_in_flight_turn(req: CancelTurnRequest, request: Request = None)
     eff_uid = verified_uid or req.user_id or 0
     pre_sess = await adb(db.get_session, req.session_id)
     pre_turn_count = int((pre_sess or {}).get("turn_count") or 0)
-    had_active = _get_active_in_flight_turn(req.session_id) is not None
+    active_entry = _get_active_in_flight_turn(req.session_id)
+    had_active = active_entry is not None
+    cancelled_turn_id = active_entry.get("turn_id") if isinstance(active_entry, dict) else None
     stopped = await _cancel_session_in_flight_task(req.session_id)
     if had_active and not stopped:
         raise HTTPException(
@@ -906,11 +932,13 @@ async def cancel_in_flight_turn(req: CancelTurnRequest, request: Request = None)
             "type": "NEW_SCENE",
             "session": enriched_session,
             "sync_timestamp": time.time(),
+            **({"turn_id": cancelled_turn_id} if cancelled_turn_id else {}),
         })
         return {
             "status": "completed",
             "session_id": req.session_id,
             "session": enriched_session,
+            **({"turn_id": cancelled_turn_id} if cancelled_turn_id else {}),
         }
 
     await manager.broadcast(req.session_id, {
@@ -918,11 +946,13 @@ async def cancel_in_flight_turn(req: CancelTurnRequest, request: Request = None)
         "session_id": req.session_id,
         "session": enriched_session,
         "sync_timestamp": time.time(),
+        **({"turn_id": cancelled_turn_id} if cancelled_turn_id else {}),
     })
     return {
         "status": "cancelled",
         "session_id": req.session_id,
         "session": enriched_session,
+        **({"turn_id": cancelled_turn_id} if cancelled_turn_id else {}),
     }
 
 

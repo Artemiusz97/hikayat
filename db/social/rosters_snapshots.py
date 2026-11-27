@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Sequence
+
 import db
 import json
 import re
@@ -61,6 +63,36 @@ def get_school_roster(session_id: int) -> list[dict]:
             (session_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def delete_school_roster_entries(
+    session_id: int,
+    npc_keys_or_names: Sequence[str],
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Deletes matching `school_directory` rows for `session_id` by lowercase npc_id or name."""
+    sid = int(session_id or 0)
+    targets = {
+        str(k or "").strip().lower()
+        for k in (npc_keys_or_names or ())
+        if str(k or "").strip()
+    }
+    if sid <= 0 or not targets:
+        return 0
+    placeholders = ", ".join("?" for _ in targets)
+    ordered = sorted(targets)
+
+    def _run(c: sqlite3.Connection) -> int:
+        cur = c.execute(
+            f"DELETE FROM school_directory WHERE session_id = ? AND (LOWER(npc_id) IN ({placeholders}) OR LOWER(name) IN ({placeholders}))",
+            (sid, *ordered, *ordered),
+        )
+        return int(cur.rowcount or 0)
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
 
 def get_anomalous_agent_roster(session_id: int) -> list[dict]:
     """Returns the anomalous special agents roster for a session if present."""

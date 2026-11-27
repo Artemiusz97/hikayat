@@ -35,21 +35,28 @@ GOSSIP_FEED_SCHEMA = """{
 async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False) -> list[dict]:
     """Retrieves cached social feed posts or generates 4 fresh posts via fast LLM call."""
     session_id = session["id"]
+    from mechanics.social.origin_mode import resolve_player_age_profile
+
+    player_profile = resolve_player_age_profile(session)
+    is_student = bool(player_profile.get("is_student"))
+
     if not force_refresh:
         existing = await db.adb(db.get_gossip_feed, session_id, limit=6)
+        if not is_student and existing:
+            existing = [p for p in existing if not is_stale_campus_gossip_post(p)]
         if existing and len(existing) >= 3:
             return existing
 
     scen_key = session.get("scenario", "fantasy")
-    branding = get_phone_branding(scen_key)
-    from mechanics.world.locations import get_zone_location_name, is_school_scenario
+    branding = get_phone_branding(scen_key, session=session, is_student=is_student)
+    from mechanics.world.locations import get_zone_location_name
     current_loc = get_zone_location_name(session.get("current_location", "Local Area"))
     sq = await db.adb(db.get_active_story_quest, session_id)
     sq_title = sq.get("title", "Ongoing Mystery") if sq else "Daily Happenings"
     sq_obj = sq.get("objective", "") if sq else ""
 
     school_hints = ""
-    if is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key):
+    if is_student:
         from mechanics.social.school_roster import ensure_school_directory_exists
         roster = await db.adb(ensure_school_directory_exists, session)
         if roster:
@@ -76,14 +83,25 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
                 + "\n".join(chars_info) + "\n"
                 "- Characters may post under recognizable handles, share jokes, complain about homework, or discuss club events.\n"
             )
+    else:
+        school_hints = (
+            "\nADULT CITY & FIELD DISPATCH CONTEXT:\n"
+            "- Protagonist is an adult field operative/resident — keep timeline chatter centered on city districts, transit disruptions, guild/agency bulletins, local businesses, and metro rumors.\n"
+            "- Do NOT mention high school homework, cafeteria food, freshman pranks, or teen club gossip.\n"
+        )
 
+    guideline_scope = (
+        "slice-of-life updates, banter, club photos/announcements, jokes, sub-tweets, peer opinions"
+        if is_student
+        else "district chatter, municipal alerts, transit updates, local shop buzz, street rumors, network opinions"
+    )
     system_prompt = (
         f"Generate 4 short, realistic social media posts / timeline updates for a {scen_key} roleplay story.\n"
         f"Platform: {branding['feed_app_name']}.\n"
         f"Current Location: {current_loc}. Active Chapter Stakes: {sq_title} — {sq_obj[:150]}.\n"
         f"{school_hints}"
         f"Guidelines:\n"
-        f"- Posts should feel like a real social media timeline (slice-of-life updates, banter, club photos/announcements, jokes, sub-tweets, peer opinions).\n"
+        f"- Posts should feel like a real social media timeline ({guideline_scope}).\n"
         f"- Set `likes` to an integer between 3 and 85.\n"
         f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
     )
@@ -138,29 +156,106 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
     result = await _resolve_phone_llm_fn()(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     posts = result.get("posts", [])
     if not posts:
-        posts = [
-            {
-                "author_name": "Campus Watch",
-                "author_handle": "@campus_anon",
-                "content": f"Heard strange whispers near {current_loc} earlier today... anyone else notice?",
-                "tag": "#Rumors",
-                "likes": 24,
-                "clue_hook": "",
-                "time_ago": "10m ago"
-            },
-            {
-                "author_name": "Student Pulse",
-                "author_handle": "@pulse_daily",
-                "content": "Cafeteria is serving matcha parfaits today! Long lines already forming.",
-                "tag": "#CampusLife",
-                "likes": 42,
-                "clue_hook": "",
-                "time_ago": "25m ago"
-            }
-        ]
+        if is_student:
+            posts = [
+                {
+                    "author_name": "Campus Watch",
+                    "author_handle": "@campus_anon",
+                    "content": f"Heard strange whispers near {current_loc} earlier today... anyone else notice?",
+                    "tag": "#Rumors",
+                    "likes": 24,
+                    "clue_hook": "",
+                    "time_ago": "10m ago"
+                },
+                {
+                    "author_name": "Student Pulse",
+                    "author_handle": "@pulse_daily",
+                    "content": "Cafeteria is serving matcha parfaits today! Long lines already forming.",
+                    "tag": "#CampusLife",
+                    "likes": 42,
+                    "clue_hook": "",
+                    "time_ago": "25m ago"
+                }
+            ]
+        else:
+            posts = [
+                {
+                    "author_name": "Metro Traffic Desk",
+                    "author_handle": "@metro_watch",
+                    "content": f"Heavy foot traffic and unusual delays reported near {current_loc} this shift.",
+                    "tag": "#MetroWatch",
+                    "likes": 24,
+                    "clue_hook": "",
+                    "time_ago": "10m ago"
+                },
+                {
+                    "author_name": "District Pulse",
+                    "author_handle": "@city_pulse",
+                    "content": "Evening rain cleared out downtown stalls early; delivery couriers are backed up.",
+                    "tag": "#CityChatter",
+                    "likes": 36,
+                    "clue_hook": "",
+                    "time_ago": "25m ago"
+                }
+            ]
 
     await db.adb(db.save_gossip_feed, session_id, posts)
     return posts
+
+
+_CAMPUS_SPAM_HANDLES = frozenset({
+    "@campus_anon",
+    "@pulse_daily",
+    "@drama_radar",
+    "@late_night_chatter",
+    "@study_struggles",
+})
+_CAMPUS_SPAM_AUTHORS = frozenset({
+    "campus watch",
+    "student pulse",
+    "campus lurker",
+    "anon student",
+})
+_CAMPUS_SPAM_TAGS = frozenset({
+    "#campuschat",
+    "#campuslife",
+})
+_CAMPUS_SPAM_CONTENT = (
+    "matcha parfaits",
+    "cafeteria",
+    "freshman prank",
+    "drama club",
+)
+
+
+def is_stale_campus_gossip_post(post: dict | None) -> bool:
+    """Return True if a feed post is a canned student/campus template post unsuitable for adult feeds."""
+    if not isinstance(post, dict):
+        return False
+    handle = str(post.get("author_handle") or "").strip().lower()
+    author = str(post.get("author_name") or "").strip().lower()
+    tag = str(post.get("tag") or "").strip().lower()
+    content = str(post.get("content") or "").strip().lower()
+    if handle in _CAMPUS_SPAM_HANDLES or author in _CAMPUS_SPAM_AUTHORS or tag in _CAMPUS_SPAM_TAGS:
+        return True
+    return any(tok in content for tok in _CAMPUS_SPAM_CONTENT)
+
+
+def cleanup_stale_campus_gossip_for_adult(session_id: int, session: dict | None = None) -> int:
+    """Remove canned campus/student gossip posts from `phone_gossip_feed` when PC is an adult."""
+    if not session_id:
+        return 0
+    sess = session if isinstance(session, dict) else (db.get_session(int(session_id)) or {})
+    from mechanics.social.origin_mode import resolve_player_age_profile
+
+    if resolve_player_age_profile(sess).get("is_student"):
+        return 0
+    existing = db.get_gossip_feed(int(session_id), limit=50) or []
+    cleaned = [p for p in existing if not is_stale_campus_gossip_post(p)]
+    removed = len(existing) - len(cleaned)
+    if removed > 0:
+        db.save_gossip_feed(int(session_id), cleaned)
+    return removed
 
 
 def log_gossip_clue_to_quest(session_id: int, clue_text: str) -> bool:
@@ -172,7 +267,7 @@ def log_gossip_clue_to_quest(session_id: int, clue_text: str) -> bool:
 
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "high_school_drama") if session else "high_school_drama"
-    branding = get_phone_branding(scen_key)
+    branding = get_phone_branding(scen_key, session=session)
     from mechanics.narrative.clues import categorize_clue
     db.add_session_clue(
         session_id=session_id,
@@ -288,6 +383,8 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
         "succeeded": check_res.succeeded
     }
 
+    from mechanics.social.origin_mode import resolve_player_age_profile
+    is_student = bool(resolve_player_age_profile(session, char).get("is_student"))
     scen_key = session.get("scenario", "fantasy")
     sq = await db.adb(db.get_active_story_quest, session_id)
     sq_title = sq.get("title", "Active Mystery") if sq else "Daily Happenings"
@@ -295,11 +392,16 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
     loc = session.get("current_location", "the local area")
 
     if check["succeeded"]:
+        source_examples = (
+            "anonymous student post, leaked audio file, overheard locker room chat"
+            if is_student
+            else "verified street tip, transit dispatch leak, municipal bulletin thread"
+        )
         system_prompt = (
             f"Generate 1 high-value, juicy investigation rumor or breakthrough lead for a {scen_key} mystery.\n"
             f"Stakes: {sq_title} — {sq_obj[:150]}.\n"
             f"Location: {loc}.\n"
-            f"Output a JSON object with: {{\"clue\": \"string (1-2 sentences of valuable clue)\", \"source\": \"string (e.g. anonymous student post, leaked audio file, overheard locker room chat)\"}}"
+            f"Output a JSON object with: {{\"clue\": \"string (1-2 sentences of valuable clue)\", \"source\": \"string (e.g. {source_examples})\"}}"
         )
         from game_engine.prompt_layout import build_side_channel_language_directive
         rumor_lang_dir = build_side_channel_language_directive(session, text_fields=("clue", "source"), style="narrative")
@@ -322,10 +424,11 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
         except Exception:
             discovered_rm = None
 
+        insider_handle = "@campus_insider" if is_student else "@field_insider"
         lead_post = {
             "id": f"lead_{int(time.time())}_{random.randint(100, 999)}",
             "author_name": source,
-            "author_handle": "@whisper_wire" if "audio" in source.lower() or "thread" in source.lower() else "@campus_insider",
+            "author_handle": "@whisper_wire" if "audio" in source.lower() or "thread" in source.lower() else insider_handle,
             "content": clue_text,
             "tag": "#VerifiedLead",
             "clue_hook": clue_text,
@@ -359,26 +462,44 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             out_res["world_pulse"] = world_pulse_payload
         return out_res
     else:
-        fallbacks = [
-            f"Someone posted a blurry photo claiming it was proof of secret activity, but comments proved it was just a freshman prank.",
-            f"A sensational thread about {loc} was quickly deleted as fake news and clickbait.",
-            f"Scrolled through pages of memes, study complaints, and cafeteria arguments with no credible leads.",
-            f"An alarming post turned out to just be students rehearsing a dramatic scene for the drama club."
-        ]
-        red_herring = random.choice(fallbacks)
-
-        # Prepend noise banter post into feed
-        noise_post = {
-            "id": f"noise_{int(time.time())}_{random.randint(100, 999)}",
-            "author_name": random.choice(["Campus Lurker", "Anon Student", "Corridor Whispers", "Meme Archivist"]),
-            "author_handle": random.choice(["@campus_anon", "@drama_radar", "@late_night_chatter", "@study_struggles"]),
-            "content": red_herring,
-            "tag": "#CampusChat",
-            "clue_hook": "",
-            "likes": random.randint(3, 19),
-            "time_ago": "Just now",
-            "is_lead": False
-        }
+        if is_student:
+            fallbacks = [
+                f"Someone posted a blurry photo claiming it was proof of secret activity, but comments proved it was just a freshman prank.",
+                f"A sensational thread about {loc} was quickly deleted as fake news and clickbait.",
+                f"Scrolled through pages of memes, study complaints, and cafeteria arguments with no credible leads.",
+                f"An alarming post turned out to just be students rehearsing a dramatic scene for the drama club."
+            ]
+            red_herring = random.choice(fallbacks)
+            noise_post = {
+                "id": f"noise_{int(time.time())}_{random.randint(100, 999)}",
+                "author_name": random.choice(["Campus Lurker", "Anon Student", "Corridor Whispers", "Meme Archivist"]),
+                "author_handle": random.choice(["@campus_anon", "@drama_radar", "@late_night_chatter", "@study_struggles"]),
+                "content": red_herring,
+                "tag": "#CampusChat",
+                "clue_hook": "",
+                "likes": random.randint(3, 19),
+                "time_ago": "Just now",
+                "is_lead": False
+            }
+        else:
+            fallbacks = [
+                f"A blurry street clip near {loc} drew dozens of comments before turning out to be a false traffic alert.",
+                f"A sensational dispatch rumor about {loc} was quickly flagged as clickbait.",
+                f"Scrolled past dead-end commuter gripes and metro transit complaints with no credible leads.",
+                f"False alarm on local frequencies — just utility crews running overdue grid maintenance."
+            ]
+            red_herring = random.choice(fallbacks)
+            noise_post = {
+                "id": f"noise_{int(time.time())}_{random.randint(100, 999)}",
+                "author_name": random.choice(["Night Shift Dispatch", "Metro Observer", "Street Ticker", "Grid Static"]),
+                "author_handle": random.choice(["@metro_anon", "@city_chatter", "@signal_noise", "@transit_watch"]),
+                "content": red_herring,
+                "tag": random.choice(["#MetroWatch", "#CityChatter"]),
+                "clue_hook": "",
+                "likes": random.randint(3, 19),
+                "time_ago": "Just now",
+                "is_lead": False
+            }
 
         def _persist_rumor_noise():
             with db.UnitOfWork():

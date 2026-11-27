@@ -79,6 +79,7 @@ from .phone_commitments import (
 )
 from .rosters_snapshots import (
     _ensure_actor_physical_turn_snapshots_table,
+    delete_school_roster_entries,
     get_anomalous_agent_roster,
     get_school_characters_by_facility,
     get_school_directory_batch,
@@ -96,6 +97,7 @@ __all__ = [
     "decrement_contact_request_cooldowns",
     "decrement_recruitment_cooldowns",
     "delete_contact",
+    "delete_school_roster_entries",
     "ensure_scene_npcs_in_contacts",
     "expire_overdue_appointments",
     "get_active_rendezvous_appointments",

@@ -583,6 +583,31 @@ def resolve_partner_conversation_profile(
 
     can_walk_together = bool(is_private_meetup or is_companion or score >= 100 or track == "romantic")
     convince_stay_dc = 6 if (score >= 100 or track == "romantic") else (9 if score >= 50 else 12)
+    c_app_cc = (contact or {}).get("appearance") if isinstance((contact or {}).get("appearance"), dict) else {}
+    raw_op_cc = c_app_cc.get("erotic_openness") or c_app_cc.get("openness")
+    if raw_op_cc not in (None, ""):
+        from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+        op_t_cc = normalize_openness_tier(raw_op_cc)
+        sh_cc = len((contact or {}).get("gameplay_intimate_events") or [])
+        host_cc = str((contact or {}).get("disposition") or "").strip().lower() == "hostile"
+        comf_cc = compute_with_you_comfort(
+            op_t_cc,
+            relationship_score=score,
+            relationship_track=track or "platonic",
+            shared_intimate_count=sh_cc,
+            is_hostile=host_cc,
+        )
+        if op_t_cc == "shameless":
+            convince_stay_dc -= 2
+        elif op_t_cc == "bold":
+            convince_stay_dc -= 1
+        elif op_t_cc == "prude":
+            if comf_cc["stage"] == "guarded":
+                convince_stay_dc += 2
+            elif comf_cc["stage"] == "warming_up":
+                convince_stay_dc += 1
+        convince_stay_dc = max(4, min(14, convince_stay_dc))
 
     traits_list: List[str] = []
     for t_cand in ((contact or {}).get("traits") or b_info.get("traits") or lore_ent.get("traits") or []):
@@ -1389,7 +1414,7 @@ def enforce_conversation_choice_bands(
         } - {""}
         _player_gold = int((lead_char or {}).get("gold") or 0)
         if not lead_char and int(sess.get("user_id") or 0) > 0:
-            _pch = db.get_character(int(sess.get("user_id") or 0))
+            _pch = db.get_character(int(sess.get("user_id") or 0), session_id=_ep_sid)
             if isinstance(_pch, dict):
                 _player_gold = int(_pch.get("gold") or 0)
         for _kr in (_ep_m.get("knowledge_rows") or []):

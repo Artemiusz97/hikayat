@@ -14,7 +14,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 | Level | Identifier | Trigger Criteria | Examples |
 | :--- | :--- | :--- | :--- |
 | **MAJOR** | `X.0.0` | Core simulation or gameplay **paradigm shifts** (even when DB migrations remain backward-compatible), major architectural/platform overhauls, UI/UX redesigns, or breaking save/config/interface changes. | Genesis RPG engine, Discord bot & FastAPI web UI (`v1.0.0`); Modular package architecture & React SPA (`v2.0.0`); Living World NPC Autonomy & Epistemic Asymmetry Matrix (`v3.0.0`). |
-| **MINOR** | `X.Y.0` | New gameplay systems, command suites, quest/content frameworks, localization expansions, or significant deterministic/dev-ops capabilities introduced within the current engine paradigm. | Living World & Time Engine (`v1.6.0`), Modular Items & FNV DT (`v1.8.0`), Spatial Graph & SDXL (`v2.4.0`), Entity Contracts & Realty (`v2.9.0`), Threat Clock & Chapter Plan (`v2.11.0`), Closed-World NPC Engine (`v2.13.0`). |
+| **MINOR** | `X.Y.0` | New gameplay systems, command suites, quest/content frameworks, localization expansions, or significant deterministic/dev-ops capabilities introduced within the current engine paradigm. | Living World & Time Engine (`v1.6.0`), Modular Items & FNV DT (`v1.8.0`), Spatial Graph & SDXL (`v2.4.0`), Entity Contracts & Realty (`v2.9.0`), Threat Clock & Chapter Plan (`v2.11.0`), Closed-World NPC Engine (`v2.13.0`), Multi-Realm & Veiled Spirit Courts (`v3.7.0`). |
 | **PATCH** | `X.Y.Z` | Bug fixes, regression patches, performance/N+1 query fixes, concurrency hardening, LLM prompt/sanitizer tuning, translation fixes, and UI polish—with no new gameplay systems added. | Biome Diversity & Fail-Forward Polish (`v1.5.2`), Narrative Style Supremacy & Equipment Slot Hardening (`v1.8.1`). |
 
 ---
@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.7.0** | 2026-11-27 | Minor | Multi-Realm World Hierarchy & Dynamic Rifts (`realms/`, Migration 63), Veiled Spirit Realm v2 & 3 Spirit Courts with 90+ Sworn Ally Summons (Migrations 62/64), Dual-Form Al-Ghul, Categorized Online Store & SchoolMart, 24h Analog Clock Dial, Stature/Anatomy Reaction Engine, Tailscale Security & Full Package Decomposition. |
 | **v3.6.0** | 2026-11-22 | Minor | Core Monolith Package Decompositions (`db/core/`, `db/social/`, `api/adventure/`, `services/turn/`, `game_engine/turn/`), Persistence SQL Purity, Expanded Python & ESLint 9 Quality Gates, and Concurrency/Audit Hardening. |
 | **v3.5.0** | 2026-11-22 | Minor | Zero-Turn Scene Examine & Tactical Intel, Declarative 41-Table Session Registry (`db/registry.py`) & Pooled `ReadUnitOfWork`, Acrylic Glassmorphism UI & 12 `.webp` Scenario Backdrops, Drop-In Custom Fonts (`custom_fonts/`), 5-Mode Consumables & Scenario Currencies. |
 | **v3.4.0** | 2026-11-20 | Minor | Outlaw Factions & 10-Wing HQs (Migration v60), 68 Special Agent Blueprints & 3-Stage Population Engine, Native `<dialog>` World Map Modal Overhaul, Narrative Pacing & Prose Styles (v58/v59), Hybrid Reasoning Streaming. |
@@ -59,6 +60,21 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.7.0] - 2026-11-27
+
+#### Added & Enhanced
+- **Multi-Realm World Hierarchy, Dynamic Ephemeral Rifts & Vessel Travel (`mechanics/world/locations/realms/`, `data/dynamic_realm_templates.json`, Migration 63)**:
+  - Upgraded spatial modeling to a 4-tier *Realm ➔ Zone ➔ Facility ➔ Room* graph with seeded alternate realms across Fantasy, Sci-Fi (9 orbital/vessel/planetary realms + FTL `execute_starship_jump`), and Anomalous scenarios, temporal scaling (`time_scale`), realm comms isolation (`check_realm_comms_available`), same-realm fast-travel guards, ephemeral anomaly rifts (`anomalous_rift_open`, `anomalous_rift_lockdown`), and save-slot realm badges (`adventure_saves_realm_meta_v63`) + World Map gateway routing.
+- **Hidden Veiled Spirit Realm v2, Three Autonomous Spirit Courts & Dual-Form Al-Ghul (Migrations 62 & 64, `folklore_spirit_realm.py`, `folklore_spirit_courts.py`, `folklore_ghoul.py`)**:
+  - Expanded `realm_veiled_spirit_world` into 8 zones (*Dusk Confluence Bazaar* neutral hub + 4-wing Night Market, *Sato-no-Inari* Kitsune, *Kampung Kayangan* Orang Bunian, *The Pale Ossuary* Al-Ghul, and 4 frontier biomes) with deterministic procedural court naming (`folklore_spirit_naming.py`), 40 Spirit Realm NPC templates, sparring drills, Guest-Cottages (`>= 70` rep), **Sworn Ally (`90+`) Passive Stat Auras & Native 3-Turn Combat Summons** (`spirit_court_perks.py`), cross-realm commission boards (`spirit_court_bounties.py`), and 9 Spirit World events (`spirit_realm_events.py`, `data/world_events_catalog.json`).
+  - Added **Dual-Form Al-Ghul (`folklore_ghoul.py`)** contextual humanoid/canid shifting (`striped_hyena`, `wolf`, `coyote`, `jackal`), Sentinel Toll/Nerve gates, and Ossuary Blood-Truce Exile & Atonement.
+- **Categorized Online Store, Student SchoolMart & Phone Personalization (`mechanics/combat/online_store.py`, `PhoneShopApp.jsx`, `PhoneSettingsApp.jsx`)**:
+  - Added daily-rotating category-tabbed smartphone shopping, 20%+ CHA student **SchoolMart** discounts, combat courier lockouts, realm-comms / Bone-Relay checks, `PhoneSettingsApp.jsx` with 11 bundled `.webp` wallpapers (`web/public/phone-wallpapers/`), and `PhonePhotoLightbox.jsx`.
+- **24-Hour Analog Clock Dial, Build/Anatomy Reaction Engine & Employment Policy (`AnalogClockDial.jsx`, `anatomyOptions.js`, `intimate_excitement.py`, `employment_policy.py`)**:
+  - Added draggable 24h `AnalogClockDial.jsx` in `TimeSkipModal.jsx` with Slider/Dial toggle (`SettingsModal.jsx`), `stature`/`physique`/`rear_size`/`rear_texture`/`species_surface` customization across React Web & `/character appearance` Discord UI, anatomy/preference excitement multipliers (`evaluate_anatomy_excitement_modifiers`), unified `IntimateDossierPanel.jsx` & `OperativeCombatDossierCard.jsx`, and `employment_policy.py` teen/student civilian job safeguards.
+- **Full Monolith Package Completion, Layer-Boundary Inversion & Tailscale Security (`llm_client/`, `game_engine/choices_cleaner/`, `db/quests/`, `db/dossiers/`, `cogs/adventure/embeds/`, `api/codex_phone/`, `launchers/`)**:
+  - Decomposed the remaining 6 backend monoliths and 5 large React modules (`GameView`, `useGameSession`, `PhoneModal`, `CodexPanel`, `ContactsPanel` + `useEscapeLayer.js`), inverted upward `db/` imports via `services/anomalous_containment_service.py`, added `is_trusted_tailscale_request` (`api/security.py`), organized secondary launchers into `launchers/`, hardened secret/LAN checks in `scripts/package_release.py`, and synchronized 5-language locale parity (`1,971` JSON keys) & `.agents/` release gates.
 
 ### [v3.6.0] - 2026-11-22
 

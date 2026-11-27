@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -18,8 +18,31 @@ import {
 import { apiCall } from '../../api/client';
 import { AcrylicModal, CollapsibleSection, MotionButton } from '../Common/MotionPrimitives';
 import CurrencyBadge from '../Common/CurrencyBadge';
-import { formatGender, formatRace } from '../../utils/npcDemographics';
-import { FEMALE_TEXTURE_OPTIONS, MALE_TEXTURE_OPTIONS } from '../../utils/anatomyOptions';
+import { formatGender, formatRace, formatStature, formatPhysique, normalizeStatureClient, normalizePhysiqueClient } from '../../utils/npcDemographics';
+import {
+  REAR_SIZE_OPTIONS,
+  STATURE_OPTIONS,
+  classifyAssetSizeTierClient,
+  classifyRearSizeTierClient,
+  formatAssetTexture,
+  formatFusedRear,
+  getAllowedPhysiqueOptions,
+  getAllowedRearTextureOptions,
+  getAllowedTextureOptions,
+  getSpeciesSurfaceClient,
+  healPhysiqueForSelection,
+  healRearTextureForSelection,
+  healTextureForSelection,
+  isFemaleGender,
+  isFeralRearExcluded,
+  isMaleGender,
+  normalizeAssetTextureClient,
+  rollClientAssetTexture,
+  rollClientBuild,
+  rollClientRearTexture,
+  stripRearTextureFromSizeClient,
+  stripTextureFromSizeClient,
+} from '../../utils/anatomyOptions';
 
 const getScenarioSkillsMeta = (scenarioKey) => {
   const key = String(scenarioKey || 'fantasy').trim().toLowerCase();
@@ -144,35 +167,36 @@ const formatTitle = (str) => {
 
 const formatFusedAsset = (sizeStr, texStr, isMale = false, t = null) => {
   const s = String(sizeStr || (isMale ? 'Average' : 'Modest B-Cup')).replace(/^[()]+|[()]+$/g, '').trim();
-  const tStr = String(texStr || '').replace(/^[()]+|[()]+$/g, '').trim();
-  
-  const bKey = s.toLowerCase().replace(/[\s-]+/g, '_');
-  const bTranslated = t ? t(`anatomy.${bKey}`, s) : s;
-  
-  if (!tStr) return formatTitle(bTranslated);
+  const normTex = normalizeAssetTextureClient(texStr, isMale);
+  const texTranslated = normTex ? formatAssetTexture(normTex, isMale, t) : '';
+  const baseSize = stripTextureFromSizeClient(s, isMale) || s;
 
-  // If s already contains the texture (e.g. LLM flared or pre-fused)
-  const tClean = tStr.toLowerCase().replace(/&/g, '').trim();
-  const sClean = s.toLowerCase().replace(/&/g, '').trim();
-  if (s.toLowerCase().includes(tStr.toLowerCase()) || (tClean.length > 3 && sClean.includes(tClean))) {
-    return formatTitle(bTranslated);
-  }
+  const bareFemale = { flat: 'AA-Cup', small: 'B-Cup', average: 'C-Cup', large: 'D-Cup', huge: 'E-Cup' };
+  const bareMale = { flat: 'Tiny', small: 'Compact', average: 'Average', large: 'Large', huge: 'Huge' };
+  const sLow = baseSize.toLowerCase().trim();
+  const normalizedBase = !isMale && bareFemale[sLow]
+    ? bareFemale[sLow]
+    : isMale && bareMale[sLow]
+      ? bareMale[sLow]
+      : baseSize;
 
-  const texKey = tStr.toLowerCase().replace(/[\s-&]+/g, '_');
-  const texTranslated = t ? t(`anatomy.${texKey}`, tStr) : tStr;
+  const bKey = normalizedBase.toLowerCase().replace(/[\s-]+/g, '_');
+  const bTranslated = t ? t(`anatomy.${bKey}`, normalizedBase) : normalizedBase;
+
+  if (!texTranslated) return formatTitle(bTranslated);
 
   if (!isMale) {
-    const cupMatch = s.match(/\b([A-Ha-h]+(?:\+)?-Cup)\b/i);
+    const cupMatch = normalizedBase.match(/\b([A-Ha-h]+(?:\+)?-Cup)\b/i);
     if (cupMatch) {
       const cupPart = cupMatch[1].toUpperCase().replace(/-CUP$/, '-Cup');
       return `${formatTitle(texTranslated)} ${cupPart}`;
     }
     const redundant = ['generous', 'voluptuous', 'modest', 'petite', 'heavy', 'bountiful', 'shapely', 'toned', 'firm', 'soft', 'full', 'small', 'large', 'average'];
-    const filtered = s.split(/\s+/).filter(w => !redundant.includes(w.toLowerCase())).join(' ').trim();
+    const filtered = normalizedBase.split(/\s+/).filter(w => !redundant.includes(w.toLowerCase())).join(' ').trim();
     if (filtered) return `${formatTitle(texTranslated)} ${formatTitle(filtered)}`;
     return `${formatTitle(texTranslated)} ${formatTitle(bTranslated)}`;
   } else {
-    const inchMatch = s.match(/(\d+(?:\.\d+)?\s*(?:"|inch(?:es)?))/i);
+    const inchMatch = normalizedBase.match(/(\d+(?:\.\d+)?\s*(?:"|inch(?:es)?))/i);
     if (inchMatch) {
       let inchPart = inchMatch[1].trim();
       if (/inch/i.test(inchPart)) {
@@ -182,7 +206,7 @@ const formatFusedAsset = (sizeStr, texStr, isMale = false, t = null) => {
       return `${formatTitle(texTranslated)} ${inchPart}`;
     }
     const redundant = ['thick', 'long', 'massive', 'compact', 'slender', 'sturdy', 'dense', 'toned', 'formidable', 'large', 'huge', 'small'];
-    const filtered = s.split(/\s+/).filter(w => !redundant.includes(w.toLowerCase())).join(' ').trim();
+    const filtered = normalizedBase.split(/\s+/).filter(w => !redundant.includes(w.toLowerCase())).join(' ').trim();
     if (filtered) return `${formatTitle(texTranslated)} ${formatTitle(filtered)}`;
     return `${formatTitle(texTranslated)} ${formatTitle(bTranslated)}`;
   }
@@ -222,6 +246,7 @@ export const StatusEffectBadge = ({ effect }) => {
 const CharacterSheet = ({
   character,
   scenario = null,
+  playerProfile = null,
   onAllocateStat,
   onCastSpell,
   onRefreshCharacter = null,
@@ -233,42 +258,90 @@ const CharacterSheet = ({
   const [editBSize, setEditBSize] = useState(character?.appearance?.breast_size || character?.breast_size || 'average');
   const [editPSize, setEditPSize] = useState(character?.appearance?.penis_size || character?.penis_size || 'average');
   const [editTexture, setEditTexture] = useState(character?.appearance?.asset_texture || character?.asset_texture || '');
+  const [editRSize, setEditRSize] = useState(character?.appearance?.rear_size || character?.rear_size || 'average');
+  const [editRTexture, setEditRTexture] = useState(character?.appearance?.rear_texture || character?.rear_texture || '');
   const [savingApp, setSavingApp] = useState(false);
   const [specialOpen, setSpecialOpen] = useState(true);
   const [combatStatsOpen, setCombatStatsOpen] = useState(true);
   const [skillsOpen, setSkillsOpen] = useState(true);
 
+  const isMale = isMaleGender(character?.gender);
+  const isFemale = isFemaleGender(character?.gender);
+  const feralRearExcluded = isFeralRearExcluded(character?.race);
   const charPresent = Boolean(character);
-  const charBSize = character?.appearance?.breast_size || character?.breast_size || 'average';
-  const charPSize = character?.appearance?.penis_size || character?.penis_size || 'average';
-  const charAssetTex = character?.appearance?.asset_texture || character?.asset_texture || '';
+  const charStature = normalizeStatureClient(character?.appearance?.stature || character?.stature) || 'average';
+  const charPhysique = healPhysiqueForSelection(normalizePhysiqueClient(character?.appearance?.physique || character?.physique) || 'Average', character?.gender, charStature, character?.race) || 'Average';
+  const charBSizeRaw = character?.appearance?.breast_size || character?.breast_size || 'average';
+  const charPSizeRaw = character?.appearance?.penis_size || character?.penis_size || 'average';
+  const charRSizeRaw = character?.appearance?.rear_size || character?.rear_size || 'average';
+  const charBSize = classifyAssetSizeTierClient(charBSizeRaw, false);
+  const charPSize = classifyAssetSizeTierClient(charPSizeRaw, true);
+  const charRSize = classifyRearSizeTierClient(charRSizeRaw);
+  const charAssetTex = healTextureForSelection(
+    character?.appearance?.asset_texture || character?.asset_texture || '',
+    isMale,
+    isMale ? charPSize : charBSize
+  );
+  const charRearTex = healRearTextureForSelection(
+    character?.appearance?.rear_texture || character?.rear_texture || '',
+    charRSize
+  );
+
+  const [editStature, setEditStature] = useState(charStature);
+  const [editPhysique, setEditPhysique] = useState(charPhysique);
+  const prevModalOpenRef = useRef(false);
 
   useEffect(() => {
-    if (charPresent) {
+    const opening = showAppearanceModal && !prevModalOpenRef.current;
+    prevModalOpenRef.current = showAppearanceModal;
+    if (charPresent && opening) {
+      setEditStature(charStature);
+      setEditPhysique(charPhysique);
       setEditBSize(charBSize);
       setEditPSize(charPSize);
       setEditTexture(charAssetTex);
+      setEditRSize(charRSize);
+      setEditRTexture(charRearTex);
     }
-  }, [charPresent, charBSize, charPSize, charAssetTex, showAppearanceModal]);
+  }, [charPresent, charStature, charPhysique, charBSize, charPSize, charAssetTex, charRSize, charRearTex, showAppearanceModal]);
 
-  const charGender = (character?.gender || '').toLowerCase();
-  const isMale = ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => charGender.includes(kw)) && !['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => charGender.includes(kw));
-  const isNsfw = String(character?.scenario || '').includes('nsfw') || Boolean(character?.appearance?.breast_size || character?.appearance?.penis_size);
+  const effScenario = String(scenario?.scenario || (typeof scenario === 'string' ? scenario : '') || character?.scenario || '').toLowerCase();
+  const isNsfw = Boolean(
+    scenario?.is_nsfw ||
+    (Array.isArray(scenario?.tags) && scenario.tags.includes('nsfw')) ||
+    effScenario.includes('nsfw')
+  );
+  const allowedEditPhysiques = getAllowedPhysiqueOptions(character?.gender, editStature, character?.race);
+  const editSizeTier = isMale ? classifyAssetSizeTierClient(editPSize, true) : classifyAssetSizeTierClient(editBSize, false);
+  const allowedEditTextures = getAllowedTextureOptions(isMale, editSizeTier);
+  const editRearTier = classifyRearSizeTierClient(editRSize);
+  const allowedEditRearTextures = getAllowedRearTextureOptions(editRearTier);
+  const editSpeciesSurface = getSpeciesSurfaceClient(character?.race, character?.appearance?.skin_type);
 
   const handleSaveAppearance = async () => {
     setSavingApp(true);
     try {
-      const finalBSize = isMale ? undefined : editBSize;
-      const finalPSize = isMale ? editPSize : undefined;
+      const payload = {
+        user_id: character.user_id,
+        character_id: character.id,
+        stature: editStature || 'average',
+        physique: healPhysiqueForSelection(editPhysique, character?.gender, editStature, character?.race) || 'Average',
+      };
+      if (isNsfw) {
+        if (isMale) {
+          payload.penis_size = editPSize !== charPSize ? editPSize : (stripTextureFromSizeClient(charPSizeRaw, true) || editPSize);
+        } else {
+          payload.breast_size = editBSize !== charBSize ? editBSize : (stripTextureFromSizeClient(charBSizeRaw, false) || editBSize);
+        }
+        payload.asset_texture = editTexture ? healTextureForSelection(editTexture, isMale, editSizeTier) : '';
+        if (!feralRearExcluded) {
+          payload.rear_size = editRSize !== charRSize ? editRSize : (stripRearTextureFromSizeClient(charRSizeRaw) || editRSize);
+          payload.rear_texture = editRTexture ? healRearTextureForSelection(editRTexture, editRearTier) : '';
+        }
+      }
       const res = await apiCall('/api/character/appearance', {
         method: 'POST',
-        body: JSON.stringify({
-          user_id: character.user_id,
-          character_id: character.id,
-          breast_size: finalBSize,
-          penis_size: finalPSize,
-          asset_texture: editTexture,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res?.character) {
         await onRefreshCharacter?.();
@@ -377,7 +450,35 @@ const CharacterSheet = ({
               </span>
             );
           })()}
-              {isNsfw && !isMale && (
+          {playerProfile?.badge_label && (
+            <span
+              className={`px-2 py-0.5 rounded-md border font-semibold text-xs ${
+                playerProfile.is_student
+                  ? 'bg-sky-950/70 border-sky-700/60 text-sky-200'
+                  : 'bg-emerald-950/70 border-emerald-700/60 text-emerald-200'
+              }`}
+            >
+              {playerProfile.is_student
+                ? t('character.profile_badge_student', playerProfile.badge_label)
+                : playerProfile.origin_mode === 'adult'
+                ? t('character.profile_badge_agent', playerProfile.badge_label)
+                : t('character.profile_badge_adult', playerProfile.badge_label)}
+            </span>
+          )}
+          {playerProfile?.is_student && playerProfile?.student_grade && (
+            <span className="hk-chip text-indigo-200 border-indigo-700/50 bg-indigo-950/50">
+              {playerProfile.student_grade}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAppearanceModal(true)}
+            className="px-2.5 py-0.5 rounded-md bg-fantasy-accent/15 hover:bg-fantasy-accent/25 border border-fantasy-accent/40 text-amber-200 font-semibold text-xs flex items-center gap-1 transition-colors"
+            title={t('character.customize_build_tooltip', 'Click to customize height & physique')}
+          >
+            <span>📐 {[formatStature(charStature, t), formatPhysique(charPhysique, t)].filter(Boolean).join(' • ')}</span>
+          </button>
+              {isNsfw && (isFemale || Boolean(character.appearance?.breast_size || character.breast_size)) && (
                 <button
                   type="button"
                   onClick={() => setShowAppearanceModal(true)}
@@ -407,6 +508,23 @@ const CharacterSheet = ({
                     const fused = formatFusedAsset(rawPSize, rawTex, true, t);
                     return (
                       <span>🔞 {t('anatomy.penis_size', 'Penis Size')}: {fused}</span>
+                    );
+                  })()}
+                </button>
+              )}
+              {isNsfw && !feralRearExcluded && (
+                <button
+                  type="button"
+                  onClick={() => setShowAppearanceModal(true)}
+                  className="px-2.5 py-0.5 rounded-md bg-rose-950/70 hover:bg-rose-900/90 border border-rose-700/70 text-rose-200 font-semibold text-xs flex items-center gap-1 transition-colors"
+                  title={t('character.customize_rear_tooltip', 'Click to customize rear size & tactile flavor')}
+                >
+                  {(() => {
+                    const rawRSize = character.appearance?.rear_size || character.rear_size || 'average';
+                    const rawRTex = character.appearance?.rear_texture || character.rear_texture || '';
+                    const fusedRear = formatFusedRear(rawRSize, rawRTex, t).label || rawRSize;
+                    return (
+                      <span>🍑 {t('anatomy.rear_size', 'Rear')}: {fusedRear}</span>
                     );
                   })()}
                 </button>
@@ -669,24 +787,24 @@ const CharacterSheet = ({
         </div>
       )}
 
-      {/* Intimate Physical Anatomy Live Customization Modal */}
+      {/* Appearance & Physical Build Live Customization Modal */}
       <AcrylicModal
         isOpen={showAppearanceModal}
         onClose={() => setShowAppearanceModal(false)}
-        label={t('character.customize_anatomy', 'Customize Physical Anatomy')}
+        label={t('character.customize_appearance', 'Customize Appearance')}
         maxWidthClass="max-w-md"
         zIndexClass="z-[100]"
         className="p-5 space-y-4"
       >
         <div className="flex items-center justify-between border-b border-fantasy-border/35 pb-3">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-lg shrink-0">🔞</span>
+            <span className="text-lg shrink-0">📐</span>
             <div className="min-w-0">
               <h3 className="font-rpg font-bold text-sm text-fantasy-accent truncate">
-                {t('character.customize_anatomy', 'Customize Physical Anatomy')}
+                {t('character.customize_appearance', 'Customize Appearance')}
               </h3>
               <p className="text-[10px] text-gray-400 truncate">
-                {t('character.anatomy_desc', "Live update your character's assets & tactile textures")}
+                {t('character.appearance_desc', "Live update your character's build and appearance")}
               </p>
             </div>
           </div>
@@ -699,69 +817,212 @@ const CharacterSheet = ({
           </MotionButton>
         </div>
 
-        <div className="space-y-3.5 text-xs">
-          {isMale ? (
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
-                {t('character.penis_size_tier', 'Penis Size Tier')}
-              </label>
-              <select
-                value={editPSize}
-                onChange={(e) => setEditPSize(e.target.value)}
-                className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
-              >
-                <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
-                <option value="average">{t('character.penis_average', 'Proportional (Average)')}</option>
-                <option value="large">{t('character.penis_large', 'Well-Endowed / Formidable (Large)')}</option>
-                <option value="huge">{t('character.penis_huge', 'Massive / Heavy (Huge)')}</option>
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
-                {t('character.breast_size_tier', 'Breast Size Tier')}
-              </label>
-              <select
-                value={editBSize}
-                onChange={(e) => setEditBSize(e.target.value)}
-                className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
-              >
-                <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
-                <option value="small">{t('character.breast_petite', 'Petite / Modest (A-B Cup)')}</option>
-                <option value="average">{t('character.breast_proportional', 'Proportional (C-Cup)')}</option>
-                <option value="large">{t('character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)')}</option>
-                <option value="huge">{t('character.breast_bountiful', 'Bountiful / Massive (E+ Cup)')}</option>
-              </select>
-            </div>
-          )}
-
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
-                {t('character.tactile_texture', 'Tactile Texture / Feature')} ({isMale ? 'Phallus' : 'Breasts'})
-              </label>
+        <div className="space-y-4 text-xs">
+          {/* Section 1: Physical Build (always shown for SFW & NSFW) */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[11px] uppercase tracking-wider font-bold text-amber-300">
+                📐 {t('character.physical_build_section', 'Physical Build')}
+              </h4>
               <button
                 type="button"
                 onClick={() => {
-                  const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
-                  setEditTexture(pool[Math.floor(Math.random() * pool.length)].value);
+                  const rolled = rollClientBuild(character?.race, character?.gender);
+                  setEditStature(rolled.stature);
+                  setEditPhysique(rolled.physique);
                 }}
-                className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
+                className="text-[10px] text-fantasy-accent hover:text-amber-300 flex items-center gap-1 font-semibold"
               >
-                <Sparkles size={11} /> {t('character.roll_feature', 'Roll Feature')}
+                🎲 {t('build.roll_build', 'Roll Build')}
               </button>
             </div>
-            <select
-              value={editTexture}
-              onChange={(e) => setEditTexture(e.target.value)}
-              className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
-            >
-              <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
-              {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-300 mb-1">
+                  {t('build.height_label', 'Height')}
+                </label>
+                <select
+                  value={editStature}
+                  onChange={(e) => {
+                    const nextStature = e.target.value;
+                    setEditStature(nextStature);
+                    setEditPhysique(healPhysiqueForSelection(editPhysique, character?.gender, nextStature, character?.race) || 'Average');
+                  }}
+                  className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                >
+                  {STATURE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {t(opt.i18nKey, opt.fallback)}{opt.rangeHint ? ` ${opt.rangeHint}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-300 mb-1">
+                  {t('build.physique_label', 'Physique')}
+                </label>
+                <select
+                  value={editPhysique}
+                  onChange={(e) => setEditPhysique(e.target.value)}
+                  className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                >
+                  {allowedEditPhysiques.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {t(opt.i18nKey, opt.fallback)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
+
+          {/* Section 2: Intimate Anatomy (NSFW scenarios only) */}
+          {isNsfw && (
+            <div className="space-y-3.5 pt-3 border-t border-fantasy-border/35">
+              <h4 className="text-[11px] uppercase tracking-wider font-bold text-pink-300">
+                🔞 {t('character.intimate_anatomy_section', 'Intimate Anatomy')}
+              </h4>
+              {isMale ? (
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
+                    {t('character.penis_size_tier', 'Penis Size Tier')}
+                  </label>
+                  <select
+                    value={editPSize}
+                    onChange={(e) => {
+                      const nextSz = e.target.value;
+                      setEditPSize(nextSz);
+                      if (editTexture) {
+                        setEditTexture(healTextureForSelection(editTexture, true, classifyAssetSizeTierClient(nextSz, true)));
+                      }
+                    }}
+                    className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                  >
+                    <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
+                    <option value="average">{t('character.penis_average', 'Proportional (Average)')}</option>
+                    <option value="large">{t('character.penis_large', 'Well-Endowed / Formidable (Large)')}</option>
+                    <option value="huge">{t('character.penis_huge', 'Massive / Heavy (Huge)')}</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
+                    {t('character.breast_size_tier', 'Breast Size Tier')}
+                  </label>
+                  <select
+                    value={editBSize}
+                    onChange={(e) => {
+                      const nextSz = e.target.value;
+                      setEditBSize(nextSz);
+                      if (editTexture) {
+                        setEditTexture(healTextureForSelection(editTexture, false, classifyAssetSizeTierClient(nextSz, false)));
+                      }
+                    }}
+                    className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                  >
+                    <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
+                    <option value="small">{t('character.breast_petite', 'Petite / Modest (A-B Cup)')}</option>
+                    <option value="average">{t('character.breast_proportional', 'Proportional (C-Cup)')}</option>
+                    <option value="large">{t('character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)')}</option>
+                    <option value="huge">{t('character.breast_bountiful', 'Bountiful / Massive (E+ Cup)')}</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
+                    {t('character.tactile_texture', 'Tactile Texture / Feature')} ({isMale ? 'Phallus' : 'Breasts'})
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditTexture(rollClientAssetTexture(isMale, editSizeTier, character?.race, editPhysique));
+                    }}
+                    className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
+                  >
+                    <Sparkles size={11} /> {t('character.roll_feature', 'Roll Feature')}
+                  </button>
+                </div>
+                <select
+                  value={editTexture}
+                  onChange={(e) => setEditTexture(e.target.value)}
+                  className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                >
+                  <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
+                  {allowedEditTextures.map(opt => (
+                    <option key={opt.value} value={opt.value}>{t(opt.i18nKey, opt.fallback)}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Rear / Ass Anatomy (All Genders, NSFW only, non-feral) */}
+              {!feralRearExcluded && (
+                <div className="pt-2.5 border-t border-fantasy-border/25 space-y-3">
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wider font-bold text-rose-300 mb-1">
+                      {t('character.rear_size_tier', 'Rear / Ass Size Tier')}
+                    </label>
+                    <select
+                      value={editRSize}
+                      onChange={(e) => {
+                        const nextSz = e.target.value;
+                        setEditRSize(nextSz);
+                        if (editRTexture) {
+                          setEditRTexture(healRearTextureForSelection(editRTexture, classifyRearSizeTierClient(nextSz)));
+                        }
+                      }}
+                      className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                    >
+                      {REAR_SIZE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{t(opt.selectKey, opt.selectFallback)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
+                        {t('character.rear_texture', 'Rear Tactile Texture')}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditRTexture(rollClientRearTexture(editRearTier, character?.race, editPhysique));
+                        }}
+                        className="text-[10px] text-rose-300 hover:text-rose-200 flex items-center gap-1 font-semibold"
+                      >
+                        <Sparkles size={11} /> {t('character.roll_rear_feature', 'Roll Rear Feature')}
+                      </button>
+                    </div>
+                    <select
+                      value={editRTexture}
+                      onChange={(e) => setEditRTexture(e.target.value)}
+                      className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+                    >
+                      <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
+                      {allowedEditRearTextures.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{t(opt.i18nKey, opt.label)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {editSpeciesSurface && (
+                    <p className="mt-1.5 text-[10px] text-amber-300/90 flex items-center gap-1">
+                      ✨ {t('anatomy.species_surface.label', 'Auto species surface')}:{' '}
+                      <strong className="font-semibold">{t(editSpeciesSurface.i18nKey, editSpeciesSurface.fallback)}</strong>
+                    </p>
+                  )}
+                </div>
+              )}
+              {feralRearExcluded && editSpeciesSurface && (
+                <p className="mt-1.5 text-[10px] text-amber-300/90 flex items-center gap-1">
+                  ✨ {t('anatomy.species_surface.label', 'Auto species surface')}:{' '}
+                  <strong className="font-semibold">{t(editSpeciesSurface.i18nKey, editSpeciesSurface.fallback)}</strong>
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-3 border-t border-fantasy-border/35">

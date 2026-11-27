@@ -64,25 +64,151 @@ class ZoneSelectDropdown(discord.ui.Select):
             sync=self.sync,
             user_id=self.user_id,
         )
-        embed = build_zone_places_embed(self.session_id, selected_zone, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
+        embed = await adb(
+            build_zone_places_embed,
+            self.session_id,
+            selected_zone,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
+
+def _load_zone_select_summary(
+    session_id: int,
+    scen_key: str,
+    current_loc: str = "",
+    char_name: str = "",
+) -> list[dict]:
+    from mechanics.world.locations import (
+        get_node_realm_id,
+        get_zone_summary_tree,
+        process_llm_location_update,
+        sanitize_location_target,
+    )
+    sess = db.get_session(session_id) or {}
+    curr_nid = str(sess.get("current_node_id") or "").strip()
+    curr_realm_id = get_node_realm_id(session_id, curr_nid) if curr_nid else ""
+    # Auto-discover only active quest targets belonging to the current realm (Rule 2)
+    active_wps = db.get_all_session_active_waypoints(session_id)
+    pending_targets: list[str] = []
+    for wp in active_wps:
+        target_loc = wp.get("target_location", "").strip()
+        if target_loc:
+            if curr_realm_id:
+                cand_nid = str(wp.get("target_node_id") or "").strip() or (
+                    db.resolve_node_id_from_location(session_id, target_loc, prefer_facility=False) or ""
+                )
+                if cand_nid:
+                    wp_realm = get_node_realm_id(session_id, cand_nid)
+                    if wp_realm and wp_realm != curr_realm_id:
+                        continue
+            clean_target = sanitize_location_target(
+                target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name
+            )
+            if clean_target:
+                pending_targets.append(clean_target)
+    if pending_targets and not db.is_in_readonly_uow():
+        with db.UnitOfWork():
+            for clean_target in pending_targets:
+                process_llm_location_update(
+                    session_id, clean_target, scen_key, char_name=char_name, preferred_realm_id=curr_realm_id
+                )
+    return get_zone_summary_tree(
+        session_id,
+        scen_key,
+        current_loc=current_loc,
+        char_name=char_name,
+        realm_id=curr_realm_id or None,
+    )
+
+
+class RealmGatewayButton(discord.ui.Button):
+    def __init__(self, cog: "AdventureCog", session_id: int, gateway: dict, sync: bool = False):
+        icon = str(gateway.get("icon") or "🌀")
+        can_cross = bool(gateway.get("can_cross_now"))
+        ap_name = str(gateway.get("access_point_name") or "Access Point")
+        t_realm = str(gateway.get("target_realm_name") or "Realm")
+        if can_cross:
+            lbl = str(gateway.get("label") or f"Cross to {t_realm}")
+            style = discord.ButtonStyle.primary
+        else:
+            lbl = f"Go to {ap_name} ({t_realm})"
+            style = discord.ButtonStyle.secondary
+        super().__init__(
+            label=f"{icon} {lbl}"[:80],
+            style=style,
+        )
+        self.cog = cog
+        self.session_id = session_id
+        self.gateway = dict(gateway)
+        self.sync = sync
+        self.can_cross = can_cross
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.can_cross:
+            dc = {
+                "label": str(self.gateway.get("label") or "Cross Portal"),
+                "intent": "movement",
+                "sub_intent": str(self.gateway.get("action_kind") or "portal_cross"),
+                "target_node_id": str(self.gateway.get("target_node_id") or ""),
+                "target_realm_id": str(self.gateway.get("target_realm_id") or ""),
+                "vessel_realm_id": str(self.gateway.get("vessel_realm_id") or ""),
+                "portal_edge_type": str(self.gateway.get("edge_type") or ""),
+            }
+        else:
+            ap_name = str(self.gateway.get("access_point_name") or "Access Point")
+            ap_nid = str(self.gateway.get("access_point_node_id") or "")
+            dc = {
+                "label": f"Travel to {ap_name}",
+                "intent": "fast_travel",
+                "target_node_id": ap_nid,
+                "target_location": str(self.gateway.get("access_point_location") or ""),
+            }
+        if self.sync:
+            await self.cog.handle_sync_pick(interaction, self.session_id, direct_choice=dc)
+        else:
+            await self.cog.handle_action(interaction, self.session_id, direct_choice=dc)
+
+
 class ZoneSelectView(SessionRestrictedView):
-    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, current_loc: str = "", char_name: str = "", sync: bool = False, zones_summary: list = None, user_id: int | None = None):
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        scen_key: str,
+        current_loc: str = "",
+        char_name: str = "",
+        sync: bool = False,
+        zones_summary: list = None,
+        user_id: int | None = None,
+        realm_summary: dict | None = None,
+    ):
         super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.user_id = user_id
         if zones_summary is None:
-            from mechanics.world.locations import process_llm_location_update, get_zone_summary_tree, sanitize_location_target
-            # Auto-discover any active quest target locations so they exist in SQLite and show in the dropdown
-            active_wps = db.get_all_session_active_waypoints(session_id)
-            for wp in active_wps:
-                target_loc = wp.get("target_location", "").strip()
-                if target_loc:
-                    clean_target = sanitize_location_target(target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
-                    process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
-            zones_summary = get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
+            zones_summary = _load_zone_select_summary(
+                session_id, scen_key, current_loc=current_loc, char_name=char_name
+            )
 
         self.add_item(ZoneSelectDropdown(cog, session_id, scen_key, zones_summary, current_loc=current_loc, char_name=char_name, sync=sync, user_id=user_id))
+        if isinstance(realm_summary, dict):
+            all_gws = list(realm_summary.get("realm_gateways") or [])
+            crossable = [gw for gw in all_gws if isinstance(gw, dict) and gw.get("can_cross_now")][:2]
+            non_local = [gw for gw in all_gws if isinstance(gw, dict) and not gw.get("can_cross_now")][:2]
+            for gw in crossable + non_local:
+                self.add_item(RealmGatewayButton(cog, session_id, gw, sync=sync))
+
+
+def _load_realm_summary(session_id: int) -> dict:
+    """Loads realm gateways/summary for ZoneSelectView via adb() off the asyncio event loop."""
+    if not session_id:
+        return {}
+    from mechanics.world.locations import build_session_realm_summary
+    with db.ReadUnitOfWork():
+        sess = db.get_session(session_id) or {}
+        return build_session_realm_summary(session_id, sess.get("current_node_id")) or {}
 
 class PrimarySelectDropdown(discord.ui.Select):
     def __init__(
@@ -191,8 +317,35 @@ class PrimarySelectView(SessionRestrictedView):
         self.add_item(back_btn)
 
     async def _on_back(self, interaction: discord.Interaction):
-        embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
-        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync, user_id=self.user_id)
+        zones_summary, realm_summary = await asyncio.gather(
+            adb(
+                _load_zone_select_summary,
+                self.session_id,
+                self.scen_key,
+                self.current_loc,
+                self.char_name,
+            ),
+            adb(_load_realm_summary, self.session_id),
+        )
+        embed = await adb(
+            build_world_map_embed,
+            self.session_id,
+            self.scen_key,
+            self.current_loc,
+            self.char_name,
+            zones_summary,
+        )
+        view = ZoneSelectView(
+            self.cog,
+            self.session_id,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+            sync=self.sync,
+            zones_summary=zones_summary,
+            user_id=self.user_id,
+            realm_summary=realm_summary,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -327,12 +480,46 @@ class SubLocationSelectView(SessionRestrictedView):
             sync=self.sync,
             user_id=self.user_id,
         )
-        embed = build_zone_places_embed(self.session_id, self.zone_name, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
+        embed = await adb(
+            build_zone_places_embed,
+            self.session_id,
+            self.zone_name,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_world_map(self, interaction: discord.Interaction):
-        embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
-        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync, user_id=self.user_id)
+        zones_summary, realm_summary = await asyncio.gather(
+            adb(
+                _load_zone_select_summary,
+                self.session_id,
+                self.scen_key,
+                self.current_loc,
+                self.char_name,
+            ),
+            adb(_load_realm_summary, self.session_id),
+        )
+        embed = await adb(
+            build_world_map_embed,
+            self.session_id,
+            self.scen_key,
+            self.current_loc,
+            self.char_name,
+            zones_summary,
+        )
+        view = ZoneSelectView(
+            self.cog,
+            self.session_id,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+            sync=self.sync,
+            zones_summary=zones_summary,
+            user_id=self.user_id,
+            realm_summary=realm_summary,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
 class SceneItemSelectDropdown(discord.ui.Select):

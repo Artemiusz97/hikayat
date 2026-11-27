@@ -10,7 +10,7 @@ from typing import Any
 from db import adb
 from scenario_data import get_scenario_display_name
 from mechanics.combat.loadouts import ensure_combatant_loadout
-from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
+from mechanics.narrative.campaign_spine import PLACEHOLDER_ACTOR_RE
 from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
 from mechanics.social.races import roll_scenario_npc_race
 from mechanics.world import resolve_scene_merchant_ui_state
@@ -36,7 +36,7 @@ _UNNAMED_ACTOR_TOKENS: frozenset[str] = frozenset(
 
 def _is_unnamed_or_generic_actor(name: str, npc_dict: dict[str, Any]) -> bool:
     clean = str(name or "").strip()
-    if not clean or _PLACEHOLDER_ACTOR_RE.search(clean):
+    if not clean or PLACEHOLDER_ACTOR_RE.search(clean):
         return True
     if bool(
         npc_dict.get("is_monster")
@@ -70,60 +70,113 @@ def _sanitize_enemy_telegraph_view(e_view: dict) -> None:
         e_view["telegraphed_skill"] = sanitized_tel
 
 
+def heal_session_before_projection(
+    session: dict | None,
+    session_id: int | None = None,
+) -> list | None:
+    """Explicitly runs idempotent session self-healing writes (agent roster & starter quarters) outside ReadUnitOfWork."""
+    if not session or not isinstance(session, dict):
+        return None
+    sid_val = int(session_id if session_id is not None else (session.get("id") or 0))
+    if sid_val <= 0:
+        return None
+
+    pre_agent_roster = None
+    if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+        raw_r = session.get("anomalous_agent_roster")
+        if not isinstance(raw_r, list) or not raw_r:
+            try:
+                from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+                pre_agent_roster = ensure_anomalous_agent_roster(sid_val, str(session.get("scenario") or ""))
+                if isinstance(pre_agent_roster, list):
+                    session["anomalous_agent_roster"] = pre_agent_roster
+            except Exception:
+                pre_agent_roster = []
+    try:
+        from mechanics.social.employment_policy import heal_invalid_teen_civilian_employment
+        from mechanics.social.roster_tags import is_school_scenario
+
+        scen_str = str(session.get("scenario") or "")
+        if is_school_scenario(scen_str):
+            heal_invalid_teen_civilian_employment(sid_val, scen_key=scen_str, session=session)
+    except Exception:
+        pass
+    try:
+        from mechanics.social.origin_mode import resolve_player_age_profile
+        from mechanics.narrative.bounty import cleanup_stale_adult_school_bounties
+        from mechanics.system.phone.gossip_feed import cleanup_stale_campus_gossip_for_adult
+
+        if not resolve_player_age_profile(session).get("is_student"):
+            cleanup_stale_adult_school_bounties(sid_val, session=session)
+            cleanup_stale_campus_gossip_for_adult(sid_val, session=session)
+    except Exception:
+        pass
+    try:
+        from mechanics.world.locations import is_anomalous_realty_scenario
+        if is_anomalous_realty_scenario(str(session.get("scenario") or "")):
+            if not any(p.get("is_starter") for p in db.get_player_properties(sid_val)):
+                db.grant_or_relocate_starter_quarters(sid_val)
+    except Exception:
+        pass
+    return pre_agent_roster
+
+
+def _flush_projection_pending_writes(session_id: int, pending_writes: dict[str, Any]) -> None:
+    if session_id <= 0 or not pending_writes:
+        return
+    try:
+        with db.UnitOfWork():
+            if "choices" in pending_writes:
+                db.update_session(session_id, choices=pending_writes["choices"])
+            if "merchant" in pending_writes:
+                db.save_merchant_state(session_id, pending_writes["merchant"])
+    except Exception:
+        pass
+
+
 def enrich_session_for_client(
     session: dict,
     user_id: int,
     ui_lang: str | None = None,
     *,
     read_only: bool = False,
+    preloaded_settings: dict | None = None,
+    preloaded_char: dict | None = None,
+    preloaded_inv: list | None = None,
+    preloaded_pacts: list[dict] | None = None,
+    preloaded_physical_state: dict | None = None,
+    pre_agent_roster: list | None = None,
+    pre_healed: bool = False,
 ) -> dict:
-    """Enriches session payload under a single ReadUnitOfWork (deferring any writes until exit)."""
+    """Enriches session payload under a single ReadUnitOfWork (pure when read_only=True)."""
     if not session or not isinstance(session, dict):
         return session
 
     sid_val = int(session.get("id") or 0)
-    pre_agent_roster = None
-    if (
-        not read_only
-        and sid_val > 0
-        and scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
-    ):
-        raw_r = session.get("anomalous_agent_roster")
-        if not isinstance(raw_r, list) or not raw_r:
-            try:
-                from mechanics.social.agent_roster import ensure_anomalous_agent_roster
-                pre_agent_roster = ensure_anomalous_agent_roster(sid_val, str(session.get("scenario") or ""))
-            except Exception:
-                pre_agent_roster = []
-    if not read_only and sid_val > 0:
-        try:
-            from mechanics.world.locations import is_anomalous_realty_scenario
-            if is_anomalous_realty_scenario(str(session.get("scenario") or "")):
-                if not any(p.get("is_starter") for p in db.get_player_properties(sid_val)):
-                    db.grant_or_relocate_starter_quarters(sid_val)
-        except Exception:
-            pass
+    eff_agent_roster = pre_agent_roster
+    if not read_only and sid_val > 0 and not pre_healed:
+        healed_roster = heal_session_before_projection(session, sid_val)
+        if eff_agent_roster is None:
+            eff_agent_roster = healed_roster
 
-    pending_writes: dict[str, Any] = {}
+    pending_writes: dict[str, Any] | None = None if read_only else {}
     with db.ReadUnitOfWork():
         enriched = _enrich_session_for_client_body(
             session,
             user_id,
             ui_lang=ui_lang,
             read_only=read_only,
-            pre_agent_roster=pre_agent_roster,
+            pre_agent_roster=eff_agent_roster,
             pending_writes=pending_writes,
+            preloaded_settings=preloaded_settings,
+            preloaded_char=preloaded_char,
+            preloaded_inv=preloaded_inv,
+            preloaded_pacts=preloaded_pacts,
+            preloaded_physical_state=preloaded_physical_state,
         )
 
     if not read_only and sid_val > 0 and pending_writes:
-        try:
-            with db.UnitOfWork():
-                if "choices" in pending_writes:
-                    db.update_session(sid_val, choices=pending_writes["choices"])
-                if "merchant" in pending_writes:
-                    db.save_merchant_state(sid_val, pending_writes["merchant"])
-        except Exception:
-            pass
+        _flush_projection_pending_writes(sid_val, pending_writes)
     return enriched
 
 
@@ -138,6 +191,11 @@ def _enrich_session_for_client_body(
     read_only: bool = False,
     pre_agent_roster: list | None = None,
     pending_writes: dict[str, Any] | None = None,
+    preloaded_settings: dict | None = None,
+    preloaded_char: dict | None = None,
+    preloaded_inv: list | None = None,
+    preloaded_pacts: list[dict] | None = None,
+    preloaded_physical_state: dict | None = None,
 ) -> dict:
     """Enriches session payload with odds, party vitals, combat state, formatted time, fallback flags, and categorized combat decks."""
     if not session or not isinstance(session, dict):
@@ -153,17 +211,35 @@ def _enrich_session_for_client_body(
     session["is_in_combat"] = in_combat
 
     raw_choices = session.get("choices") or []
-    user_settings = db.get_settings(uid) if uid else {}
-    char = db.get_character(uid, session_id=session.get("id"), settings=user_settings) if uid else None
-    if char and char.get("user_id") and int(char["user_id"]) != int(uid):
+    user_settings = (
+        dict(preloaded_settings)
+        if preloaded_settings is not None
+        else (db.get_settings(uid) if uid else {})
+    )
+    char = (
+        dict(preloaded_char)
+        if preloaded_char is not None
+        else (db.get_character(uid, session_id=session.get("id"), settings=user_settings) if uid else None)
+    )
+    if preloaded_settings is None and char and char.get("user_id") and int(char["user_id"]) != int(uid):
         user_settings = db.get_settings(char["user_id"])
-    char_inv = (db.get_inventory(uid, char=char) or []) if (uid and char) else []
+    try:
+        from mechanics.social.origin_mode import resolve_player_age_profile
+
+        session["player_profile"] = resolve_player_age_profile(session, char)
+    except Exception:
+        pass
+    char_inv = (
+        [dict(it) if isinstance(it, dict) else it for it in preloaded_inv]
+        if preloaded_inv is not None
+        else ((db.get_inventory(uid, char=char) or []) if (uid and char) else [])
+    )
     if not raw_choices or any(not isinstance(c, dict) for c in raw_choices):
         raw_choices = game_engine.sanitize_and_diversify_choices(
             raw_choices,
             scenario=scenario_data.resolve_scenario_key(session.get("scenario")),
             location=session.get("current_location", ""),
-            char=dict(char) if char else None,
+            char={**char, "_preloaded_inventory": char_inv} if char else None,
             dialogue_partner=session.get("dialogue_partner"),
             current_npcs=session.get("current_npcs", []),
             session_id=session.get("id")
@@ -347,7 +423,11 @@ def _enrich_session_for_client_body(
         if uid and session.get("id"):
             try:
                 from mechanics.pacts import get_pact_slot_capacity, get_available_patrons_for_context
-                _act_pacts = db.get_player_active_pacts(int(session["id"]), int(uid))
+                _act_pacts = (
+                    preloaded_pacts
+                    if preloaded_pacts is not None
+                    else db.get_player_active_pacts(int(session["id"]), int(uid))
+                )
                 _avail_p = get_available_patrons_for_context(session, char or {}, int(uid), persist_db=False)
                 session["contracts_hud"] = {
                     "enabled": True,
@@ -470,7 +550,15 @@ def _enrich_session_for_client_body(
 
         inv = char_inv if char else []
         party = [(dict(char), inv)] if char else []
-        learned_sids = db.get_learned_spells(uid, char=char) if char else []
+        learned_sids = list(db.get_learned_spells(uid, char=char) if char else [])
+        if session.get("id"):
+            try:
+                from mechanics.combat.spells.spirit_court_perks import get_active_spirit_court_summon_spell_ids
+                for _sc_sid in get_active_spirit_court_summon_spell_ids(int(session["id"])):
+                    if _sc_sid not in learned_sids:
+                        learned_sids.append(_sc_sid)
+            except Exception:
+                pass
         skill_prog_hud = db.get_skill_progress(char) if char else {}
         location = session.get("current_location") or "area"
         scen_key = session.get("scenario") or "fantasy"
@@ -590,17 +678,21 @@ def _enrich_session_for_client_body(
 
     # Dynamic Clothing Status & Present NPC Enrichment
     try:
-        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
-        phys_st = db.get_session_physical_state(session.get("id")) if session.get("id") else None
+        from mechanics.social.physical_state import compute_clothing_summary_badge, match_actor_key, find_player_actor_key
+        phys_st = (
+            preloaded_physical_state
+            if preloaded_physical_state is not None
+            else (db.get_session_physical_state(session.get("id")) if session.get("id") else None)
+        )
         phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
 
         # 1. Player character clothing status
         sess_char = session.get("character") if isinstance(session.get("character"), dict) else {}
         char_dict = dict(char) if char else sess_char
         char_name = char_dict.get("name") if isinstance(char_dict, dict) else ""
-        matched_p_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=session.get("id")) or (_match_actor_key(char_name, phys_actors) if char_name else "")
+        matched_p_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=session.get("id")) or (match_actor_key(char_name, phys_actors) if char_name else "")
         if matched_p_key not in phys_actors and sess_char.get("name"):
-            alt_key = find_player_actor_key(phys_actors, party=[(sess_char, [])], session_id=session.get("id")) or _match_actor_key(str(sess_char["name"]), phys_actors)
+            alt_key = find_player_actor_key(phys_actors, party=[(sess_char, [])], session_id=session.get("id")) or match_actor_key(str(sess_char["name"]), phys_actors)
             if alt_key in phys_actors:
                 matched_p_key = alt_key
                 char_dict = sess_char
@@ -618,7 +710,7 @@ def _enrich_session_for_client_body(
         if isinstance(session.get("party_members"), list):
             for pm in session["party_members"]:
                 if isinstance(pm, dict) and pm.get("name"):
-                    m_pm_key = _match_actor_key(str(pm["name"]), phys_actors)
+                    m_pm_key = match_actor_key(str(pm["name"]), phys_actors)
                     pm_act_data = phys_actors.get(m_pm_key) or {}
                     pm["clothing_status"] = compute_clothing_summary_badge(
                         pm_act_data.get("clothing"),
@@ -752,15 +844,15 @@ def _enrich_session_for_client_body(
             if not n_name:
                 return None
 
-            matched_n_key = _match_actor_key(n_name, phys_actors)
+            matched_n_key = match_actor_key(n_name, phys_actors)
             n_act_data = phys_actors.get(matched_n_key) or {}
             matched_contact = contacts_by_name.get(n_name.lower())
             if not matched_contact and contacts_by_name:
-                m_c_key = _match_actor_key(n_name, contacts_by_name)
+                m_c_key = match_actor_key(n_name, contacts_by_name)
                 matched_contact = contacts_by_name.get(m_c_key)
             matched_lore = lore_characters.get(n_name.lower()) if lore_characters else None
             if not matched_lore and lore_characters:
-                m_l_key = _match_actor_key(n_name, lore_characters)
+                m_l_key = match_actor_key(n_name, lore_characters)
                 matched_lore = lore_characters.get(m_l_key)
             matched_wr = world_roster_by_name.get(n_name.lower()) if world_roster_by_name else None
             if isinstance(matched_wr, dict):
@@ -775,7 +867,7 @@ def _enrich_session_for_client_body(
                     n_dict["basic_info"] = {**matched_wr["basic_info"], **_cur_bi}
             matched_agent = agent_roster_by_name.get(n_name.lower()) if agent_roster_by_name else None
             if not matched_agent and agent_roster_by_name:
-                m_a_key = _match_actor_key(n_name, agent_roster_by_name)
+                m_a_key = match_actor_key(n_name, agent_roster_by_name)
                 matched_agent = agent_roster_by_name.get(m_a_key)
             c_rec = matched_contact or matched_lore
             demo_sources: list[dict | None] = [n_dict, c_rec, matched_wr, matched_agent]
@@ -797,7 +889,7 @@ def _enrich_session_for_client_body(
                 if legacy_roster_by_name:
                     matched_legacy = legacy_roster_by_name.get(n_name.lower())
                     if not matched_legacy:
-                        m_leg_key = _match_actor_key(n_name, legacy_roster_by_name)
+                        m_leg_key = match_actor_key(n_name, legacy_roster_by_name)
                         matched_legacy = legacy_roster_by_name.get(m_leg_key)
                 if isinstance(matched_legacy, dict):
                     demo_sources.append(matched_legacy)
@@ -912,7 +1004,7 @@ def _enrich_session_for_client_body(
 
             # 3. Synchronize intimate excitement meter (when applicable)
             exc_actors = (phys_st.get("excitement") or {}).get("actors") or {}
-            matched_exc_key = _match_actor_key(n_name, exc_actors) if exc_actors else ""
+            matched_exc_key = match_actor_key(n_name, exc_actors) if exc_actors else ""
             exc_data = exc_actors.get(matched_exc_key) or {}
 
             partner_meter_data = None
@@ -926,12 +1018,12 @@ def _enrich_session_for_client_body(
             if isinstance(last_intimate, dict) and last_intimate.get("active"):
                 p_meters = last_intimate.get("partner_meters") or []
                 for pm in p_meters:
-                    if isinstance(pm, dict) and _match_actor_key(n_name, {pm.get("name", ""): pm}):
+                    if isinstance(pm, dict) and match_actor_key(n_name, {pm.get("name", ""): pm}):
                         partner_meter_data = pm
                         break
                 if not partner_meter_data and last_intimate.get("partner_meter") is not None:
                     p_name = last_intimate.get("partner_name") or session.get("dialogue_partner") or ""
-                    if _match_actor_key(n_name, {p_name: True}):
+                    if match_actor_key(n_name, {p_name: True}):
                         partner_meter_data = {
                             "meter": last_intimate.get("partner_meter", 0),
                             "status": last_intimate.get("act_type", ""),
@@ -1173,6 +1265,31 @@ def _enrich_session_for_client_body(
             session["epistemic_hud"] = db.build_player_fog_of_war_summary(int(session["id"]))
         except Exception as e_ep:
             logger.debug(f"Could not enrich epistemic_hud for session: {e_ep}")
+
+        # Realm HUD (only surfaces badge when 2+ visible realms or player is outside primary realm)
+        try:
+            from mechanics.world.locations.realms import build_session_realm_summary
+            r_sum = build_session_realm_summary(int(session["id"]), session.get("current_node_id"))
+            curr_r = r_sum.get("current_realm")
+            session["realm_hud"] = {
+                "show_realm_badge": bool(r_sum.get("show_realm_badge")),
+                "visible_realm_count": int(r_sum.get("visible_realm_count") or 0),
+                "realm_id": str((curr_r or {}).get("realm_id") or ""),
+                "realm_name": str((curr_r or {}).get("name") or ""),
+                "realm_kind": str((curr_r or {}).get("realm_kind") or "world"),
+                "portal_icon": str((curr_r or {}).get("portal_icon") or ""),
+                "comms_isolated": bool((curr_r or {}).get("comms_isolated")),
+                "supports_spirit_relay": bool(
+                    (curr_r or {}).get("supports_spirit_relay")
+                    or str((curr_r or {}).get("realm_id") or "") == "realm_veiled_spirit_world"
+                ),
+                "time_scale": float((curr_r or {}).get("time_scale", 1.0)),
+                "is_mobile_vessel": bool((curr_r or {}).get("is_mobile_vessel")),
+                "docked_realm_id": str((curr_r or {}).get("docked_realm_id") or ""),
+                "docked_realm_name": str((curr_r or {}).get("docked_realm_name") or ""),
+            }
+        except Exception as e_rh:
+            logger.debug(f"Could not enrich realm_hud for session: {e_rh}")
 
     active_turn = _get_active_in_flight_turn(sid_int)
     if active_turn:

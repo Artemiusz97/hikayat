@@ -5,7 +5,7 @@ description: "Use this skill whenever modifying LLM prompts, KV-cache prompt ord
 
 # Hikayat LLM Orchestration, Prose Guardrails & Image Prompt Runbook
 
-Use this guide whenever working on `llm_client.py`, `game_engine/prompts.py`, `game_engine/prompt_layout.py`, `game_engine/turn/narration.py`, `game_engine/pronoun_resolver.py`, `game_engine/choices_cleaner.py`, `models/llm_schemas.py`, or `mechanics/narrative/image_prompt_composer.py`.
+Use this guide whenever working on `llm_client/`, `game_engine/prompts.py`, `game_engine/prompt_layout.py`, `game_engine/turn/narration.py`, `game_engine/pronoun_resolver.py`, `game_engine/choices_cleaner/`, `models/llm_schemas.py`, or `mechanics/narrative/image_prompt_composer.py`.
 
 ---
 
@@ -25,7 +25,7 @@ Hikayat orders prompt blocks strictly from **least volatile to most volatile** s
 
 ## 2. Client Routing, Circuit Breakers & Schema Coercion
 
-- **Client Isolation (`llm_client.py`)**:
+- **Client Isolation (`llm_client/`)**:
   - Standard scenarios route through `_client` (`LLM_MODEL` + `LLM_FALLBACK_MODELS`).
   - Mature scenarios (`scenario_data.uses_nsfw_model(scen_key)`) route through `_nsfw_client` (`NSFW_LLM_*`) when configured, falling back cleanly when unset.
   - Per-model health uses `trip_model_circuit(model_name, cooldown_sec)` and `is_model_healthy(model_name)` so rate-limited or down models fail over without stalling every turn.
@@ -52,7 +52,7 @@ When a turn produces empty/emergency fallback prose (`_is_fallback_narrative`), 
 2. **Pronoun Resolution (`game_engine/pronoun_resolver.py`)**:
    - Wraps resolved 3rd-person pronouns in `<ref char="Name" role="Role">pronoun</ref>` using `build_actor_registry()`.
    - Always call `strip_pronoun_tags()` / `format_pronouns_for_prompt()` before injecting stored history back into LLM prompts so `<ref>` markup never leaks into future completions.
-3. **Hybrid Choice Pipeline (`game_engine/choices_cleaner.py`)**:
+3. **Hybrid Choice Pipeline (`game_engine/choices_cleaner/`)**:
    - Deduplicates semantically overlapping LLM choices via `_extract_choice_semantic_stems()`.
    - Enforces Hikayat's check rules: active dialogue choices require skill checks (`DC 5–8`) except the 1 dedicated `dialogue_exit` choice (`stat: "NONE"`, `requirement: 0`, `"ends_dialogue": true`); quest actions require skill checks; never offer/share items not in the player's carried inventory.
 4. **5-Language Narration (`en`, `pl`, `ms`, `zh`, `de`)**:
@@ -69,6 +69,16 @@ When a turn produces empty/emergency fallback prose (`_is_fallback_narrative`), 
 
 ## 6. Verification Commands
 ```bash
+python .agents/skills/hikayat-llm-prose-and-prompts/scripts/audit_prompt_hygiene.py
 python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_cast_contract_and_protagonist_title.py tests/test_unnamed_actor_presence_and_pronouns.py
 python scripts/simulate_narrative.py --mode choices --scenario fantasy
 ```
+
+---
+
+## 7. Common Mistakes & Red Flags
+- **Breaking live HTTP client proxy interception**: Replacing `_http_client`, `_embed_http_client`, or `_nsfw_http_client` proxy bindings in `llm_client/__init__.py` with static imports breaks `tests/conftest.py` offline blocking (`test_module_proxies_preserve_submodule_bindings_on_patch_and_delattr`).
+- **Polluting `Z0a` / `Z0b` static zones**: Injecting timestamps, random IDs, or session state inside `@functools.cache def build_static_core` destroys KV-cache hit rates and leaks across sessions.
+- **Unfrozen retry side effects**: Allowing `run_narration_pass` (`game_engine/turn/narration.py`) to mutate vitals, location, or `npcs_present` violates Invariant D13; always restore mechanical state from `snapshot["applied"]`.
+- **Re-feeding raw `<ref>` tags**: Passing stored history into prompts without `strip_pronoun_tags()` / `format_pronouns_for_prompt()` leaks `<ref char="...">` markup into completions.
+- **Single-access LLM schemas**: Adding fields to `models/llm_schemas.py` without dict access (`obj["field"]`, `obj.get()`) and `""`/`None` coercion breaks local/open-weights model handling.

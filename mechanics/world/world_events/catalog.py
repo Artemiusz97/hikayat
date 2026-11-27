@@ -93,15 +93,20 @@ def get_eligible_templates(
     scen_key: str,
     entity_type: str | None = None,
     include_nsfw: bool = False,
+    current_realm_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Returns eligible Macro Event or Rumor templates for scen_key with strict NSFW quarantine."""
+    """Returns eligible Macro Event or Rumor templates for scen_key with strict NSFW and realm-scope quarantine."""
     catalog = load_event_catalog()
     families = resolve_genre_families(scen_key)
     scen_allows_nsfw = bool(include_nsfw) and scenario_data.has_tag(scen_key, "nsfw")
+    eff_realm = str(current_realm_id or "").strip()
 
     eligible: list[dict[str, Any]] = []
     for tmpl in catalog:
         if entity_type and tmpl.get("entity_type") != entity_type:
+            continue
+        tmpl_realm = str(tmpl.get("realm_scope") or "").strip()
+        if tmpl_realm and eff_realm != tmpl_realm:
             continue
         is_nsfw_tmpl = int(bool(tmpl.get("is_nsfw", 0))) == 1
         if is_nsfw_tmpl and not scen_allows_nsfw:
@@ -109,6 +114,11 @@ def get_eligible_templates(
         tmpl_fams = set(tmpl.get("genre_families") or [])
         if tmpl_fams & families:
             eligible.append(tmpl)
+
+    if eff_realm == "realm_veiled_spirit_world" and entity_type == "macro_event":
+        spirit_scoped = [t for t in eligible if str(t.get("realm_scope") or "").strip() == "realm_veiled_spirit_world"]
+        if spirit_scoped:
+            return spirit_scoped
     return eligible
 
 

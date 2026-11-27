@@ -21,6 +21,25 @@ from .post_combat import (
 
 logger = logging.getLogger(__name__)
 
+
+def _check_feral_hunt(
+    session_id: int,
+    session: Dict[str, Any] | None,
+    dead_enemies: List[Any],
+) -> tuple[Dict[str, Any], ...]:
+    """Returns `(feral_mod,)` when Feral Al-Ghul Pack Hunt is active and feral enemies fell in Barrowlands/Mire."""
+    from mechanics.world.world_events.spirit_realm_events import (
+        get_feral_ghul_hunt_modifiers,
+        is_feral_spirit_pack_enemy,
+    )
+    nid = str((session or {}).get("current_node_id") or "")
+    mod = get_feral_ghul_hunt_modifiers(session_id, nid)
+    if not mod.get("active"):
+        return ()
+    if not any(is_feral_spirit_pack_enemy(de) for de in (dead_enemies or [])):
+        return ()
+    return (mod,)
+
 def award_post_combat_auto_loot(
     session: Dict[str, Any],
     party: Optional[List[Any]],
@@ -29,6 +48,7 @@ def award_post_combat_auto_loot(
     *,
     confiscated: bool = False,
     killed_non_hostiles_count: int = 0,
+    persist_db: bool = True,
 ) -> List[str]:
     """
     Immediately rolls and awards level-scaled post-combat spoils per living party member
@@ -55,6 +75,40 @@ def award_post_combat_auto_loot(
             t_val = de.get("tier") or de.get("tier_rank")
             if isinstance(t_val, int):
                 max_tier = min(max_tier, max(1, min(3, t_val)))
+
+    # Active Veiled World Event hook: Feral Al-Ghul Pack Hunt boosts loot tier & awards +5 cull rep
+    sess_id = int((session or {}).get("id") or 0)
+    if sess_id and any(is_feral := _check_feral_hunt(sess_id, session, dead_enemies)):
+        feral_mod = is_feral[0]
+        if feral_mod.get("loot_tier_bonus"):
+            max_tier = max(1, max_tier - int(feral_mod["loot_tier_bonus"]))
+        cull_rep = int(feral_mod.get("cull_rep_bonus") or 0)
+        if cull_rep > 0 and persist_db:
+            try:
+                from mechanics.world.locations.folklore_spirit_courts import (
+                    SPIRIT_COURT_FACTIONS,
+                    adjust_spirit_court_reputation,
+                )
+                target_vk = "ghoul" if db.get_faction(sess_id, SPIRIT_COURT_FACTIONS["ghoul"]["faction_id"]) else next(
+                    (
+                        vk for vk in ("kitsune", "bunian", "ghoul")
+                        if db.get_faction(sess_id, SPIRIT_COURT_FACTIONS[vk]["faction_id"])
+                    ),
+                    "ghoul",
+                )
+                adj_feral = adjust_spirit_court_reputation(
+                    sess_id,
+                    target_vk,
+                    cull_rep,
+                    reason="feral_ghul_pack_hunt_cull",
+                )
+                llm_outcome["_feral_hunt_cull_bonus"] = {
+                    "village_key": target_vk,
+                    "rep_gained": int(adj_feral.get("delta") or cull_rep),
+                    "loot_tier_boosted": int(feral_mod.get("loot_tier_bonus") or 0),
+                }
+            except Exception as _feral_exc:
+                logger.warning("Feral hunt cull rep award skipped for session %s: %s", sess_id, _feral_exc)
 
     loot_display_names: List[str] = []
     living_chars: List[Dict[str, Any]] = []
@@ -196,7 +250,14 @@ def _record_non_incursion_anomaly_kills(session: dict, party: Optional[list], de
             logger.warning("Folklore codex kill record failed for %s: %s", d.get("name"), rec_err)
 
 
-def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict, party: list = None) -> dict:
+def reconcile_combat_results(
+    session: dict,
+    llm_outcome: dict,
+    precomputed: dict,
+    party: list = None,
+    *,
+    persist_db: bool = True,
+) -> dict:
     """Applies precomputed outcomes to the final LLM response and handles post-combat choices."""
     if not precomputed:
         return llm_outcome
@@ -328,8 +389,8 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                         g_gain = int(t_inc.get("reward_gold", 120) or 120)
                         x_gain = int(t_inc.get("reward_xp", 85) or 85)
                         if lead_uid:
-                            db.apply_hp_mp_delta(lead_uid, gold_delta=g_gain)
-                            db.add_xp(lead_uid, x_gain)
+                            db.apply_hp_mp_delta(lead_uid, gold_delta=g_gain, session_id=sess_id_int)
+                            db.add_xp(lead_uid, x_gain, session_id=sess_id_int)
                         v_ent = record_contained_anomaly_to_vault_log(
                             session_id=sess_id_int,
                             entity_name=t_inc["entity_name"],
@@ -340,7 +401,7 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                             resolution_method="De-escalated & Contained in Combat",
                             user_id=lead_uid,
                         )
-                        _roll_optional_incursion_gear_drop(lead_uid, scen_rec)
+                        _roll_optional_incursion_gear_drop(lead_uid, scen_rec, session_id=sess_id_int)
                         parley_contained_messages.append(
                             f"🗣️ Contained **{t_inc['entity_name']}** alive via combat de-escalation! "
                             f"Earned +{g_gain}G, +{x_gain} XP, and logged into {v_ent['vault_facility']}."
@@ -499,6 +560,7 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                             effect=str(_wp_eq.get("effect") or _wp_eq.get("description") or ""),
                             slot_cost=int(_wp_eq.get("slot_cost") or 1),
                             force=True,
+                            session_id=int(session["id"]),
                         )
                         llm_outcome["_combat_resolved_notice"] += f"\n🎡 **Witching Peak Relic Salvage:** Recovered **`{_wp_eq['name']}`**!"
             if isinstance(session, dict) and session.get("id"):
@@ -779,6 +841,7 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
             llm_outcome,
             confiscated=confiscate_anomalous_loot,
             killed_non_hostiles_count=len(killed_non_hostiles),
+            persist_db=persist_db,
         )
 
     finalize_post_combat_state(
@@ -789,6 +852,7 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
         total_xp_gain=total_xp_gain,
         dead_enemies=dead_enemies,
         dead_enemy_dicts_rec=dead_enemy_dicts_rec,
+        persist_db=persist_db,
     )
     if dead_enemies and isinstance(session, dict) and session.get("id"):
         try:

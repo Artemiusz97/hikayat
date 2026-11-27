@@ -29,6 +29,7 @@ _VALID_SUB_INTENTS = {
     "hide", "eavesdrop", "combat_attack", "combat_magic", "combat_tactic", "combat_flee",
     "hush_bribe", "threaten_silence", "confide", "deny", "present_proof", "destroy_proof",
     "discretion_request", "use_leverage", "warn_target",
+    "portal_cross", "starship_jump", "recall_starship",
 }
 
 

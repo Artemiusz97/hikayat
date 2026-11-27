@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 import json
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 import db
 import scenario_data
@@ -176,23 +176,52 @@ def get_anomalous_site_spec(site_id: str) -> dict[str, Any] | None:
     return sites.get(canonical) if canonical else None
 
 
+def build_session_node_match_index(
+    session_nodes: Iterable[Mapping[str, Any]] | None,
+) -> tuple[tuple[str, dict[str, Any] | None], ...]:
+    """Pre-sort and filter session world nodes once per sweep for fast anomalous-site matching."""
+    if not session_nodes:
+        return ()
+    sites, sub_to_site, _, _, _, _ = _build_indexes()
+    entries: list[tuple[str, dict[str, Any] | None]] = []
+    for wn in session_nodes:
+        if not (isinstance(wn, dict) or isinstance(wn, Mapping)):
+            continue
+        wname = str(wn.get("name") or "").strip().lower()
+        if not wname:
+            continue
+        wnid = str(wn.get("node_id") or "").strip().lower()
+        wpid = str(wn.get("parent_id") or "").strip().lower()
+        if wnid in SAFE_EXCLUSION_SITE_IDS or wnid in AHS_PROTECTED_SUB_IDS:
+            entries.append((wname, None))
+        elif wnid in sub_to_site:
+            entries.append((wname, sites.get(sub_to_site[wnid])))
+        elif wpid in sites and sites[wpid].get("site_type") != "embedded_wing":
+            entries.append((wname, sites[wpid]))
+    entries.sort(key=lambda pair: len(pair[0]), reverse=True)
+    return tuple(entries)
+
+
 def resolve_anomalous_site(
     node_id: str = "",
     parent_id: str = "",
     location_str: str = "",
     curr_node: Mapping[str, Any] | None = None,
     session_nodes: Iterable[Mapping[str, Any]] | None = None,
+    *,
+    node_match_index: Sequence[tuple[str, dict[str, Any] | None]] | None = None,
 ) -> dict[str, Any] | None:
     """
     Resolve an anomalous site catalog entry cleanly from node IDs, parent IDs,
     or procedural epithet location strings.
     """
-    eff_nid = str(node_id or (curr_node.get("node_id") if isinstance(curr_node, Mapping) else "") or "").strip().lower()
-    eff_pid = str(parent_id or (curr_node.get("parent_id") if isinstance(curr_node, Mapping) else "") or "").strip().lower()
+    is_curr_map = isinstance(curr_node, dict) or isinstance(curr_node, Mapping)
+    eff_nid = str(node_id or (curr_node.get("node_id") if is_curr_map else "") or "").strip().lower()
+    eff_pid = str(parent_id or (curr_node.get("parent_id") if is_curr_map else "") or "").strip().lower()
 
     if eff_nid in SAFE_EXCLUSION_SITE_IDS or eff_nid in AHS_PROTECTED_SUB_IDS:
         return None
-    if isinstance(curr_node, Mapping):
+    if is_curr_map:
         st = parse_node_state(curr_node)
         if st.get("is_minor_club_hq") or (st.get("is_faction_hq") and eff_nid == "loc_delinquent_boiler_den"):
             return None
@@ -215,10 +244,14 @@ def resolve_anomalous_site(
         if not any(tok in loc_low for tok in _AHS_ACTIVE_ANOMALY_SUB_TOKENS):
             return None
 
-    if loc_low and session_nodes:
+    if loc_low and node_match_index is not None:
+        for wname, resolved_spec in node_match_index:
+            if wname and wname in loc_low:
+                return resolved_spec
+    elif loc_low and session_nodes:
         # Sort longest node names first to prevent partial prefix collisions
         sorted_nodes = sorted(
-            (wn for wn in session_nodes if isinstance(wn, Mapping) and str(wn.get("name") or "").strip()),
+            (wn for wn in session_nodes if (isinstance(wn, dict) or isinstance(wn, Mapping)) and str(wn.get("name") or "").strip()),
             key=lambda wn: len(str(wn.get("name") or "").strip()),
             reverse=True,
         )

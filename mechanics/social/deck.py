@@ -191,6 +191,31 @@ def _compute_npc_dc_modifiers(
             rel_mod = -2
         else:
             rel_mod = -1
+        c_app_dc = (contact_obj or {}).get("appearance") if isinstance((contact_obj or {}).get("appearance"), dict) else {}
+        raw_op_dc = c_app_dc.get("erotic_openness") or c_app_dc.get("openness")
+        if raw_op_dc not in (None, ""):
+            from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+            op_t_dc = normalize_openness_tier(raw_op_dc)
+            rel_t_dc = str((contact_obj or {}).get("relationship_track") or (contact_obj or {}).get("track") or "platonic")
+            sh_dc = len((contact_obj or {}).get("gameplay_intimate_events") or [])
+            host_dc = str((contact_obj or {}).get("disposition") or "").strip().lower() == "hostile"
+            comf_dc = compute_with_you_comfort(
+                op_t_dc,
+                relationship_score=score,
+                relationship_track=rel_t_dc,
+                shared_intimate_count=sh_dc,
+                is_hostile=host_dc,
+            )
+            if op_t_dc == "shameless":
+                rel_mod -= 2
+            elif op_t_dc == "bold":
+                rel_mod -= 1
+            elif op_t_dc == "prude":
+                if comf_dc["stage"] == "guarded":
+                    rel_mod += 2
+                elif comf_dc["stage"] == "warming_up":
+                    rel_mod += 1
     elif category in ("get_to_know", "callbacks_history"):
         if score < 30:
             rel_mod = 1

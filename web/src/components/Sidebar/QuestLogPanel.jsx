@@ -41,6 +41,7 @@ const QuestLogPanel = ({
   onRefreshCharacter,
   character = null,
   session = null,
+  playerProfile = null,
   scenario = null,
   onOpenWorldMap,
 }) => {
@@ -52,6 +53,7 @@ const QuestLogPanel = ({
     activeStoryQuest,
     clues = [],
     noticeBoardLabel = 'Bounty Board',
+    playerProfile: codexPlayerProfile = null,
     currentChapter = 1,
     maxChapters = 11,
     campaignSpine = null,
@@ -66,7 +68,12 @@ const QuestLogPanel = ({
     chooseEpilogue,
   } = codexHook;
 
+  const isStudentOrigin = Boolean(
+    (playerProfile || codexPlayerProfile || session?.player_profile)?.is_student
+  );
+
   const [subTab, setSubTab] = useState('story'); // 'story' | 'bounties' | 'caseboard' | 'campaign' | 'history'
+  const [bountyScopeFilter, setBountyScopeFilter] = useState('all'); // 'all' | 'generic' | 'faction' | 'school'
   const [historyFilter, setHistoryFilter] = useState('all'); // 'all' | 'Completed' | 'Failed' | 'Abandoned'
   const [busyAction, setBusyAction] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -84,6 +91,7 @@ const QuestLogPanel = ({
     setSelectedSuspect('__all__');
     setClueAId('');
     setClueBId('');
+    setBountyScopeFilter('all');
     setFeedback(null);
   }, [session?.id]);
 
@@ -145,12 +153,29 @@ const QuestLogPanel = ({
     ])
   ).sort();
 
+  const sidebarAvailableBounties = (availableBounties || []).filter((b) => {
+    const isSchoolB = Boolean(b?.bounty_scope === 'school' || b?.is_school_bounty);
+    if (!isStudentOrigin && isSchoolB) return false;
+    const isFactionB = Boolean(
+      b?.bounty_scope === 'faction' ||
+        b?.faction_id ||
+        b?.faction_name ||
+        (b?.board_source && String(b.board_source).toLowerCase() !== 'general') ||
+        String(b?.quest_id || '').startsWith('FBNT-')
+    );
+    if (bountyScopeFilter === 'school') return isSchoolB;
+    if (bountyScopeFilter === 'generic') return !isSchoolB && !isFactionB;
+    if (bountyScopeFilter === 'faction') return !isSchoolB && isFactionB;
+    return true;
+  });
+
   const handleGenerateBoard = async (forceRefresh = true) => {
     if (!generateBounties || busyAction) return;
     setBusyAction('generate_board');
     setFeedback(null);
     try {
-      await generateBounties(forceRefresh);
+      const boardScope = bountyScopeFilter !== 'all' ? bountyScopeFilter : null;
+      await generateBounties(forceRefresh, null, boardScope);
       setFeedback({ type: 'ok', text: `Refreshed ${noticeBoardLabel} postings!` });
     } catch (err) {
       setFeedback({ type: 'error', text: err.message || 'Could not generate bounties.' });
@@ -973,11 +998,14 @@ const QuestLogPanel = ({
           {subTab === 'bounties' && (
             <BountiesTab
               noticeBoardLabel={noticeBoardLabel}
-              availableBounties={availableBounties}
+              availableBounties={sidebarAvailableBounties}
               expandedBounties={expandedBounties}
               onToggleBounty={toggleBounty}
               onGenerateBoard={handleGenerateBoard}
               onBountyContract={handleBountyContract}
+              bountyScopeFilter={bountyScopeFilter}
+              onChangeBountyScopeFilter={setBountyScopeFilter}
+              isStudentOrigin={isStudentOrigin}
               busyAction={busyAction}
               scenario={effScenario}
               t={t}

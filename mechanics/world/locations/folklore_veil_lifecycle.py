@@ -30,12 +30,14 @@ def preview_sanctuary_treaty_violation(
     session: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Pure, non-mutating preview of Sanctuary Non-Aggression Pact expulsion for `persist_db=False` pre-turn staging."""
-    if not session_id or village_key not in ("kitsune", "bunian"):
+    if not session_id or village_key not in ("kitsune", "bunian", "ghoul"):
         return {"expelled": False}
     catalog = load_folklore_villages_catalog()
     v_meta = (catalog.get("villages") or {}).get(village_key) or {}
     fac_id = str(v_meta.get("village_id") or (
-        "loc_hidden_kitsune_village" if village_key == "kitsune" else "loc_hidden_bunian_village"
+        "loc_hidden_kitsune_village"
+        if village_key == "kitsune"
+        else ("loc_hidden_bunian_village" if village_key == "bunian" else "loc_hidden_ghoul_village")
     ))
     mundane_name = str(v_meta.get("mundane_name") or v_meta.get("outer_threshold_name") or fac_id)
     outer_id = OUTER_THRESHOLD_NODE_IDS[village_key]
@@ -48,10 +50,19 @@ def preview_sanctuary_treaty_violation(
         session["current_location"] = ejected_loc
         session["nearby_enemies"] = []
         session["leyline_spirit_passage_unlocked"] = False
+    surge_text = (
+        "azure foxfire and chiming shrine wards"
+        if village_key == "kitsune"
+        else (
+            "silver banyan mist and echoing serunai chords"
+            if village_key == "bunian"
+            else "freezing cypress-incense shadows and tolling iron columbarium bells"
+        )
+    )
     directive = (
         f"[STAGE DIRECTION — SANCTUARY TREATY VIOLATION & BANISHMENT]: "
         f"Violence and containment devices are forbidden within the ancient sanctuary pact. "
-        f"Blinding {'azure foxfire and chiming shrine wards' if village_key == 'kitsune' else 'silver banyan mist and echoing serunai chords'} "
+        f"Blinding {surge_text} "
         f"surge around the party, sweeping them back outside to {outer_name} after half an hour of timeless disorientation. "
         f"The inner enclave's veil is sealed shut until a sacred offering of atonement is presented at the outer threshold."
     )
@@ -79,7 +90,7 @@ def apply_sanctuary_treaty_violation(
     - Advances session clock by +30 minutes when `advance_clock=True`
     - Re-locks the village veil with veil_atonement_required=True and disables inner-plaza Fast Travel
     """
-    if not session_id or village_key not in ("kitsune", "bunian"):
+    if not session_id or village_key not in ("kitsune", "bunian", "ghoul"):
         return {"expelled": False}
 
     eff_turn = int(turn_number if turn_number is not None else db.get_effective_session_turn(session_id))
@@ -87,13 +98,21 @@ def apply_sanctuary_treaty_violation(
     catalog = load_folklore_villages_catalog()
     v_meta = (catalog.get("villages") or {}).get(village_key) or {}
     fac_id = str(v_meta.get("village_id") or (
-        "loc_hidden_kitsune_village" if village_key == "kitsune" else "loc_hidden_bunian_village"
+        "loc_hidden_kitsune_village"
+        if village_key == "kitsune"
+        else ("loc_hidden_bunian_village" if village_key == "bunian" else "loc_hidden_ghoul_village")
     ))
     mundane_name = str(v_meta.get("mundane_name") or v_meta.get("outer_threshold_name") or fac_id)
     true_name = str(v_meta.get("true_name") or "")
     outer_id = preview["ejected_node_id"]
     ejected_loc = preview["ejected_location"]
     plaza_id = INNER_PLAZA_NODE_IDS[village_key]
+
+    from .folklore_spirit_realm import (
+        SPIRIT_VILLAGE_PUBLIC_FACILITIES,
+        SPIRIT_ZONE_BY_VILLAGE,
+        adjust_spirit_court_reputation,
+    )
 
     relock_state = {
         "veil_village_key": village_key,
@@ -106,27 +125,60 @@ def apply_sanctuary_treaty_violation(
         "expelled_turn": eff_turn,
     }
     with db.UnitOfWork() as conn:
+        fac_row = conn.execute(
+            "SELECT parent_id FROM world_nodes WHERE session_id = ? AND node_id = ?",
+            (int(session_id), fac_id),
+        ).fetchone()
+        in_spirit_zone = bool(fac_row and fac_row["parent_id"] == SPIRIT_ZONE_BY_VILLAGE[village_key])
+
         db.update_world_node_state(session_id, fac_id, relock_state)
         for room_id in VEILED_INNER_ROOM_IDS[village_key]:
             db.update_world_node_state(session_id, room_id, relock_state)
+        if in_spirit_zone:
+            # Seal all 5 public facilities + rooms of ONLY the offended village
+            for extra_fid in SPIRIT_VILLAGE_PUBLIC_FACILITIES[village_key]:
+                db.update_world_node_state(session_id, extra_fid, {"veil_atonement_required": True, "veil_attuned": False, "expelled_turn": eff_turn})
+                child_rows = conn.execute(
+                    "SELECT node_id FROM world_nodes WHERE session_id = ? AND parent_id = ?",
+                    (int(session_id), extra_fid),
+                ).fetchall()
+                for cr in child_rows:
+                    db.update_world_node_state(session_id, str(cr["node_id"]), {"veil_atonement_required": True, "expelled_turn": eff_turn})
+            # Re-lock that village's human portal edge only
+            conn.execute(
+                """UPDATE world_edges SET is_locked = 1
+                   WHERE session_id = ?
+                     AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ?))""",
+                (int(session_id), outer_id, plaza_id, plaza_id, outer_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE world_nodes SET name = ? WHERE session_id = ? AND node_id = ?",
+                (mundane_name, session_id, fac_id),
+            )
+            if true_name:
+                conn.execute(
+                    "UPDATE session_locations SET primary_name = ? WHERE session_id = ? AND primary_name = ?",
+                    (mundane_name, session_id, true_name),
+                )
 
-        conn.execute(
-            "UPDATE world_nodes SET name = ? WHERE session_id = ? AND node_id = ?",
-            (mundane_name, session_id, fac_id),
-        )
         conn.execute(
             "UPDATE world_nodes SET is_transit_hub = 0 WHERE session_id = ? AND node_id = ?",
             (session_id, plaza_id),
         )
-        conn.execute(
-            "UPDATE world_edges SET is_locked = 1 WHERE session_id = ? AND edge_type = 'leyline_spirit_passage'",
-            (session_id,),
-        )
-        if true_name:
+        if village_key in ("kitsune", "bunian"):
             conn.execute(
-                "UPDATE session_locations SET primary_name = ? WHERE session_id = ? AND primary_name = ?",
-                (mundane_name, session_id, true_name),
+                "UPDATE world_edges SET is_locked = 1 WHERE session_id = ? AND from_node_id IN ('sub_kitsune_inner_plaza', 'sub_kitsune_leyline_shrine', 'sub_bunian_inner_plaza', 'sub_bunian_orchid_spring') AND to_node_id IN ('sub_kitsune_inner_plaza', 'sub_kitsune_leyline_shrine', 'sub_bunian_inner_plaza', 'sub_bunian_orchid_spring') AND edge_type = 'leyline_spirit_passage'",
+                (session_id,),
             )
+        adjust_spirit_court_reputation(
+            int(session_id),
+            village_key,
+            -25,
+            reason="sanctuary_pact_violation",
+            turn_number=eff_turn,
+            conn=conn,
+        )
         for inner_rid in VEILED_INNER_ROOM_IDS[village_key]:
             conn.execute(
                 "DELETE FROM session_locations WHERE session_id = ? AND location_id = ?",
@@ -187,22 +239,28 @@ def rollback_folklore_veil_state_after_turn(
     reverted_v = 0
     reverted_ley = 0
 
-    ctx = nullcontext(conn) if conn is not None else db.get_conn()
+    from .folklore_spirit_realm import SPIRIT_VILLAGE_PUBLIC_FACILITIES, SPIRIT_ZONE_BY_VILLAGE
+
+    ctx = nullcontext(conn) if conn is not None else db.UnitOfWork()
     with ctx as c:
-        for v_key in ("kitsune", "bunian"):
+        for v_key in ("kitsune", "bunian", "ghoul"):
             v_meta = villages_meta.get(v_key) or {}
             fac_id = str(v_meta.get("village_id") or (
-                "loc_hidden_kitsune_village" if v_key == "kitsune" else "loc_hidden_bunian_village"
+                "loc_hidden_kitsune_village"
+                if v_key == "kitsune"
+                else ("loc_hidden_bunian_village" if v_key == "bunian" else "loc_hidden_ghoul_village")
             ))
             mundane_name = str(v_meta.get("mundane_name") or v_meta.get("outer_threshold_name") or fac_id)
             true_name = str(v_meta.get("true_name") or fac_id)
             plaza_id = INNER_PLAZA_NODE_IDS[v_key]
+            outer_id = OUTER_THRESHOLD_NODE_IDS[v_key]
             row = c.execute(
-                "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
+                "SELECT parent_id, state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
                 (int(session_id), fac_id),
             ).fetchone()
             if not row:
                 continue
+            in_spirit_zone = bool(row["parent_id"] == SPIRIT_ZONE_BY_VILLAGE.get(v_key))
             try:
                 st = json.loads(row["state_json"] or "{}") if row["state_json"] else {}
             except Exception:
@@ -222,10 +280,16 @@ def rollback_folklore_veil_state_after_turn(
                 })
                 st.pop("unlocked_turn", None)
                 st.pop("last_unlock_reason", None)
-                c.execute(
-                    "UPDATE world_nodes SET name = ?, state_json = ? WHERE session_id = ? AND node_id = ?",
-                    (mundane_name, json.dumps(st), int(session_id), fac_id),
-                )
+                if in_spirit_zone:
+                    c.execute(
+                        "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                        (json.dumps(st), int(session_id), fac_id),
+                    )
+                else:
+                    c.execute(
+                        "UPDATE world_nodes SET name = ?, state_json = ? WHERE session_id = ? AND node_id = ?",
+                        (mundane_name, json.dumps(st), int(session_id), fac_id),
+                    )
                 c.execute(
                     "UPDATE world_nodes SET is_transit_hub = 0 WHERE session_id = ? AND node_id = ?",
                     (int(session_id), plaza_id),
@@ -251,7 +315,7 @@ def rollback_folklore_veil_state_after_turn(
                         "DELETE FROM session_locations WHERE session_id = ? AND location_id = ?",
                         (int(session_id), room_id),
                     )
-                if true_name:
+                if not in_spirit_zone and true_name:
                     c.execute(
                         "UPDATE session_locations SET primary_name = ? WHERE session_id = ? AND primary_name = ?",
                         (mundane_name, int(session_id), true_name),
@@ -260,19 +324,75 @@ def rollback_folklore_veil_state_after_turn(
             elif expelled_t > t_num and st.get("veil_atonement_required"):
                 st["veil_atonement_required"] = False
                 st.pop("expelled_turn", None)
-                if 0 < unlocked_t <= t_num:
+                restored_attuned = bool(0 < unlocked_t <= t_num)
+                if in_spirit_zone:
+                    for extra_fid in SPIRIT_VILLAGE_PUBLIC_FACILITIES[v_key]:
+                        ef_row = c.execute(
+                            "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
+                            (int(session_id), extra_fid),
+                        ).fetchone()
+                        if ef_row and ef_row["state_json"]:
+                            try:
+                                ef_st = json.loads(ef_row["state_json"])
+                            except Exception:
+                                ef_st = {}
+                            if isinstance(ef_st, dict) and ef_st.get("veil_atonement_required"):
+                                ef_st["veil_atonement_required"] = False
+                                ef_st["veil_attuned"] = restored_attuned
+                                ef_st.pop("expelled_turn", None)
+                                c.execute(
+                                    "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                                    (json.dumps(ef_st), int(session_id), extra_fid),
+                                )
+                        child_rows = c.execute(
+                            "SELECT node_id, state_json FROM world_nodes WHERE session_id = ? AND parent_id = ?",
+                            (int(session_id), extra_fid),
+                        ).fetchall()
+                        for cr in child_rows:
+                            if cr["state_json"]:
+                                try:
+                                    cr_st = json.loads(cr["state_json"])
+                                except Exception:
+                                    cr_st = {}
+                                if isinstance(cr_st, dict) and cr_st.get("veil_atonement_required"):
+                                    cr_st["veil_atonement_required"] = False
+                                    cr_st.pop("expelled_turn", None)
+                                    c.execute(
+                                        "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                                        (json.dumps(cr_st), int(session_id), str(cr["node_id"])),
+                                    )
+                    if restored_attuned:
+                        c.execute(
+                            """UPDATE world_edges SET is_locked = 0
+                               WHERE session_id = ?
+                                 AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ?))""",
+                            (int(session_id), outer_id, plaza_id, plaza_id, outer_id),
+                        )
+
+                if restored_attuned:
                     st.update({"veil_attuned": True, "is_hidden": False, "discovered": True, "unlocked_permanent": True})
-                    c.execute(
-                        "UPDATE world_nodes SET name = ?, state_json = ? WHERE session_id = ? AND node_id = ?",
-                        (true_name, json.dumps(st), int(session_id), fac_id),
-                    )
+                    if in_spirit_zone:
+                        c.execute(
+                            "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                            (json.dumps(st), int(session_id), fac_id),
+                        )
+                    else:
+                        c.execute(
+                            "UPDATE world_nodes SET name = ?, state_json = ? WHERE session_id = ? AND node_id = ?",
+                            (true_name, json.dumps(st), int(session_id), fac_id),
+                        )
                     c.execute(
                         "UPDATE world_nodes SET is_transit_hub = 1 WHERE session_id = ? AND node_id = ?",
                         (int(session_id), plaza_id),
                     )
+                    target_z_id = (
+                        SPIRIT_ZONE_BY_VILLAGE[v_key]
+                        if in_spirit_zone
+                        else str(v_meta.get("zone_id") or "")
+                    )
                     zone_row = c.execute(
                         "SELECT name FROM world_nodes WHERE session_id = ? AND node_id = ?",
-                        (int(session_id), str(v_meta.get("zone_id") or "")),
+                        (int(session_id), target_z_id),
                     ).fetchone()
                     z_nm = str(zone_row["name"]) if zone_row and zone_row["name"] else str(v_meta.get("zone_name") or "")
                     for room_id in VEILED_INNER_ROOM_IDS[v_key]:
@@ -300,7 +420,7 @@ def rollback_folklore_veil_state_after_turn(
                                        VALUES (?, ?, ?, ?, ?, ?, 0, COALESCE((SELECT created_at FROM session_locations WHERE session_id = ? AND location_id = ?), strftime('%s','now')))""",
                                     (int(session_id), room_id, z_nm, true_name, str(r_row["name"] or room_id), str(r_row["atmosphere"] or ""), int(session_id), room_id),
                                 )
-                    if mundane_name:
+                    if not in_spirit_zone and mundane_name:
                         c.execute(
                             "UPDATE session_locations SET primary_name = ? WHERE session_id = ? AND primary_name = ?",
                             (true_name, int(session_id), mundane_name),
@@ -333,11 +453,14 @@ def rollback_folklore_veil_state_after_turn(
                 reverted_ley = 1
 
         from mechanics.social.folklore_roster_lifecycle import rollback_folklore_roster_state_after_turn
+        from .folklore_spirit_realm import rollback_spirit_realm_state_after_turn
+        spirit_rev = rollback_spirit_realm_state_after_turn(int(session_id), t_num, conn=c)
         roster_rev = rollback_folklore_roster_state_after_turn(int(session_id), t_num, conn=c)
 
     return {
         "villages_reverted": reverted_v,
         "leyline_reverted": reverted_ley,
+        **spirit_rev,
         **roster_rev,
     }
 
@@ -416,7 +539,7 @@ def backfill_zone_split_and_hidden_villages_v49(conn: Any, session_id: Optional[
                 p_id = str(prim.get("id") or "")
                 if not p_id:
                     continue
-                if z_id_target == "zone_woods_reserve" and p_id != "loc_hidden_bunian_village":
+                if z_id_target == "zone_woods_reserve" and p_id not in ("loc_hidden_bunian_village", "loc_bunian_mist_glade"):
                     continue
                 is_hid = bool(prim.get("is_hidden"))
                 disp_p_name = str((prim.get("mundane_name") if is_hid else prim.get("name")) or prim.get("name") or p_id)
@@ -460,8 +583,8 @@ def backfill_zone_split_and_hidden_villages_v49(conn: Any, session_id: Optional[
                     }
                     if s_id == "loc_et_fox_torii_tunnel":
                         conn.execute(
-                            "UPDATE world_nodes SET parent_id = 'loc_hidden_kitsune_village', state_json = COALESCE(state_json, ?) WHERE session_id = ? AND node_id = ?",
-                            (json.dumps(s_meta), sid, s_id),
+                            "UPDATE world_nodes SET parent_id = ?, state_json = COALESCE(state_json, ?) WHERE session_id = ? AND node_id = ?",
+                            (p_id, json.dumps(s_meta), sid, s_id),
                         )
                     conn.execute(
                         """INSERT OR IGNORE INTO world_nodes
@@ -548,6 +671,8 @@ def backfill_zone_split_and_hidden_villages_v49(conn: Any, session_id: Optional[
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
                 (sid, f_a, f_b, mins, locked, sc_type, sc_dc, etype),
             )
+        from .folklore_spirit_realm_lifecycle import backfill_folklore_spirit_realm_v52
+        backfill_folklore_spirit_realm_v52(conn, session_id=sid)
         migrated_sessions += 1
 
     return migrated_sessions

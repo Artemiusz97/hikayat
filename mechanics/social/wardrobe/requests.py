@@ -388,6 +388,53 @@ def evaluate_outfit_request_compliance(
             or bundle["presets"][PRESET_DUTY if in_campus_class else PRESET_CASUAL]
         )
 
+    is_spicy_req = req_preset in ("lingerie", "bra_less", "commando")
+    if is_spicy_req:
+        from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+        op_tier = normalize_openness_tier(
+            meta.get("app", {}).get("erotic_openness") or meta.get("app", {}).get("openness") or (
+                "prude" if meta.get("is_prude") else ("shameless" if meta.get("is_shameless") else ("bold" if meta.get("is_bold_or_shameless") else "moderate"))
+            )
+        )
+        shared_cnt_req = int(
+            (npc.get("shared_intimacy_stats") or {}).get("shared_encounters")
+            or len(npc.get("gameplay_intimate_events") or [])
+            or 0
+        )
+        is_hostile_req = str(npc.get("disposition") or rel.get("disposition") or "").strip().lower() == "hostile"
+        comfort_req = compute_with_you_comfort(
+            op_tier,
+            relationship_score=aff,
+            relationship_track=track or ("romantic" if is_romantic else "platonic"),
+            shared_intimate_count=shared_cnt_req,
+            is_hostile=is_hostile_req,
+            for_dm_or_inquiry=is_dm,
+        )
+        spicy_allowed = False
+        if not is_hostile_req:
+            if op_tier in ("bold", "shameless"):
+                spicy_allowed = bool(aff >= 50 or is_romantic)
+            elif op_tier == "moderate":
+                spicy_allowed = bool(comfort_req["is_romantic"] or comfort_req["stage"] in ("warming_up", "trusting_private"))
+            else:
+                if req_preset == "lingerie":
+                    spicy_allowed = comfort_req["stage"] in ("warming_up", "trusting_private")
+                else:
+                    spicy_allowed = comfort_req["stage"] == "trusting_private"
+
+        if not spicy_allowed:
+            return {
+                "status": "refused",
+                "dress_code_violation": False,
+                "pending_request_payload": None,
+                "directive_text": (
+                    f"[PRE-TURN OUTFIT REQUEST — REFUSAL]\n"
+                    f"The player asked {npc_name} to wear '{req_phrase}' ({req_preset}). "
+                    f"Even in private or DMs, {npc_name} does not feel comfortable crossing that intimacy boundary at their current trust/relationship standing and politely refuses."
+                ),
+            }
+
     # Defer future date requests, DM prep requests, or public non-change-point full swaps
     if (is_date_req and not is_public_dress_violation) or (
         not is_dm and not is_public_dress_violation and not is_public_micro and not at_change_point

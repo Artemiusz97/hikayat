@@ -277,6 +277,7 @@ def preload_discord_social_context(
     reveal_debug = False
     ui_lang = "en"
     player_last_name = ""
+    player_char: Optional[dict] = None
     if user_id:
         try:
             user_settings = db.get_settings(user_id) or {}
@@ -286,7 +287,16 @@ def preload_discord_social_context(
             reveal_debug = False
             ui_lang = "en"
         try:
-            char_row = db.get_character(user_id) or {}
+            from mechanics.social.relationships import resolve_session_player_character
+
+            char_row = resolve_session_player_character(
+                session_id=sid,
+                character_id=cid,
+                user_id=user_id,
+                session=session_row,
+            ) or {}
+            if isinstance(char_row, Mapping) and char_row:
+                player_char = dict(char_row)
             if not cid and char_row.get("id"):
                 cid = int(char_row["id"])
             player_last_name = _extract_last_name(str(char_row.get("name") or ""))
@@ -436,6 +446,7 @@ def preload_discord_social_context(
         "character_id": cid,
         "scenario_key": scen,
         "session": session_row,
+        "player_char": player_char,
         "reveal_debug": reveal_debug,
         "ui_lang": ui_lang,
         "player_last_name": player_last_name,
@@ -535,6 +546,7 @@ def enrich_discord_npc_with_routine(
         preloaded_faction_state=fow_context.get("faction_state"),
         preloaded_agent_roster=fow_context.get("anomalous_agent_roster"),
         preloaded_session=fow_context.get("session"),
+        player_char=fow_context.get("player_char"),
     )
 
     roster_row = (

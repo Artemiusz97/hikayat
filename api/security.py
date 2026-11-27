@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import secrets
 import sys
@@ -10,11 +11,14 @@ from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request, WebSocket
 
+from bin import tunnel
 import db
 from db import adb
 
 _PROCESS_AUTH_SECRET: str = secrets.token_hex(32)
 _TRUSTED_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+_TAILSCALE_IPV4_NET = ipaddress.ip_network("100.64.0.0/10")
+_TAILSCALE_IPV6_NET = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 
 
 def _get_auth_secret() -> bytes:
@@ -96,6 +100,77 @@ def is_strict_auth_context(request_or_ws: Request | WebSocket | None) -> bool:
     client = getattr(request_or_ws, "client", None)
     host = str(getattr(client, "host", "") or "").strip().lower()
     if host and host not in _TRUSTED_LOCAL_HOSTS:
+        return True
+    return False
+
+
+def _is_tailscale_mode_enabled() -> bool:
+    if os.getenv("HIKAYAT_TRUST_TAILSCALE", "").strip().lower() in ("true", "1", "yes"):
+        return True
+    active_provider = (tunnel.get_active_provider() or "").strip().lower()
+    if active_provider:
+        return active_provider == "tailscale"
+    configured = (
+        os.getenv("HIKAYAT_SHARE_PROVIDER")
+        or os.getenv("SHARE_PROVIDER")
+        or ""
+    ).strip().lower()
+    return configured == "tailscale"
+
+
+def _header_value(headers: Any, name: str) -> str:
+    if not headers:
+        return ""
+    val = headers.get(name) if hasattr(headers, "get") else None
+    if val is None and hasattr(headers, "get"):
+        val = headers.get(name.lower())
+    if val is None and isinstance(headers, dict):
+        target = name.lower()
+        for k, v in headers.items():
+            if str(k).lower() == target:
+                val = v
+                break
+    return str(val or "").strip()
+
+
+def _is_tailscale_ip(host: str) -> bool:
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        (isinstance(ip, ipaddress.IPv4Address) and ip in _TAILSCALE_IPV4_NET)
+        or (isinstance(ip, ipaddress.IPv6Address) and ip in _TAILSCALE_IPV6_NET)
+    )
+
+
+def is_trusted_tailscale_request(request_or_ws: Request | WebSocket | None) -> bool:
+    if request_or_ws is None or not _is_tailscale_mode_enabled():
+        return False
+    headers = getattr(request_or_ws, "headers", None) or {}
+    if _header_value(headers, "cf-connecting-ip") or _header_value(headers, "tailscale-funnel-request"):
+        return False
+    client = getattr(request_or_ws, "client", None)
+    host = str(getattr(client, "host", "") or "").strip().lower()
+    is_ts_ip = _is_tailscale_ip(host)
+    xff = _header_value(headers, "x-forwarded-for")
+    xri = _header_value(headers, "x-real-ip")
+    # Path A: Tailscale Serve reverse-proxied from loopback or Uvicorn ProxyHeadersMiddleware.
+    # Require every forwarded hop to belong to Tailscale CGNAT/ULA space when proxy headers are present.
+    if xff or xri:
+        hops = [h.strip() for h in xff.split(",") if h.strip()] + ([xri] if xri else [])
+        if not hops or not all(_is_tailscale_ip(h) for h in hops):
+            return False
+        return bool(
+            (host in _TRUSTED_LOCAL_HOSTS or is_ts_ip)
+            and _header_value(headers, "tailscale-user-login")
+        )
+    # Path B: Direct connection over the tailnet without a reverse proxy.
+    if is_ts_ip:
         return True
     return False
 

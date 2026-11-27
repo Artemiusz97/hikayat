@@ -60,6 +60,11 @@ def _clear_examine_cache_all() -> None:
         _SESSION_EPOCHS.clear()
 
 
+db.register_session_rollback_hook = getattr(db, "register_session_rollback_hook", None)
+if callable(db.register_session_rollback_hook):
+    db.register_session_rollback_hook(invalidate_examine_cache)
+
+
 def _make_examine_cache_key(
     session: Dict[str, Any],
     snapshot: Dict[str, Any],

@@ -577,7 +577,7 @@ class ChoiceView(SessionRestrictedView):
 
         from mechanics.system.phone import scenario_has_smartphone, get_phone_branding
         if scenario_has_smartphone(scen_key) and not self.in_combat:
-            branding = get_phone_branding(scen_key)
+            branding = get_phone_branding(scen_key, session)
             phone_btn = discord.ui.Button(label=branding["device_name"].split(" ", 1)[-1], emoji=branding["emoji"], style=discord.ButtonStyle.secondary)
             phone_btn.callback = self._phone_callback
             self.add_item(phone_btn)
@@ -1381,7 +1381,7 @@ class SyncChoiceView(SessionRestrictedView):
 
         from mechanics.system.phone import scenario_has_smartphone, get_phone_branding
         if scenario_has_smartphone(scen_key) and not in_combat:
-            branding = get_phone_branding(scen_key)
+            branding = get_phone_branding(scen_key, session)
             phone_btn = discord.ui.Button(label=branding["device_name"].split(" ", 1)[-1], emoji=branding["emoji"], style=discord.ButtonStyle.secondary)
             phone_btn.callback = self._phone_callback
             self.add_item(phone_btn)

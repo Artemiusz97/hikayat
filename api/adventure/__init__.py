@@ -17,7 +17,7 @@ import game_engine
 import scenario_data
 from scenario_data import get_scenario_display_name
 from mechanics.combat.loadouts import ensure_combatant_loadout
-from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
+from mechanics.narrative.campaign_spine import PLACEHOLDER_ACTOR_RE
 from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
 from mechanics.social.races import roll_scenario_npc_race
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
@@ -37,12 +37,15 @@ from ..deps import (
     StartAdventureRequest,
     ToggleNonLethalRequest,
     ToggleStealthRequest,
-    _serializable_action,
     enrich_choices_with_odds,
     enrich_session_party_members,
     logger,
     manager,
+    serializable_action,
 )
+
+_PLACEHOLDER_ACTOR_RE = PLACEHOLDER_ACTOR_RE
+_serializable_action = serializable_action
 from ..security import verify_session_participant, verify_user_access
 from . import (
     enrichment as _mod_enrichment,
@@ -74,6 +77,7 @@ from .enrichment import (
     _sanitize_enemy_telegraph_view,
     _trigger_scene_image_broadcast,
     enrich_session_for_client,
+    heal_session_before_projection,
 )
 from .routes_session import (
     delete_save,
@@ -181,6 +185,7 @@ __all__ = [
     "get_character_sessions_endpoint",
     "get_session_image",
     "get_world_map_locations",
+    "heal_session_before_projection",
     "invalidate_examine_cache",
     "join_adventure",
     "launch_in_flight_ws_task",

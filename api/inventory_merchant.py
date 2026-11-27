@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+_PHONE_MERCHANT_TYPES = frozenset({"online_general", "online_delivery", "school_mart"})
+
 import db
 from db import adb
 import character_data as cd
 import scenario_data
+from mechanics.combat import is_in_combat
 from mechanics.combat.merchant import (
     generate_merchant_shop,
     generate_grounded_merchant_rumors,
@@ -21,6 +24,18 @@ from mechanics.combat.merchant import (
     stamp_discounted_purchase_metadata,
     validate_or_clear_faction_quartermaster,
 )
+from mechanics.combat.online_store import (
+    SCHOOL_MART_STUDENT_DISCOUNT_PCT,
+    STORE_MODE_ONLINE_GENERAL,
+    STORE_MODE_SCHOOL_MART,
+    compute_phone_item_badges,
+    get_eligible_phone_store_categories,
+    infer_item_category,
+    is_legacy_flat_phone_stock,
+    is_school_mart_requested,
+    normalize_phone_store_mode,
+)
+from mechanics.social.origin_mode import resolve_player_age_profile
 from mechanics.combat.items import (
     apply_item_to_target,
     is_key_item,
@@ -50,9 +65,38 @@ from .deps import (
     MerchantSellRequest,
     MerchantHaggleRequest,
     MerchantRumorRequest,
+    ensure_realm_comms_available,
 )
 
 router = APIRouter()
+
+
+async def _get_session_character(user_id: int, session_id: int) -> dict | None:
+    """Resolve the session-bound character first, falling back to the user's active character."""
+    char = await adb(db.get_character, user_id, session_id=session_id)
+    if not char:
+        char = await adb(db.get_character, user_id)
+    return char
+
+
+def _resolve_validated_request_merchant_type(
+    req_mtype: str | None,
+    merchant: dict,
+    loc: str,
+    scen_key: str,
+) -> str:
+    """Reject client-supplied merchant_type overrides that are not active or permitted at `loc`."""
+    fallback_mtype = str(merchant.get("merchant_type") or "")
+    if merchant.get("is_phone_shop") or fallback_mtype.strip().lower() in _PHONE_MERCHANT_TYPES:
+        fallback_mtype = ""
+    req_clean = str(req_mtype or "").strip()
+    if not req_clean or req_clean == fallback_mtype:
+        return fallback_mtype
+    loc_stores = get_available_merchant_types_for_location(loc, scen_key=scen_key) or []
+    allowed_loc_types = {str(s.get("type") or "").strip() for s in loc_stores if isinstance(s, dict) and s.get("type")}
+    if req_clean in allowed_loc_types:
+        return req_clean
+    return fallback_mtype
 
 
 def _validate_or_clear_faction_quartermaster(session_id: int, loc: str, merchant: dict) -> tuple[bool, dict]:
@@ -60,11 +104,24 @@ def _validate_or_clear_faction_quartermaster(session_id: int, loc: str, merchant
     return validate_or_clear_faction_quartermaster(session_id, loc, merchant)
 
 
+def _stock_item_qty(entry: dict) -> int:
+    """Safely parse stock entry quantity, defaulting missing key to 1 and malformed/None to 0."""
+    if "quantity" not in entry:
+        return 1
+    raw_qty = entry.get("quantity")
+    if raw_qty is None:
+        return 0
+    try:
+        return int(raw_qty)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _annotate_stock_items(raw_stock: list[dict], shop_ctx: dict, discount_pct: int) -> list[dict]:
     """Annotate in-stock merchant items with effective prices and faction pricing badges."""
     annotated: list[dict] = []
     for item in raw_stock or []:
-        if not isinstance(item, dict) or item.get("quantity", 1) <= 0:
+        if not isinstance(item, dict) or not str(item.get("name") or "").strip() or _stock_item_qty(item) <= 0:
             continue
         base_price = int(item.get("price", 15) or 15)
         final_price = compute_effective_shop_item_price(item, shop_ctx=shop_ctx, discount_pct=discount_pct)
@@ -385,17 +442,27 @@ def _enrich_inventory_item(item: dict, char: dict, equipment: dict) -> dict:
 
 
 @router.get("/api/inventory/{user_id}")
-async def get_inventory(user_id: int, request: Request = None):
+async def get_inventory(user_id: int, session_id: int | None = None, request: Request = None):
     """Fetches user inventory items and equipped gear with rich inspection metadata."""
-    await verify_user_access(request, user_id)
-    char = await adb(db.get_character, user_id)
+    if session_id is not None:
+        await verify_session_participant(request, session_id, user_id)
+        active_sid = int(session_id)
+    else:
+        await verify_user_access(request, user_id)
+        active_sid = await adb(db.get_active_session_id_for_user, user_id)
+
+    char = (
+        (await _get_session_character(user_id, int(active_sid)) if active_sid else None)
+        or await adb(db.get_character, user_id)
+    )
     if not char:
         raise HTTPException(status_code=404, detail="Character not found")
 
     char_dict = dict(char)
-    items = await adb(db.get_inventory, user_id)
-    equipment = await adb(db.get_equipment, user_id)
-    active_sid = char_dict.get("active_session_id") or await adb(db.get_active_session_id_for_user, user_id)
+    if not active_sid:
+        active_sid = char_dict.get("active_session_id")
+    items = await adb(db.get_inventory, user_id, char=char_dict, session_id=active_sid)
+    equipment = await adb(db.get_equipment, user_id, char=char_dict, session_id=active_sid)
     capacity = await adb(db.get_character_inventory_capacity, user_id, char_dict, active_sid)
     base_capacity = cd.inventory_capacity(char_dict["str_"])
     property_bonus_slots = max(0, int(capacity) - int(base_capacity))
@@ -422,14 +489,17 @@ async def get_inventory(user_id: int, request: Request = None):
 @router.post("/api/inventory/equip")
 async def equip_item(req: EquipRequest, request: Request = None):
     """Equips an inventory item into a slot."""
-    await verify_user_access(request, req.user_id)
+    if req.session_id:
+        _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
+    else:
+        canonical_id = await verify_user_access(request, req.user_id)
     if req.slot not in cd.EQUIPMENT_SLOTS:
         raise HTTPException(status_code=400, detail="Invalid equipment slot")
 
-    lock_sid = await adb(db.get_active_session_id_for_user, req.user_id)
-    async with distributed_adventure_lock(req.user_id, lock_sid):
+    lock_sid = req.session_id or await adb(db.get_active_session_id_for_user, req.user_id)
+    async with distributed_adventure_lock(canonical_id, lock_sid):
         try:
-            prev = await adb(db.equip_item, req.user_id, req.item_id, req.slot)
+            prev = await adb(db.equip_item, req.user_id, req.item_id, req.slot, session_id=lock_sid)
             return {"success": True, "unequipped_previous": prev}
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -438,32 +508,43 @@ async def equip_item(req: EquipRequest, request: Request = None):
 @router.post("/api/inventory/unequip")
 async def unequip_slot(req: UnequipRequest, request: Request = None):
     """Unequips an item from an equipment slot."""
-    await verify_user_access(request, req.user_id)
+    if req.session_id:
+        _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
+    else:
+        canonical_id = await verify_user_access(request, req.user_id)
     if req.slot not in cd.EQUIPMENT_SLOTS:
         raise HTTPException(status_code=400, detail="Invalid equipment slot")
 
-    lock_sid = await adb(db.get_active_session_id_for_user, req.user_id)
-    async with distributed_adventure_lock(req.user_id, lock_sid):
-        item = await adb(db.unequip_slot, req.user_id, req.slot)
+    lock_sid = req.session_id or await adb(db.get_active_session_id_for_user, req.user_id)
+    async with distributed_adventure_lock(canonical_id, lock_sid):
+        item = await adb(db.unequip_slot, req.user_id, req.slot, session_id=lock_sid)
         return {"success": True, "unequipped_item": item}
 
 
 @router.post("/api/inventory/drop")
 async def drop_item(req: ItemDropRequest, request: Request = None):
     """Drops/discards an item from the user's inventory onto the active room floor (D20)."""
-    await verify_user_access(request, req.user_id)
-    lock_sid = await adb(db.get_active_session_id_for_user, req.user_id)
-    async with distributed_adventure_lock(req.user_id, lock_sid):
-        items = await adb(db.get_inventory, req.user_id)
+    if req.session_id:
+        _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
+    else:
+        canonical_id = await verify_user_access(request, req.user_id)
+    lock_sid = req.session_id or await adb(db.get_active_session_id_for_user, req.user_id)
+    async with distributed_adventure_lock(canonical_id, lock_sid):
+        actor_char = (
+            await _get_session_character(req.user_id, int(lock_sid))
+            if lock_sid
+            else await adb(db.get_character, req.user_id)
+        )
+        items = await adb(db.get_inventory, req.user_id, char=actor_char)
         target_item = next((dict(i) for i in (items or []) if i.get("id") == req.item_id), None)
         if target_item and is_key_item(target_item):
             raise HTTPException(status_code=400, detail="Key items cannot be dropped or discarded.")
 
-        removed = await adb(db.remove_item, req.user_id, req.item_id)
+        removed = await adb(db.remove_item, req.user_id, req.item_id, char=actor_char, session_id=lock_sid)
         if not removed:
             raise HTTPException(status_code=404, detail="Item not found or could not be removed")
-        if target_item:
-            await adb(db.drop_item_to_session_floor, req.user_id, target_item)
+        if target_item and not is_digital_item(target_item):
+            await adb(db.drop_item_to_session_floor, req.user_id, target_item, session_id=lock_sid)
         if lock_sid:
             try:
                 invalidate_examine_cache(lock_sid)
@@ -476,12 +557,17 @@ async def drop_item(req: ItemDropRequest, request: Request = None):
 async def use_item(req: ItemUseRequest, request: Request = None):
     """Uses a consumable item, reads a spellbook, or inspects a key/digital item."""
     if req.session_id:
-        await verify_session_participant(request, req.session_id, req.user_id)
+        _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
     else:
-        await verify_user_access(request, req.user_id)
+        canonical_id = await verify_user_access(request, req.user_id)
     lock_sid = req.session_id or await adb(db.get_active_session_id_for_user, req.user_id)
-    async with distributed_adventure_lock(req.user_id, lock_sid):
-        items = await adb(db.get_inventory, req.user_id)
+    async with distributed_adventure_lock(canonical_id, lock_sid):
+        actor_char = (
+            await _get_session_character(req.user_id, int(lock_sid))
+            if lock_sid
+            else await adb(db.get_character, req.user_id)
+        )
+        items = await adb(db.get_inventory, req.user_id, char=actor_char)
         target_item = next((dict(i) for i in items if i.get("id") == req.item_id), None)
         if not target_item:
             raise HTTPException(status_code=404, detail="Item not found in inventory")
@@ -534,7 +620,11 @@ async def use_item(req: ItemUseRequest, request: Request = None):
         if not success:
             raise HTTPException(status_code=400, detail=message)
 
-        char = await adb(db.get_character, req.user_id)
+        char = (
+            await _get_session_character(req.user_id, int(lock_sid))
+            if lock_sid
+            else await adb(db.get_character, req.user_id)
+        )
         return {
             "success": True,
             "message": message,
@@ -600,14 +690,17 @@ async def get_merchant_shop(
     user_id: int = Query(...),
     merchant_type: str | None = Query(None),
     is_phone_shop: bool = Query(False),
+    store_mode: str | None = Query(None),
     request: Request = None,
 ):
     """Fetches or generates the active merchant shop (or Smartphone E-Shop) stock and player sell valuations."""
     if int(user_id) <= 0 or int(session_id) <= 0:
         raise HTTPException(status_code=400, detail="Invalid user_id or session_id.")
     session, _ = await verify_session_participant(request, session_id, user_id)
+    if is_phone_shop:
+        await ensure_realm_comms_available(session_id, session=session)
 
-    char = await adb(db.get_character, user_id)
+    char = await _get_session_character(user_id, session_id)
     if not char:
         raise HTTPException(status_code=404, detail="Character not found")
 
@@ -616,6 +709,17 @@ async def get_merchant_shop(
     cur_min = int(session.get("current_minute", 480) or 480)
     loc = session.get("current_location", "")
     scen_key = session.get("scenario", "fantasy")
+    player_profile = resolve_player_age_profile(session, char)
+    is_student = bool(player_profile.get("is_student"))
+    in_combat = bool(session.get("in_combat") or is_in_combat(session))
+
+    if is_phone_shop and is_school_mart_requested(store_mode) and not is_student:
+        raise HTTPException(status_code=403, detail="SchoolMart student store is only available to student characters.")
+    effective_store_mode = (
+        normalize_phone_store_mode(store_mode, is_student=is_student)
+        if is_phone_shop
+        else ""
+    )
 
     if is_phone_shop and merchant_type and (MERCHANT_ARCHETYPES.get(merchant_type) or {}).get("in_person_only"):
         raise HTTPException(
@@ -624,7 +728,11 @@ async def get_merchant_shop(
         )
     explicit_merchant_type = str(merchant_type or "").strip() or None
     prev_m_type = merchant.get("merchant_type") or "general_merchant"
-    m_type = "online_delivery" if is_phone_shop else (explicit_merchant_type or prev_m_type)
+    m_type = (
+        ("school_mart" if effective_store_mode == STORE_MODE_SCHOOL_MART else "online_delivery")
+        if is_phone_shop
+        else (explicit_merchant_type or prev_m_type)
+    )
     from scenario_data import is_anomalous_incursions_scenario as _is_anom_merch
     is_anom_scen = bool(_is_anom_merch(scen_key))
     if is_anom_scen and m_type in ("spellbook_merchant", "magic_merchant"):
@@ -729,10 +837,20 @@ async def get_merchant_shop(
     store_key = (
         f"{loc or 'monastic_shrine'}:monastic_shrine_daily"
         if is_monastic_member_shrine
-        else get_store_key(merchant, is_phone_shop=is_phone_shop, merchant_type=m_type, location=loc)
+        else get_store_key(
+            merchant,
+            is_phone_shop=is_phone_shop,
+            merchant_type=m_type,
+            location=loc,
+            store_mode=effective_store_mode,
+        )
     )
 
-    stock_field = "phone_stock" if is_phone_shop else "stock"
+    stock_field = (
+        ("school_mart_stock" if effective_store_mode == STORE_MODE_SCHOOL_MART else "phone_stock")
+        if is_phone_shop
+        else "stock"
+    )
     moved_store = bool(
         not is_phone_shop
         and not is_monastic_member_shrine
@@ -740,50 +858,68 @@ async def get_merchant_shop(
         and store_key != merchant.get("active_store_key")
     )
     catalogue, needs_restock = get_or_create_merchant_catalogue(merchant, store_key, cur_day, cur_min)
+    if (
+        is_phone_shop
+        and effective_store_mode == STORE_MODE_ONLINE_GENERAL
+        and (
+            is_legacy_flat_phone_stock(merchant.get(stock_field))
+            or is_legacy_flat_phone_stock((catalogue or {}).get("stock"))
+        )
+    ):
+        needs_restock = True
+        merchant[stock_field] = []
+
     if is_shop_open and needs_restock and (switched_store or moved_store or not merchant.get(stock_field)):
-        inv = await adb(db.get_inventory, user_id)
+        inv = await adb(db.get_inventory, user_id, char=char)
         party = [(dict(char), inv)]
         arch_meta = MERCHANT_ARCHETYPES.get(m_type, MERCHANT_ARCHETYPES.get("general_merchant", {}))
         restock_name = (
-            "Express E-Shop Delivery"
+            ("SchoolMart Campus Store" if effective_store_mode == STORE_MODE_SCHOOL_MART else "Express E-Shop Delivery")
             if is_phone_shop
             else (staff_keeper_name or (arch_meta.get("title") if (switched_store or moved_store) else (merchant.get("flavor_name") or arch_meta.get("title") or "Local Merchant")))
         )
         try:
-            shop_data = await generate_merchant_shop(
-                party=party,
-                merchant_name=restock_name,
-                merchant_description="Instant drone & courier delivery straight to your location." if is_phone_shop else (arch_meta.get("intro_template") if (switched_store or moved_store) else (merchant.get("flavor_description") or "")),
-                session=session,
-                is_phone_shop=is_phone_shop,
-                merchant_type=m_type
-            )
-        except Exception:
-            phone_fallback_stock = [
-                {"name": "Choco-Butter Croissant", "item_type": "Snack", "description": "Warm, flaky pastry perfect for late-night study sessions.", "price": 17, "quantity": 5, "tier": 1},
-                {"name": "Iced Vanilla Latte", "item_type": "Drink", "description": "Refreshing cold brew to keep your focus sharp during lectures.", "price": 10, "quantity": 5, "tier": 1},
-                {"name": "Matcha Spark Energy Drink", "item_type": "Drink", "description": "Crisp green tea energy blend restoring 15 HP and 15 MP.", "price": 22, "quantity": 4, "tier": 2},
-                {"name": "Deluxe Bento Box", "item_type": "Food", "description": "Balanced meal restoring stamina and well-being.", "price": 25, "quantity": 3, "tier": 2},
-                {"name": "Highlighter Pen (Neon Pink)", "item_type": "Stationery", "description": "Essential stationery for marking key points in textbooks.", "price": 15, "quantity": 5, "tier": 1},
-                {"name": "Notebook (A5 Ruled)", "item_type": "Stationery", "description": "Sturdy paper for jotting down lecture notes and doodles.", "price": 12, "quantity": 5, "tier": 1},
-                {"name": "Gourmet Truffle Chocolates", "item_type": "Gift", "description": "Artisan confectionery wrapped with a satin ribbon (+Affinity).", "price": 38, "quantity": 3, "tier": 2},
-                {"name": "Cute Mascot Phone Charm", "item_type": "Gift", "description": "Adorable acrylic charm loved by classmates (+Affinity).", "price": 28, "quantity": 3, "tier": 2},
-                {"name": "Portable Fast-Charger Power Bank", "item_type": "Gadget", "description": "Compact battery pack ensuring all digital devices stay powered.", "price": 45, "quantity": 2, "tier": 2},
-                {"name": "Scented Lavender Hand Cream", "item_type": "Gift", "description": "Calming floral lotion that makes a lovely thoughtful gift.", "price": 24, "quantity": 4, "tier": 1},
-                {"name": "Exam Cram Flashcards", "item_type": "Study Aid", "description": "Color-coded revision cards granting +1 INT during quizzes.", "price": 18, "quantity": 4, "tier": 2},
-                {"name": "Thermal Travel Tumbler", "item_type": "Accessory", "description": "Keeps beverages piping hot or icy cold through the school day.", "price": 32, "quantity": 3, "tier": 2},
-            ]
-            shop_data = {
-                "intro_narrative": arch_meta.get("intro_template") or "Order snacks, gifts, and gear for immediate delivery.",
-                "stock": phone_fallback_stock if is_phone_shop else [
-                    {"name": "Express Energy Drink", "item_type": "Drink", "description": "Restores 10 HP and 10 MP.", "price": 20, "quantity": 3, "tier": 2},
-                    {"name": "Artisan Gift Box", "item_type": "Gift", "description": "A thoughtful gift for a close friend.", "price": 35, "quantity": 2, "tier": 2},
-                ],
-                "rumors": [] if is_phone_shop else await adb(generate_grounded_merchant_rumors, session_id, scen_key),
+            gen_kwargs = {
+                "party": party,
+                "merchant_name": restock_name,
+                "merchant_description": (
+                    arch_meta.get("intro_template", "Order daily essentials for fast delivery.")
+                    if is_phone_shop
+                    else (arch_meta.get("intro_template") if (switched_store or moved_store) else (merchant.get("flavor_description") or ""))
+                ),
+                "session": session,
+                "is_phone_shop": is_phone_shop,
+                "merchant_type": m_type,
             }
+            if is_phone_shop:
+                gen_kwargs["store_mode"] = effective_store_mode
+            shop_data = await generate_merchant_shop(**gen_kwargs)
+        except Exception:
+            if is_phone_shop:
+                from mechanics.combat.online_store import build_phone_store_catalog
+
+                cur_meta_fb = scenario_data.get_scenario_currency(scen_key)
+                shop_data = build_phone_store_catalog(
+                    scen_key,
+                    store_mode=effective_store_mode,
+                    day=cur_day,
+                    is_nsfw=scenario_data.is_nsfw_scenario(scen_key),
+                    player_level=int(char.get("level", 1) or 1),
+                    currency=cur_meta_fb.get("name", "Credits"),
+                )
+            else:
+                shop_data = {
+                    "intro_narrative": arch_meta.get("intro_template") or "Browse wares and trade gear.",
+                    "stock": [
+                        {"name": "Express Energy Drink", "item_type": "Drink", "description": "Restores 10 HP and 10 MP.", "price": 20, "quantity": 3, "tier": 2},
+                        {"name": "Artisan Gift Box", "item_type": "Gift", "description": "A thoughtful gift for a close friend.", "price": 35, "quantity": 2, "tier": 2},
+                    ],
+                    "rumors": await adb(generate_grounded_merchant_rumors, session_id, scen_key),
+                }
         catalogue = update_merchant_catalogue(merchant, store_key, shop_data, cur_day, cur_min)
         merchant[stock_field] = catalogue.get("stock", [])
         if not is_phone_shop:
+            merchant["is_phone_shop"] = False
             merchant["merchant_type"] = m_type
             merchant["in_person_only"] = bool(shop_data.get("in_person_only") or arch_meta.get("in_person_only"))
             merchant["active_store_key"] = store_key
@@ -793,9 +929,16 @@ async def get_merchant_shop(
             merchant["discount_pct"] = catalogue.get("discount_pct", 0)
             merchant["available"] = True
         await adb(db.save_merchant_state, session_id, merchant)
-    elif is_shop_open and catalogue and (switched_store or moved_store or not merchant.get(stock_field)):
+    elif is_shop_open and catalogue and (
+        switched_store
+        or moved_store
+        or not merchant.get(stock_field)
+        or (not is_phone_shop and bool(merchant.get("is_phone_shop")))
+    ):
         merchant[stock_field] = catalogue.get("stock", [])
         if not is_phone_shop:
+            was_phone_flag = bool(merchant.get("is_phone_shop"))
+            merchant["is_phone_shop"] = False
             merchant["merchant_type"] = m_type
             merchant["in_person_only"] = bool((MERCHANT_ARCHETYPES.get(m_type) or {}).get("in_person_only"))
             merchant["active_store_key"] = store_key
@@ -804,31 +947,20 @@ async def get_merchant_shop(
             merchant["haggle_attempts"] = catalogue.get("haggle_attempts", merchant.get("haggle_attempts", 0))
             merchant["discount_pct"] = catalogue.get("discount_pct", merchant.get("discount_pct", 0))
             merchant["available"] = True
-            if switched_store or moved_store:
+            if switched_store or moved_store or was_phone_flag:
                 await adb(db.save_merchant_state, session_id, merchant)
 
-    # If phone shop stock has fewer than 6 items, supplement with diverse catalog items
     if is_phone_shop:
-        existing_items = merchant.get(stock_field) or []
-        if len(existing_items) < 8:
-            supplement_items = [
-                {"name": "Matcha Spark Energy Drink", "item_type": "Drink", "description": "Crisp green tea energy blend restoring 15 HP and 15 MP.", "price": 22, "quantity": 4, "tier": 2},
-                {"name": "Deluxe Bento Box", "item_type": "Food", "description": "Balanced meal restoring stamina and well-being.", "price": 25, "quantity": 3, "tier": 2},
-                {"name": "Gourmet Truffle Chocolates", "item_type": "Gift", "description": "Artisan confectionery wrapped with a satin ribbon (+Affinity).", "price": 38, "quantity": 3, "tier": 2},
-                {"name": "Cute Mascot Phone Charm", "item_type": "Gift", "description": "Adorable acrylic charm loved by classmates (+Affinity).", "price": 28, "quantity": 3, "tier": 2},
-                {"name": "Portable Fast-Charger Power Bank", "item_type": "Gadget", "description": "Compact battery pack ensuring all digital devices stay powered.", "price": 45, "quantity": 2, "tier": 2},
-                {"name": "Scented Lavender Hand Cream", "item_type": "Gift", "description": "Calming floral lotion that makes a lovely thoughtful gift.", "price": 24, "quantity": 4, "tier": 1},
-                {"name": "Exam Cram Flashcards", "item_type": "Study Aid", "description": "Color-coded revision cards granting +1 INT during quizzes.", "price": 18, "quantity": 4, "tier": 2},
-                {"name": "Thermal Travel Tumbler", "item_type": "Accessory", "description": "Keeps beverages piping hot or icy cold through the school day.", "price": 32, "quantity": 3, "tier": 2},
-            ]
-            names_in_stock = {it.get("name") for it in existing_items}
-            for sup in supplement_items:
-                if sup["name"] not in names_in_stock:
-                    existing_items.append(sup)
-            merchant[stock_field] = existing_items
-            await adb(db.save_merchant_state, session_id, merchant)
-
-    discount_pct = _compute_charisma_discount(char, merchant)
+        if effective_store_mode == STORE_MODE_SCHOOL_MART:
+            cha_disc = _compute_charisma_discount(char, {"discount_pct": 0})
+            student_discount_pct = SCHOOL_MART_STUDENT_DISCOUNT_PCT
+            discount_pct = min(40, student_discount_pct + cha_disc)
+        else:
+            student_discount_pct = 0
+            discount_pct = 0
+    else:
+        student_discount_pct = 0
+        discount_pct = _compute_charisma_discount(char, merchant)
     shop_ctx = await adb(
         get_anomalous_shop_faction_context,
         session,
@@ -848,9 +980,16 @@ async def get_merchant_shop(
             if isinstance(s_it, dict) and int(s_it.get("quantity", 1) or 1) > 1:
                 s_it["quantity"] = 1
     stock = _annotate_stock_items(raw_stock, shop_ctx, discount_pct) if is_shop_open else []
+    if is_phone_shop:
+        for st_it in stock:
+            if isinstance(st_it, dict):
+                if not st_it.get("category"):
+                    st_it["category"] = infer_item_category(st_it, store_mode=effective_store_mode)
+                if not st_it.get("badges"):
+                    st_it["badges"] = compute_phone_item_badges(st_it)
 
     # Compute sellable items from player inventory
-    inv_items = await adb(db.get_inventory, user_id)
+    inv_items = await adb(db.get_inventory, user_id, char=char, session_id=session_id)
     sellable = []
     for it in inv_items:
         it_dict = dict(it)
@@ -861,6 +1000,8 @@ async def get_merchant_shop(
         sellable.append(it_dict)
 
     available_stores = []
+    loc_node_id = str(session.get("current_node_id") or "").strip()
+    is_spirit_market_loc = False
     if not is_phone_shop:
         loc_stores = get_available_merchant_types_for_location(loc, scen_key=scen_key)
         seen_types = set()
@@ -875,15 +1016,28 @@ async def get_merchant_shop(
                 "emoji": s.get("emoji", "🛍️"),
                 "description": s.get("intro_template", "")
             })
-        # Ensure specialist tabs are browsable in standard fantasy/sci-fi hubs
+        from mechanics.world.locations.folklore_spirit_realm import is_node_in_spirit_realm
+        in_spirit_realm_loc = await adb(is_node_in_spirit_realm, session_id, loc_node_id) if loc_node_id else False
+        is_spirit_market_loc = bool(
+            in_spirit_realm_loc
+            or any(
+                (MERCHANT_ARCHETYPES.get(s.get("type"), {}) or {}).get("is_night_market_stall")
+                for s in loc_stores
+            )
+        )
+        # Ensure specialist tabs are browsable in standard fantasy/sci-fi hubs (suppressed at Veiled Night Market / Spirit Realm stalls)
         from scenario_data import is_anomalous_incursions_scenario
         default_tabs = (
-            ["school_merchant", "cafe_merchant", "clothes_merchant", "gift_merchant"]
-            if is_school_scenario(scen_key)
+            []
+            if is_spirit_market_loc
             else (
-                ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "food_merchant"]
-                if is_anomalous_incursions_scenario(scen_key)
-                else ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "magic_merchant", "spellbook_merchant", "food_merchant"]
+                ["school_merchant", "cafe_merchant", "clothes_merchant", "gift_merchant"]
+                if is_school_scenario(scen_key)
+                else (
+                    ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "food_merchant"]
+                    if is_anomalous_incursions_scenario(scen_key)
+                    else ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "magic_merchant", "spellbook_merchant", "food_merchant"]
+                )
             )
         )
         for dt in default_tabs:
@@ -913,23 +1067,62 @@ async def get_merchant_shop(
             normalized_rumors.append(r_entry)
 
     arch_info = MERCHANT_ARCHETYPES.get(m_type, {})
-    merchant_name = "Express E-Shop" if is_phone_shop else (
-        staff_keeper_name or (arch_info.get("title") if (switched_store or moved_store) else (merchant.get("flavor_name") or arch_info.get("title") or "Traveling Merchant"))
-    )
     if is_phone_shop:
-        merchant_desc = "Order snacks, gifts, and gear for immediate delivery."
-    elif not is_shop_open:
-        merchant_desc = str((shop_avail or {}).get("reason_message") or "This shop is currently closed.")
+        from mechanics.system.phone import get_phone_branding
+
+        ph_brand = get_phone_branding(scen_key, session=session, is_student=is_student)
+        if effective_store_mode == STORE_MODE_SCHOOL_MART:
+            merchant_name = ph_brand.get("school_shop_app_name", "SchoolMart")
+            merchant_desc = "Student co-op essentials with automatic -20% student discount."
+        else:
+            merchant_name = ph_brand.get("shop_app_name", "Online Store")
+            merchant_desc = "Order food, drinks, meds, gifts, apparel, and tactical supplies for fast doorstep delivery."
     else:
-        merchant_desc = merchant.get("intro_narrative") or merchant.get("flavor_description") or arch_info.get("intro_template") or "Browse wares and trade gear."
-    haggle_attempts = int(merchant.get("haggle_attempts", 0) or 0)
-    haggle_discount_pct = int(merchant.get("discount_pct", 0) or 0)
+        merchant_name = (
+            staff_keeper_name or (arch_info.get("title") if (switched_store or moved_store) else (merchant.get("flavor_name") or arch_info.get("title") or "Traveling Merchant"))
+        )
+        if not is_shop_open:
+            merchant_desc = str((shop_avail or {}).get("reason_message") or "This shop is currently closed.")
+        else:
+            merchant_desc = merchant.get("intro_narrative") or merchant.get("flavor_description") or arch_info.get("intro_template") or "Browse wares and trade gear."
+    haggle_attempts = 0 if is_phone_shop else int(merchant.get("haggle_attempts", 0) or 0)
+    haggle_discount_pct = 0 if is_phone_shop else int(merchant.get("discount_pct", 0) or 0)
+    phone_categories = (
+        get_eligible_phone_store_categories(
+            scen_key,
+            store_mode=effective_store_mode,
+            is_nsfw=scenario_data.is_nsfw_scenario(scen_key),
+        )
+        if is_phone_shop
+        else []
+    )
+    delivery_blocked_reason = (
+        "Courier delivery is unavailable while in active combat."
+        if (is_phone_shop and in_combat)
+        else ""
+    )
+
+    from mechanics.world.world_events.spirit_realm_events import get_active_spirit_events
+    active_spirit_evts = await adb(get_active_spirit_events, session_id)
+    active_evt_keys = {str(e.get("template_key") or "") for e in (active_spirit_evts or []) if isinstance(e, dict)}
+    fair_active = "evt_spirit_twin_moon_fair" in active_evt_keys
+    auction_active = "evt_spirit_midnight_curio_auction" in active_evt_keys
+    lanterns_active = "evt_spirit_drifting_lanterns" in active_evt_keys
 
     return {
         "available": True if is_phone_shop else is_shop_open,
         "shop_closed_reason": "" if is_phone_shop else shop_closed_reason,
         "staff_keeper": "" if is_phone_shop else staff_keeper_name,
         "is_phone_shop": is_phone_shop,
+        "is_night_market": is_spirit_market_loc,
+        "twin_moon_fair_active": bool(fair_active),
+        "curio_auction_active": bool(auction_active),
+        "drifting_lanterns_active": bool(lanterns_active),
+        "store_mode": effective_store_mode if is_phone_shop else "",
+        "categories": phone_categories,
+        "in_combat": in_combat,
+        "delivery_blocked_reason": delivery_blocked_reason,
+        "student_discount_pct": student_discount_pct,
         "merchant_type": m_type,
         "available_stores": available_stores,
         "merchant_name": merchant_name,
@@ -953,19 +1146,25 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
     """Attempts a Charisma + Luck skill check to haggle for an extra +10% shop discount (up to 3 attempts)."""
     if int(req.user_id) <= 0 or int(req.session_id) <= 0:
         raise HTTPException(status_code=400, detail="Invalid user_id or session_id.")
-    await verify_session_participant(request, req.session_id, req.user_id)
+    _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
     async with distributed_session_lock(req.session_id):
         session = await adb(db.get_session, req.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         await _ensure_merchant_session_member(req.session_id, req.user_id, session)
 
-        char = await adb(db.get_character, req.user_id)
+        char = await _get_session_character(req.user_id, req.session_id)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found")
 
         merchant = dict(session.get("merchant") or {})
-        is_phone = bool(req.is_phone_shop or merchant.get("is_phone_shop"))
+        is_phone = bool(req.is_phone_shop)
+        if is_phone:
+            await ensure_realm_comms_available(req.session_id, session=session)
+            raise HTTPException(
+                status_code=400,
+                detail="Haggling is only available in person at physical merchant stalls.",
+            )
         is_qm_haggle = False
         if not is_phone:
             is_qm_haggle, updated_m = await adb(
@@ -977,13 +1176,16 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
             merchant.clear()
             merchant.update(updated_m)
         if not is_phone and not is_qm_haggle:
+            loc_str = session.get("current_location") or ""
+            scen_str = session.get("scenario") or "fantasy"
+            val_mtype = _resolve_validated_request_merchant_type(req.merchant_type, merchant, loc_str, scen_str)
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 req.session_id,
-                location_str=session.get("current_location") or "",
-                merchant_type=str(req.merchant_type or merchant.get("merchant_type") or ""),
+                location_str=loc_str,
+                merchant_type=val_mtype,
                 is_phone_shop=False,
-                scen_key=session.get("scenario") or "fantasy",
+                scen_key=scen_str,
                 current_day=session.get("current_day"),
                 current_minute=session.get("current_minute"),
                 turn_number=int(session.get("turn_count") or 0),
@@ -998,7 +1200,7 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
             raise HTTPException(status_code=400, detail="The merchant has grown tired of haggling (3/3 attempts used).")
 
         requirement = 4 + attempts * 2
-        settings = await adb(db.get_settings, req.user_id)
+        settings = await adb(db.get_settings, canonical_id)
         check_mode = (settings or {}).get("debug_check_mode", "off")
         check = resolve_check(int(char.get("cha", 1) or 1), requirement, int(char.get("luk", 1) or 1), check_mode=check_mode)
 
@@ -1027,7 +1229,7 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
             session,
             session.get("current_location", ""),
             bool(req.is_phone_shop),
-            req.user_id,
+            canonical_id,
         )
         raw_haggle_stock = list(
             (merchant.get("phone_stock") if bool(req.is_phone_shop) else merchant.get("stock"))
@@ -1063,14 +1265,14 @@ async def merchant_reveal_rumor(req: MerchantRumorRequest, request: Request = No
     """Runs a Charisma check to investigate a merchant rumor and logs it to the session Quest & Clue Caseboard."""
     if int(req.user_id) <= 0 or int(req.session_id) <= 0:
         raise HTTPException(status_code=400, detail="Invalid user_id or session_id.")
-    await verify_session_participant(request, req.session_id, req.user_id)
+    _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
     async with distributed_session_lock(req.session_id):
         session = await adb(db.get_session, req.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         await _ensure_merchant_session_member(req.session_id, req.user_id, session)
 
-        char = await adb(db.get_character, req.user_id)
+        char = await _get_session_character(req.user_id, req.session_id)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found")
 
@@ -1095,7 +1297,7 @@ async def merchant_reveal_rumor(req: MerchantRumorRequest, request: Request = No
                 "rumors": rumors,
             }
 
-        settings = await adb(db.get_settings, req.user_id)
+        settings = await adb(db.get_settings, canonical_id)
         check_mode = (settings or {}).get("debug_check_mode", "off")
         check = resolve_check(int(char.get("cha", 1) or 1), 5, int(char.get("luk", 1) or 1), check_mode=check_mode)
 
@@ -1163,14 +1365,14 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
     """Purchases an item from the active session merchant or Smartphone E-Shop."""
     if int(req.user_id) <= 0 or int(req.session_id) <= 0:
         raise HTTPException(status_code=400, detail="Invalid user_id or session_id.")
-    await verify_session_participant(request, req.session_id, req.user_id)
-    async with distributed_adventure_lock(req.user_id, req.session_id):
+    _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
+    async with distributed_adventure_lock(canonical_id, req.session_id):
         session = await adb(db.get_session, req.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         await _ensure_merchant_session_member(req.session_id, req.user_id, session)
 
-        char = await adb(db.get_character, req.user_id)
+        char = await _get_session_character(req.user_id, req.session_id)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found")
 
@@ -1186,13 +1388,16 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
             merchant.clear()
             merchant.update(updated_m)
         if not bool(req.is_phone_shop) and not is_qm_buy:
+            buy_loc = session.get("current_location") or ""
+            buy_scen = session.get("scenario") or "fantasy"
+            val_buy_mtype = _resolve_validated_request_merchant_type(req.merchant_type, merchant, buy_loc, buy_scen)
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 req.session_id,
-                location_str=session.get("current_location") or "",
-                merchant_type=str(req.merchant_type or merchant.get("merchant_type") or ""),
+                location_str=buy_loc,
+                merchant_type=val_buy_mtype,
                 is_phone_shop=False,
-                scen_key=session.get("scenario") or "fantasy",
+                scen_key=buy_scen,
                 current_day=session.get("current_day"),
                 current_minute=session.get("current_minute"),
                 turn_number=int(session.get("turn_count") or 0),
@@ -1204,14 +1409,31 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
                 )
         m_arch = MERCHANT_ARCHETYPES.get(str(merchant.get("merchant_type") or merchant.get("type") or ""), {})
         is_in_person_store = bool(merchant.get("in_person_only") or m_arch.get("in_person_only"))
+        buy_player_profile = resolve_player_age_profile(session, char)
+        buy_is_student = bool(buy_player_profile.get("is_student"))
+        buy_store_mode = ""
+        target_name_low = req.item_name.strip().lower()
         if req.is_phone_shop:
-            stock_field = "phone_stock"
-            phone_list = list(merchant.get("phone_stock") or [])
+            await ensure_realm_comms_available(req.session_id, session=session)
+            if is_school_mart_requested(req.store_mode) and not buy_is_student:
+                raise HTTPException(status_code=403, detail="SchoolMart student store is only available to student characters.")
+            if bool(session.get("in_combat") or is_in_combat(session)):
+                raise HTTPException(status_code=400, detail="Courier delivery is unavailable while in active combat.")
+            buy_store_mode = normalize_phone_store_mode(req.store_mode, is_student=buy_is_student)
+            stock_field = "school_mart_stock" if buy_store_mode == STORE_MODE_SCHOOL_MART else "phone_stock"
+            phone_list = list(merchant.get(stock_field) or [])
+            in_phone_stock = any(
+                isinstance(s, dict) and str(s.get("name") or "").strip().lower() == target_name_low
+                for s in phone_list
+            )
             in_person_match = any(
-                isinstance(s, dict) and s.get("name", "").lower() == req.item_name.strip().lower()
+                isinstance(s, dict) and str(s.get("name") or "").strip().lower() == target_name_low
                 for s in (merchant.get("stock") or [])
             )
-            if is_in_person_store and (not phone_list or in_person_match):
+            explicit_in_person_req = bool(
+                (MERCHANT_ARCHETYPES.get(str(req.merchant_type or ""), {}) or {}).get("in_person_only")
+            )
+            if explicit_in_person_req or (is_in_person_store and not in_phone_stock and (not phone_list or in_person_match)):
                 raise HTTPException(
                     status_code=403,
                     detail="Sanctuary spirit merchants trade strictly in person and never accept remote Smartphone E-Shop orders.",
@@ -1220,8 +1442,14 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
             stock_field = "stock"
         stock = list(merchant.get(stock_field) or [])
         target_idx = next(
-            (idx for idx, s in enumerate(stock) if s.get("name", "").lower() == req.item_name.strip().lower() and s.get("quantity", 1) > 0),
-            None
+            (
+                idx
+                for idx, s in enumerate(stock)
+                if isinstance(s, dict)
+                and str(s.get("name") or "").strip().lower() == target_name_low
+                and _stock_item_qty(s) > 0
+            ),
+            None,
         )
         if target_idx is None:
             raise HTTPException(status_code=404, detail=f"Item '{req.item_name}' is not in stock")
@@ -1235,13 +1463,19 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
                 status_code=403,
                 detail="Sanctuary spirit relics can only be acquired in person within the veiled enclave.",
             )
-        discount_pct = _compute_charisma_discount(char, merchant)
+        if req.is_phone_shop:
+            if buy_store_mode == STORE_MODE_SCHOOL_MART:
+                discount_pct = min(40, SCHOOL_MART_STUDENT_DISCOUNT_PCT + _compute_charisma_discount(char, {"discount_pct": 0}))
+            else:
+                discount_pct = 0
+        else:
+            discount_pct = _compute_charisma_discount(char, merchant)
         shop_ctx = await adb(
             get_anomalous_shop_faction_context,
             session,
             session.get("current_location", ""),
             bool(req.is_phone_shop),
-            req.user_id,
+            canonical_id,
         )
         if not shop_ctx.get("allowed", True):
             raise HTTPException(status_code=403, detail=shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
@@ -1261,11 +1495,12 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
 
         slot_cost = int(stock_item.get("slot_cost", 1) or 1)
 
-        # Embed anti-exploit resale metadata (universal across anomalous shops + all discount/grant shops)
+        # Embed anti-exploit resale metadata (universal across anomalous shops + SchoolMart + all discount/grant shops)
         item_eff = str(stock_item.get("effect") or stock_item.get("description", ""))
         is_anom_purchase = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
         if (
             is_anom_purchase
+            or buy_store_mode == STORE_MODE_SCHOOL_MART
             or shop_ctx.get("is_monastic_free_shop")
             or shop_ctx.get("is_public_discounted_shop")
             or shop_ctx.get("is_event_discounted_shop")
@@ -1278,31 +1513,8 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
                 public_requisition_item=bool(shop_ctx.get("is_public_discounted_shop")),
             )
 
-        try:
-            item_id = await adb(
-                db.atomic_merchant_purchase,
-                req.user_id,
-                stock_item["name"],
-                stock_item.get("item_type", "Item"),
-                item_eff,
-                slot_cost,
-                price,
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        if shop_ctx.get("is_monastic_free_shop"):
-            from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
-            a_state = await adb(get_anomalous_faction_state, req.session_id, req.user_id)
-            new_claims = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0) + 1
-            a_state["shrine_free_claims_today"] = new_claims
-            a_state["shrine_free_claimed_today"] = new_claims
-            await adb(save_anomalous_faction_state, req.session_id, a_state, req.user_id)
-
-        # Decrement stock quantity
-        stock_item["quantity"] = max(0, int(stock_item.get("quantity", 1)) - 1)
+        # Decrement stock quantity on a working copy before atomic commit
+        stock_item["quantity"] = max(0, _stock_item_qty(stock_item) - 1)
         if stock_item["quantity"] <= 0:
             stock.pop(target_idx)
         else:
@@ -1312,22 +1524,61 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
         # Sync with active catalogue if present
         active_key = merchant.get("active_store_key")
         catalogues = merchant.get("catalogues")
-        if isinstance(catalogues, dict) and not req.is_phone_shop:
-            if active_key and active_key in catalogues and isinstance(catalogues[active_key], dict):
-                catalogues[active_key]["stock"] = stock
+        if isinstance(catalogues, dict):
+            if req.is_phone_shop:
+                p_cat_key = "phone_school_mart" if buy_store_mode == STORE_MODE_SCHOOL_MART else "phone_shop"
+                if isinstance(catalogues.get(p_cat_key), dict):
+                    catalogues[p_cat_key]["stock"] = stock
             else:
-                for cat in catalogues.values():
-                    if isinstance(cat, dict) and "stock" in cat:
-                        cat["stock"] = stock
+                eff_cat_key = active_key or get_store_key(
+                    merchant,
+                    is_phone_shop=False,
+                    merchant_type=str(merchant.get("merchant_type") or ""),
+                    location=str(session.get("current_location") or ""),
+                )
+                if eff_cat_key and isinstance(catalogues.get(eff_cat_key), dict):
+                    catalogues[eff_cat_key]["stock"] = stock
 
-        if stock_item.get("is_vault_requisition"):
-            claimed_reqs = mark_vault_requisition_claimed(session, stock_item.get("name", ""))
-            if claimed_reqs is not None:
-                await adb(db.update_session, req.session_id, extra={"anomalous_vault_requisitions": claimed_reqs})
+        claimed_reqs = (
+            mark_vault_requisition_claimed(session, stock_item.get("name", ""))
+            if stock_item.get("is_vault_requisition")
+            else None
+        )
 
-        await adb(db.save_merchant_state, req.session_id, merchant)
-        quest_updates = await adb(game_engine.evaluate_quest_state_predicates, req.session_id, req.user_id)
-        updated_char = await adb(db.get_character, req.user_id)
+        target_char_id = int(char["id"])
+
+        def _commit_merchant_purchase():
+            with db.UnitOfWork():
+                bought_id = db.atomic_merchant_purchase(
+                    req.user_id,
+                    stock_item["name"],
+                    stock_item.get("item_type", "Item"),
+                    item_eff,
+                    slot_cost,
+                    price,
+                    character_id=target_char_id,
+                )
+                if shop_ctx.get("is_monastic_free_shop"):
+                    from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
+                    a_state = get_anomalous_faction_state(req.session_id, req.user_id)
+                    new_claims = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0) + 1
+                    a_state["shrine_free_claims_today"] = new_claims
+                    a_state["shrine_free_claimed_today"] = new_claims
+                    save_anomalous_faction_state(req.session_id, a_state, req.user_id)
+                if claimed_reqs is not None:
+                    db.update_session(req.session_id, extra={"anomalous_vault_requisitions": claimed_reqs})
+                db.save_merchant_state(req.session_id, merchant)
+                q_upd = game_engine.evaluate_quest_state_predicates(req.session_id, req.user_id)
+                return bought_id, q_upd
+
+        try:
+            item_id, quest_updates = await adb(_commit_merchant_purchase)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        updated_char = await _get_session_character(req.user_id, req.session_id)
 
         # Re-annotate stock with updated faction pricing / remaining daily Shrine grants
         post_shop_ctx = await adb(
@@ -1355,19 +1606,25 @@ async def merchant_sell(req: MerchantSellRequest, request: Request = None):
     """Sells an unequipped item from the player's inventory to the merchant."""
     if int(req.user_id) <= 0 or int(req.session_id) <= 0:
         raise HTTPException(status_code=400, detail="Invalid user_id or session_id.")
-    await verify_session_participant(request, req.session_id, req.user_id)
-    async with distributed_adventure_lock(req.user_id, req.session_id):
+    _, canonical_id = await verify_session_participant(request, req.session_id, req.user_id)
+    async with distributed_adventure_lock(canonical_id, req.session_id):
         session = await adb(db.get_session, req.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         await _ensure_merchant_session_member(req.session_id, req.user_id, session)
 
-        char = await adb(db.get_character, req.user_id)
+        char = await _get_session_character(req.user_id, req.session_id)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found")
 
         merchant = dict(session.get("merchant") or {})
-        is_phone = bool(req.is_phone_shop or merchant.get("is_phone_shop"))
+        is_phone = bool(req.is_phone_shop)
+        if is_phone:
+            await ensure_realm_comms_available(req.session_id, session=session)
+            raise HTTPException(
+                status_code=400,
+                detail="Selling items is only available in person at physical merchant stalls.",
+            )
         is_qm_haggle = False
         if not is_phone:
             is_qm_haggle, updated_m = await adb(
@@ -1379,13 +1636,16 @@ async def merchant_sell(req: MerchantSellRequest, request: Request = None):
             merchant.clear()
             merchant.update(updated_m)
         if not is_phone and not is_qm_haggle:
+            sell_loc = session.get("current_location") or ""
+            sell_scen = session.get("scenario") or "fantasy"
+            val_sell_mtype = _resolve_validated_request_merchant_type(req.merchant_type, merchant, sell_loc, sell_scen)
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 req.session_id,
-                location_str=session.get("current_location") or "",
-                merchant_type=str(req.merchant_type or merchant.get("merchant_type") or ""),
+                location_str=sell_loc,
+                merchant_type=val_sell_mtype,
                 is_phone_shop=False,
-                scen_key=session.get("scenario") or "fantasy",
+                scen_key=sell_scen,
                 current_day=session.get("current_day"),
                 current_minute=session.get("current_minute"),
                 turn_number=int(session.get("turn_count") or 0),
@@ -1396,7 +1656,7 @@ async def merchant_sell(req: MerchantSellRequest, request: Request = None):
                     detail=shop_avail.get("reason_message") or "The shop is currently closed.",
                 )
 
-        items = await adb(db.get_inventory, req.user_id)
+        items = await adb(db.get_inventory, req.user_id, char=char)
         target_item = next((dict(i) for i in items if i.get("id") == req.item_id), None)
         if not target_item:
             raise HTTPException(status_code=404, detail="Item not found in inventory")
@@ -1405,11 +1665,11 @@ async def merchant_sell(req: MerchantSellRequest, request: Request = None):
         if reject_reason:
             raise HTTPException(status_code=400, detail=reject_reason)
 
-        sold = await adb(db.sell_inventory_item, req.user_id, req.item_id, sell_price)
+        sold = await adb(db.sell_inventory_item, req.user_id, req.item_id, sell_price, character_id=int(char["id"]))
         if not sold:
             raise HTTPException(status_code=400, detail="Could not remove item from inventory")
 
-        updated_char = await adb(db.get_character, req.user_id)
+        updated_char = await _get_session_character(req.user_id, req.session_id)
 
         return {
             "success": True,

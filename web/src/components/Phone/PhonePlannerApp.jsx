@@ -10,13 +10,14 @@ const PhonePlannerApp = ({
   onCancelPlannerItem,
   onOpenMessages,
   onOpenChatWithContact,
+  commsOffline = false,
   clockFormat = '12h',
   t,
 }) => {
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-neutral-950 text-neutral-100 overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 text-neutral-100 overflow-hidden">
       {/* App Subheader */}
-      <div className="px-4 py-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between shrink-0">
+      <div className="px-4 py-3 bg-neutral-900/90 border-b border-neutral-800 rounded-t-xl flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-500 to-sky-600 flex items-center justify-center text-white shadow-sm">
             <Calendar size={16} />
@@ -191,9 +192,9 @@ const PhonePlannerApp = ({
                     {canCancel && (
                       <button
                         type="button"
-                        disabled={cancellingCommitmentId === cId}
+                        disabled={commsOffline || cancellingCommitmentId === cId}
                         onClick={() => onCancelPlannerItem(cId)}
-                        className="px-2 py-1 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400"
+                        className="px-2 py-1 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400"
                       >
                         {cancellingCommitmentId === cId ? '...' : 'Cancel'}
                         <span className="sr-only"> {appt.title || npcName}</span>

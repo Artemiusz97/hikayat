@@ -214,6 +214,7 @@ async def fail_or_broadcast_error(
     detail: str,
     *,
     broadcast_error: bool = False,
+    turn_id: str | None = None,
 ) -> None:
     """Broadcast STREAM_ERROR in async WS mode or raise HTTPException in sync HTTP mode."""
     if broadcast_error:
@@ -222,6 +223,7 @@ async def fail_or_broadcast_error(
             "session_id": session_id,
             "error": detail,
             "status_code": status_code,
+            **({"turn_id": turn_id} if turn_id else {}),
         })
         return
     raise HTTPException(status_code=status_code, detail=detail)
@@ -261,6 +263,7 @@ def launch_in_flight_ws_task(
                         await manager.broadcast(session_id, {
                             "type": "TURN_CANCELLED",
                             "session_id": session_id,
+                            "turn_id": turn_id,
                             "session": fresh,
                             "sync_timestamp": time.time(),
                         })
@@ -274,6 +277,7 @@ def launch_in_flight_ws_task(
                 await manager.broadcast(session_id, {
                     "type": "STREAM_ERROR",
                     "session_id": session_id,
+                    "turn_id": turn_id,
                     "error": err_detail,
                     "status_code": http_err.status_code,
                     "session": err_sess,
@@ -292,6 +296,7 @@ def launch_in_flight_ws_task(
                 await manager.broadcast(session_id, {
                     "type": "STREAM_ERROR",
                     "session_id": session_id,
+                    "turn_id": turn_id,
                     "error": err_detail,
                     "status_code": 500,
                     "session": err_sess,

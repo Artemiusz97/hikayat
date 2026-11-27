@@ -60,7 +60,7 @@ def _remap_epistemic_proof_refs(
         raw_meta = r["metadata_json"] or "{}"
         try:
             meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             meta = {}
         if isinstance(meta, dict):
             snaps = meta.get("_turn_snapshots")
@@ -169,8 +169,8 @@ def _rewrite_snapshot_json_list_fields(
                 elif old_host is not None and item.get("character_id") in (old_host,):
                     item["character_id"] = char_id
             row_dict[col_name] = json.dumps(parsed)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            _log.warning("Snapshot JSON column %s rewrite skipped for session %s: %s", col_name, new_sid, exc)
 
 
 def _hook_restore_contact_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]) -> dict[str, Any]:
@@ -196,7 +196,7 @@ def _hook_restore_contact_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]
             if isinstance(rel_obj, dict):
                 rel_obj["household_id"] = row_dict["household_id"]
                 row_dict["relations_json"] = json.dumps(rel_obj)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
     row_dict.setdefault("household_role", "child")
     return row_dict
@@ -269,8 +269,8 @@ def _hook_rewrite_campaign_spine_session_keys(row_dict: dict[str, Any], load_ctx
             try:
                 parsed_sp = json.loads(raw_sp) if isinstance(raw_sp, str) else raw_sp
                 row_dict[sp_col] = json.dumps(_rewrite_spine_embedded_ids(parsed_sp, old_sid, new_sid))
-            except Exception:
-                pass
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                _log.warning("Campaign spine column %s rewrite skipped for session %s: %s", sp_col, new_sid, exc)
     return row_dict
 
 
@@ -397,14 +397,39 @@ def _post_sync_loaded_player_properties(load_ctx: dict[str, Any]) -> None:
             if not child_data.get("player_properties"):
                 grant_or_relocate_starter_quarters(new_sid, conn=conn)
             else:
+                from mechanics.world.locations.folklore_spirit_courts import SPIRIT_GUEST_COTTAGE_SPEC
+                cottage_by_pid = {str(v.get("property_id") or ""): v for v in SPIRIT_GUEST_COTTAGE_SPEC.values()}
                 for pr in conn.execute(
-                    "SELECT facility_node_id, is_starter FROM player_properties WHERE session_id = ?",
+                    "SELECT property_id, facility_node_id, is_starter FROM player_properties WHERE session_id = ?",
                     (new_sid,),
                 ).fetchall():
                     m_key = "starter_unlocked" if int(pr["is_starter"] or 0) == 1 else "deed_owned"
                     _set_facility_unlock_state(conn, new_sid, str(pr["facility_node_id"]), unlocked=True, marker_key=m_key)
-    except Exception:
-        pass
+                    c_spec = cottage_by_pid.get(str(pr["property_id"] or ""))
+                    if c_spec:
+                        for g_rid in (c_spec.get("room_ids") or ()):
+                            r_row = conn.execute(
+                                "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
+                                (new_sid, g_rid),
+                            ).fetchone()
+                            if r_row:
+                                try:
+                                    r_st = json.loads(r_row["state_json"] or "{}") if r_row["state_json"] else {}
+                                except (json.JSONDecodeError, TypeError, ValueError):
+                                    r_st = {}
+                                if not isinstance(r_st, dict):
+                                    r_st = {}
+                                r_st["is_hidden"] = False
+                                r_st["discovered"] = True
+                                r_st["unlocked_permanent"] = True
+                                r_st["deed_owned"] = True
+                                r_st["granted_by_standing"] = True
+                                conn.execute(
+                                    "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                                    (json.dumps(r_st), new_sid, g_rid),
+                                )
+    except (sqlite3.Error, TypeError, ValueError, KeyError) as exc:
+        _log.warning("Post-load player property sync failed for session %s: %s", new_sid, exc)
 
 
 def _post_rebuild_session_digests_fts(load_ctx: dict[str, Any]) -> None:
@@ -435,8 +460,8 @@ def _post_remap_clue_deduction_parents(load_ctx: dict[str, Any]) -> None:
                     "UPDATE session_clues SET deduction_parents_json = ? WHERE id = ?",
                     (json.dumps(remapped_parents), cl_r["id"]),
                 )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load clue deduction remap failed for clue %s: %s", cl_r["id"], exc)
 
 
 def _post_remap_commitments_conflicting_ids(load_ctx: dict[str, Any]) -> None:
@@ -460,8 +485,8 @@ def _post_remap_commitments_conflicting_ids(load_ctx: dict[str, Any]) -> None:
                         pass
                 cm_meta["conflicting_ids"] = remapped_conflicts
                 conn.execute("UPDATE commitments_ledger SET metadata_json = ? WHERE id = ?", (json.dumps(cm_meta), cm_r["id"]))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load commitment conflict remap failed for commitment %s: %s", cm_r["id"], exc)
 
 
 def _post_remap_campaign_spines_nested_ids(load_ctx: dict[str, Any]) -> None:
@@ -488,8 +513,8 @@ def _post_remap_campaign_spines_nested_ids(load_ctx: dict[str, Any]) -> None:
                 "UPDATE campaign_spines SET lieutenants_roster_json = ?, nemeses_json = ?, state_events_json = ? WHERE id = ?",
                 (json.dumps(lts), json.dumps(nems), json.dumps(sp_events), sp_r["id"]),
             )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load campaign spine remap failed for spine %s: %s", sp_r["id"], exc)
 
 
 def _post_remap_quest_dossiers_nested_ids(load_ctx: dict[str, Any]) -> None:
@@ -529,8 +554,8 @@ def _post_remap_quest_dossiers_nested_ids(load_ctx: dict[str, Any]) -> None:
                     qd_r["id"],
                 ),
             )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load quest dossier remap failed for dossier %s: %s", qd_r["id"], exc)
 
 
 def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
@@ -561,7 +586,7 @@ def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
             ):
                 try:
                     cd_item[out_col] = json.loads(cd_item.get(j_col) or "{}")
-                except Exception:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     cd_item[out_col] = {}
             mat_rel = rg.materialize_relations(new_sid, cd_item, conn=conn)
             if cd_item.get("household_id"):
@@ -641,8 +666,8 @@ def _post_inv_remap_quest_dossiers_inventory_ids(load_ctx: dict[str, Any]) -> No
                     "UPDATE quest_dossiers SET tangible_item_json = ?, state_events_json = ? WHERE id = ?",
                     (json.dumps(t_item), json.dumps(ev_list), qd_row["id"]),
                 )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load dossier inventory remap failed for dossier %s: %s", qd_row["id"], exc)
 
 
 def _post_inv_remap_epistemic_proof_refs(load_ctx: dict[str, Any]) -> None:
@@ -845,8 +870,8 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                     extra_dict["world_ending_anomaly"] = namegen.generate_world_ending_anomaly_profile(hash_val=int(session_id or 1))
                     sess_dict["extra_json"] = json.dumps(extra_dict)
                     conn.execute("UPDATE sessions SET extra_json = ? WHERE id = ?", (sess_dict["extra_json"], session_id))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Save world_ending_anomaly capture skipped for session %s: %s", session_id, exc)
 
         # Sanitize mid-combat ephemeral constructs and summons before saving snapshot
         try:
@@ -857,7 +882,7 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                 if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
             ]
             sess_dict["current_npcs_json"] = json.dumps(cleaned_npcs)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
         snapshot = {
@@ -873,23 +898,25 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
         scene_title = sess_dict.get("scene_title") or "Adventure Continues"
         narrative_snippet = (sess_dict.get("narrative") or "")[:250].strip()
         current_location = sess_dict.get("current_location") or ""
+        realm_name, show_realm_badge = _compute_save_realm_meta_from_snapshot(snapshot)
+        show_badge_int = 1 if show_realm_badge else 0
         now = time.time()
 
         if existing:
             conn.execute(
                 """UPDATE adventure_saves
                    SET slot_name = ?, scenario = ?, scene_title = ?, narrative_snippet = ?,
-                       current_location = ?, saved_at = ?, snapshot_data = ?
+                       current_location = ?, saved_at = ?, realm_name = ?, show_realm_badge = ?, snapshot_data = ?
                    WHERE id = ?""",
-                (cleaned_slot, scenario, scene_title, narrative_snippet, current_location, now, snapshot_json, existing["id"])
+                (cleaned_slot, scenario, scene_title, narrative_snippet, current_location, now, realm_name, show_badge_int, snapshot_json, existing["id"])
             )
             save_id = existing["id"]
         else:
             cur = conn.execute(
                 """INSERT INTO adventure_saves (user_id, character_id, slot_name, scenario, scene_title,
-                                               narrative_snippet, current_location, saved_at, snapshot_data)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (user_id, char_id, cleaned_slot, scenario, scene_title, narrative_snippet, current_location, now, snapshot_json)
+                                               narrative_snippet, current_location, saved_at, realm_name, show_realm_badge, snapshot_data)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, char_id, cleaned_slot, scenario, scene_title, narrative_snippet, current_location, now, realm_name, show_badge_int, snapshot_json)
             )
             save_id = cur.lastrowid
 
@@ -901,6 +928,8 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
         "scene_title": scene_title,
         "narrative_snippet": narrative_snippet,
         "current_location": current_location,
+        "realm_name": realm_name,
+        "show_realm_badge": bool(show_realm_badge),
         "saved_at": now
     }
 
@@ -938,7 +967,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         if isinstance(to, str):
             try:
                 to = json.loads(to)
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 to = [user_id]
         if not to or user_id not in to:
             to = [user_id]
@@ -958,7 +987,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     sess_data["turn_count"] = len(action_turns)
                 else:
                     sess_data["turn_count"] = 0
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 sess_data["turn_count"] = 0
         sess_data.setdefault("last_digested_turn", 0)
         sess_data["status"] = "active"
@@ -975,7 +1004,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
             ]
             sess_data["current_npcs_json"] = json.dumps(cleaned_npcs)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
         # Preserve origin session provenance for folklore codex turn-gating and strip legacy anomaly JSON keys
@@ -987,7 +1016,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         if isinstance(raw_extra, str):
             try:
                 ex_obj = json.loads(raw_extra) if raw_extra.strip() else {}
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 ex_obj = {}
         elif isinstance(raw_extra, dict):
             ex_obj = dict(raw_extra)
@@ -1031,7 +1060,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     legacy_phys_patch = dict(p_obj)
                     clean_room_meta = {k: v for k, v in p_obj.items() if k != "actors"}
                     sess_data["physical_state_json"] = json.dumps(clean_room_meta) if clean_room_meta else "{}"
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 legacy_phys_patch = None
 
         # Filter strictly to columns present in live sessions table
@@ -1166,8 +1195,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 if not _has_sanc:
                     from mechanics.world.locations.folklore_veil_lifecycle import backfill_zone_split_and_hidden_villages_v49
                     backfill_zone_split_and_hidden_villages_v49(conn, session_id=new_session_id)
-        except Exception:
-            pass
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            _log.warning("Post-load v49 folklore zone backfill skipped for session %s: %s", new_session_id, exc)
 
         # Backfill Migration 50 contact dossier discoveries on pre-v50 save slots & sync kin/companion/romance exemptions
         try:
@@ -1178,8 +1207,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 session_id=new_session_id,
                 is_legacy_migration=_is_pre_v50_save,
             )
-        except Exception:
-            pass
+        except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError) as exc:
+            _log.warning("Post-load v50 contact discovery backfill skipped for session %s: %s", new_session_id, exc)
 
         # Backfill Migration 57 anomalous locations integrity on save load
         try:
@@ -1189,8 +1218,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             )
             backfill_anomalous_locations_integrity_v57(conn, session_id=new_session_id)
             backfill_outlaw_faction_hqs_and_residences_v60(conn, session_id=new_session_id)
-        except Exception:
-            pass
+        except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError) as exc:
+            _log.warning("Post-load v57/v60 anomalous location backfill skipped for session %s: %s", new_session_id, exc)
 
         # Run registered post-load hooks (FTS5 rebuild, ID remaps, relations materialization, properties)
         ran_post_hooks: set[str] = set()
@@ -1222,7 +1251,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         if isinstance(eff_meta, dict) and eff_meta.get("linked_contract_key"):
                             eff_meta["linked_contract_key"] = linked_ckey
                             item_dict["effect"] = "[GEAR_JSON]" + json.dumps(eff_meta, separators=(",", ":"))
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError, ValueError):
                         pass
             item_dict = {
                 k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
@@ -1245,8 +1274,13 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         "UPDATE session_entity_contracts SET bound_gear_item_id = ? WHERE session_id = ? AND contract_key = ?",
                         (int(cur_inv.lastrowid), new_session_id, linked_ckey),
                     )
-                except Exception:
-                    pass
+                except sqlite3.Error as exc:
+                    _log.warning(
+                        "Post-load bound_gear_item_id link failed for session %s contract %s: %s",
+                        new_session_id,
+                        linked_ckey,
+                        exc,
+                    )
 
         # Run registered post-inventory hooks (MacGuffin inventory_id & epistemic proof_artifact_ref remaps)
         ran_post_inv_hooks: set[str] = set()
@@ -1313,39 +1347,122 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 game_engine.heal_session_quests_on_load(new_session_id)
         except Exception as exc:
             _log.warning("Post-load quest heal failed for session %s: %s", new_session_id, exc)
+        try:
+            with savepoint(conn, "sp_load_realm_wrap"):
+                from mechanics.world.locations.realms import ensure_default_realm_wrapper
+                _loaded_scen = str((sess_dict or {}).get("scenario") or (dict(row).get("scenario") if row else "") or "fantasy")
+                ensure_default_realm_wrapper(new_session_id, _loaded_scen, conn=conn)
+        except Exception as exc:
+            _log.warning("Post-load realm wrapper failed for session %s: %s", new_session_id, exc)
+        try:
+            with savepoint(conn, "sp_load_spirit_realm_v64"):
+                from mechanics.world.locations.folklore_spirit_realm_lifecycle import backfill_folklore_spirit_realm_v64
+                origin_ids = (ex_obj.get("_origin_session_ids") if isinstance(ex_obj, dict) else None) or []
+                naming_seed_sid = int(origin_ids[0]) if origin_ids else (int(old_session_id) if old_session_id else None)
+                backfill_folklore_spirit_realm_v64(
+                    conn,
+                    session_id=new_session_id,
+                    naming_seed_session_id=naming_seed_sid,
+                )
+        except Exception as exc:
+            _log.warning("Post-load Spirit Realm v64 backfill failed for session %s: %s", new_session_id, exc)
 
     return db.get_session(new_session_id)
 
+
+def _compute_save_realm_meta_from_snapshot(snap: Any) -> tuple[str, bool]:
+    """Computes (realm_name, show_realm_badge) from an adventure save snapshot dict."""
+    realm_name = ""
+    show_badge = False
+    if not isinstance(snap, dict):
+        return realm_name, show_badge
+    try:
+        child_tables = snap.get("child_tables") or {}
+        w_nodes = child_tables.get("world_nodes") or []
+        sess_meta = snap.get("session") or {}
+        curr_nid = str(sess_meta.get("current_node_id") or "").strip()
+        if isinstance(w_nodes, list) and w_nodes:
+            from mechanics.world.locations.realms import get_node_realm_id_in_memory, get_realm_rules
+            n_map = {str(n["node_id"]): n for n in w_nodes if isinstance(n, dict) and n.get("node_id")}
+            vis_realms = [
+                n for n in n_map.values()
+                if str(n.get("node_type") or "").upper() == "REALM"
+                and not get_realm_rules(n).get("is_hidden")
+            ]
+            curr_rid = get_node_realm_id_in_memory(curr_nid, n_map) if curr_nid else ""
+            curr_r = n_map.get(curr_rid)
+            if curr_r:
+                realm_name = str(curr_r.get("name") or "")
+                r_rules = get_realm_rules(curr_r)
+                show_badge = bool(len(vis_realms) >= 2 or not r_rules.get("is_primary_realm", True))
+            elif len(vis_realms) >= 2:
+                show_badge = True
+                prim = next((r for r in vis_realms if get_realm_rules(r).get("is_primary_realm")), vis_realms[0])
+                realm_name = str(prim.get("name") or "")
+    except (NameError, UnboundLocalError, ImportError):
+        raise
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        _log.warning("Save realm meta extraction failed: %s", exc)
+    return realm_name, show_badge
+
+
+def _extract_save_realm_meta(row_dict: dict[str, Any], conn: Any = None) -> dict[str, Any]:
+    """Populates realm_name & show_realm_badge from columns, falling back to snapshot_data only for legacy NULL rows."""
+    raw_snap = row_dict.pop("snapshot_data", None)
+    if row_dict.get("realm_name") is None:
+        if raw_snap is None and conn is not None and row_dict.get("id"):
+            s_row = conn.execute(
+                "SELECT snapshot_data FROM adventure_saves WHERE id = ?",
+                (row_dict["id"],),
+            ).fetchone()
+            raw_snap = s_row["snapshot_data"] if s_row else None
+        if raw_snap:
+            try:
+                snap = json.loads(raw_snap) if isinstance(raw_snap, str) else raw_snap
+                r_name, show_b = _compute_save_realm_meta_from_snapshot(snap)
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                _log.warning("Legacy save snapshot_data parse failed for save %s: %s", row_dict.get("id"), exc)
+                r_name, show_b = "", False
+        else:
+            r_name, show_b = "", False
+        row_dict["realm_name"] = r_name
+        row_dict["show_realm_badge"] = bool(show_b)
+    else:
+        row_dict["realm_name"] = str(row_dict.get("realm_name") or "")
+        row_dict["show_realm_badge"] = bool(row_dict.get("show_realm_badge"))
+    return row_dict
+
+
 def list_adventure_saves(user_id: int) -> list[dict]:
-    """Returns metadata for all save slots owned by the user's active character."""
+    """Returns metadata for all save slots owned by the user's active character without loading snapshot blobs."""
     char = db.get_character(user_id)
     if not char:
         return []
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT id, user_id, character_id, slot_name, scenario, scene_title,
-                      narrative_snippet, current_location, saved_at
+                      narrative_snippet, current_location, saved_at, realm_name, show_realm_badge
                FROM adventure_saves
                WHERE character_id = ?
                ORDER BY saved_at DESC""",
             (char["id"],)
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_extract_save_realm_meta(dict(r), conn=conn) for r in rows]
 
 def get_adventure_save_metadata(user_id: int, slot_name: str) -> dict | None:
-    """Returns metadata for a specific save slot owned by the user's active character."""
+    """Returns metadata for a specific save slot owned by the user's active character without loading snapshot blobs."""
     char = db.get_character(user_id)
     if not char:
         return None
     with get_conn() as conn:
         row = conn.execute(
             """SELECT id, user_id, character_id, slot_name, scenario, scene_title,
-                      narrative_snippet, current_location, saved_at
+                      narrative_snippet, current_location, saved_at, realm_name, show_realm_badge
                FROM adventure_saves
                WHERE character_id = ? AND LOWER(slot_name) = LOWER(?)""",
             (char["id"], (slot_name or "").strip())
         ).fetchone()
-        return dict(row) if row else None
+        return _extract_save_realm_meta(dict(row), conn=conn) if row else None
 
 def delete_adventure_save(user_id: int, slot_name: str) -> bool:
     """Permanently deletes a save slot for the user's active character."""

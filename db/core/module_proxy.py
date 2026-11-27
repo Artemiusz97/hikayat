@@ -91,3 +91,9 @@ def callable_accepts_kwarg(fn: Any, kwarg: str) -> bool:
         ):
             return True
     return False
+
+
+def call_with_supported_kwargs(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Invoke `fn(*args, **supported_kwargs)` dropping keyword args omitted by legacy test mocks."""
+    supported = {k: v for k, v in kwargs.items() if callable_accepts_kwarg(fn, k)}
+    return fn(*args, **supported)

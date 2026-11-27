@@ -188,10 +188,23 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
         scen_key = session.get("scenario", "fantasy")
         cur_loc = session.get("current_location", "")
         char_name = char.get("name", "")
-        from mechanics.world.locations import get_zone_summary_tree
-        zones = get_zone_summary_tree(session_id, scen_key, current_loc=cur_loc, char_name=char_name)
-        embed = build_world_map_embed(session_id, scen_key, current_loc=cur_loc, char_name=char_name, zones=zones)
-        view = ZoneSelectView(self, session_id, scen_key, current_loc=cur_loc, char_name=char_name, sync=session.get("mode") == "sync", zones_summary=zones, user_id=interaction.user.id)
+        from .views.locations import _load_realm_summary, _load_zone_select_summary
+        zones, realm_summary = await asyncio.gather(
+            adb(_load_zone_select_summary, session_id, scen_key, cur_loc, char_name),
+            adb(_load_realm_summary, session_id),
+        )
+        embed = await adb(build_world_map_embed, session_id, scen_key, cur_loc, char_name, zones)
+        view = ZoneSelectView(
+            self,
+            session_id,
+            scen_key,
+            current_loc=cur_loc,
+            char_name=char_name,
+            sync=session.get("mode") == "sync",
+            zones_summary=zones,
+            user_id=interaction.user.id,
+            realm_summary=realm_summary,
+        )
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="hub", description="Access your communication device and network hub (Smartphone, Cyberdeck, Comms Pad)")

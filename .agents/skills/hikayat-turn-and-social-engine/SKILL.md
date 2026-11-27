@@ -5,7 +5,7 @@ description: "Use this skill whenever modifying, extending, or debugging Hikayat
 
 # Hikayat Turn Pipeline & Normalized Social Engine
 
-Use this runbook when working on `services/turn_service.py`, `game_engine/`, `models/llm_schemas.py`, `mechanics/social/`, `mechanics/system/`, `mechanics/stealth/`, or `db/`.
+Use this runbook when working on `services/turn_service.py`, `game_engine/`, `models/llm_schemas.py`, `mechanics/social/`, `mechanics/system/`, or `mechanics/stealth/` (for persistence schemas, migrations, saves, or rollbacks under `db/`, use `hikayat-db-lifecycle-checklist`).
 
 ---
 
@@ -37,8 +37,8 @@ Use this runbook when working on `services/turn_service.py`, `game_engine/`, `mo
      - Dijkstra/BFS graph routing and gate validation in `mechanics/world/locations/` (`movement.py`, `pathfinding.py`, `access_gate.py`, `hierarchy.py`).
      - Stealth state updates (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`) in `mechanics/stealth/`.
    - **Phase 5 — Bounded Narration & Post-Sanitizers**:
-     - Dual-model routing in `llm_client.py` (`LLM_MODEL` for prose, `LLM_UTILITY_MODEL` for background tasks, `NSFW_LLM_*` isolation for mature scenarios, 3,500-token reasoning headroom).
-     - Post-generation passes: `ensure_enemy_encounter_narrative` (`game_engine/turn/core.py`), `pronoun_resolver.py`, `sanitize_comparative_cliches`, and `choices_cleaner.py`.
+     - Dual-model routing in `llm_client/` (`LLM_MODEL` for prose, `LLM_UTILITY_MODEL` for background tasks, `NSFW_LLM_*` isolation for mature scenarios, 3,500-token reasoning headroom).
+     - Post-generation passes: `ensure_enemy_encounter_narrative` (`game_engine/turn/core.py`), `pronoun_resolver.py`, `sanitize_comparative_cliches`, and `choices_cleaner/`.
 
 ---
 
@@ -65,6 +65,15 @@ Any new or altered session-scoped table must be wired into save/load remapping, 
 
 ## 3. Verification Checklist
 ```bash
-pytest tests/test_five_normalized_models_cutover.py tests/test_codebase_contracts.py -q
+python scripts/run_tests.py agent tests/test_five_normalized_models_cutover.py tests/test_codebase_contracts.py
 python scripts/run_tests.py impact
 ```
+
+---
+
+## 4. Common Mistakes & Red Flags
+- **Splitting rollback transactions**: Splitting `_rollback_turn_failure` (`services/turn/resolve.py`) across separate `db.UnitOfWork()` closures or calling helpers that open independent connections / commit mid-rollback leaves partial state behind on failure.
+- **Mutating DB state inside read projections**: Never perform silent repair writes inside pure read endpoints such as `GET /api/adventure/active-session/{user_id}`; keep projections read-only.
+- **Coercing stripped `approach` to `""`**: Preserving `None` (not `""`) when stripping non-combat `approach` in `services/turn/prepare.py` is required for downstream narrative routing.
+- **Omitting the `db.get_equipment()` fallback**: When callers pass an empty `inventory=[]` with a valid `user_id` to `game_engine/context.py` (`_character_sheet_text`), still hydrate equipment via `db.get_equipment()`.
+- **Resurrecting departed NPCs from prose**: Always trust `CastPlan` (`present_npcs`, `dialogue_partners`, `departing_npcs`); never re-add departed characters by scraping quoted dialogue.

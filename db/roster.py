@@ -11,7 +11,7 @@ adaptation is delegated to `db.roster_adapters`.
 import json
 import sqlite3
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Sequence
 
 import db
 from .core import UnitOfWork, _conn_ctx, _opt_int, ensure_table_group_once
@@ -466,6 +466,27 @@ def hydrate_world_roster_visuals(
 
     def _run(c: sqlite3.Connection) -> int:
         _ensure_world_roster_table(c)
+        all_rows = c.execute(
+            "SELECT * FROM world_roster WHERE session_id = ? ORDER BY id ASC",
+            (sid,),
+        ).fetchall()
+        if not all_rows:
+            return 0
+        by_nid: dict[str, sqlite3.Row] = {}
+        by_name: dict[str, sqlite3.Row] = {}
+        by_slug: dict[str, sqlite3.Row] = {}
+        for r in all_rows:
+            nid_low = str(r["npc_id"] or "").strip().lower()
+            nm_raw = str(r["name"] or "").strip()
+            nm_low = nm_raw.lower()
+            nm_slug = slugify_npc_id(nm_raw)
+            if nid_low and nid_low not in by_nid:
+                by_nid[nid_low] = r
+            if nm_low and nm_low not in by_name:
+                by_name[nm_low] = r
+            if nm_slug and nm_slug not in by_slug:
+                by_slug[nm_slug] = r
+
         updated = 0
         for item in updates:
             if not isinstance(item, dict):
@@ -473,7 +494,9 @@ def hydrate_world_roster_visuals(
             key = str(item.get("npc_id") or item.get("name") or "").strip()
             if not key:
                 continue
-            row = _find_roster_row(c, sid, key)
+            raw_needle = key.lower()
+            slug_needle = slugify_npc_id(key)
+            row = by_nid.get(raw_needle) or (by_nid.get(slug_needle) if slug_needle else None) or by_name.get(raw_needle) or (by_slug.get(slug_needle) if slug_needle else None)
             if row is None:
                 continue
             existing = _hydrate_roster_row(row)
@@ -749,6 +772,75 @@ def clear_roster_npc_merchant_archetypes(
         return _run(c)
 
 
+_ALLOWED_HEAL_ROSTER_COLS: frozenset[str] = frozenset({
+    "role",
+    "workplace_node_id",
+    "home_node_id",
+    "hangout_node_id",
+    "shift_profile",
+    "staff_status",
+})
+
+
+def heal_world_roster_npc_employment(
+    session_id: int,
+    npc_id: str,
+    *,
+    updates: Mapping[str, Any] | None = None,
+    basic_info_updates: Mapping[str, Any] | None = None,
+    remove_basic_keys: Sequence[str] = (),
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Safely updates employment/demographic fields on a `world_roster` NPC row and linked contacts."""
+    raw_nid = str(npc_id or "").strip()
+    if not session_id or not raw_nid:
+        return False
+    sid, now = int(session_id), time.time()
+
+    def _run(c: sqlite3.Connection) -> bool:
+        _ensure_world_roster_table(c)
+        row = _find_roster_row(c, sid, raw_nid)
+        if row is None:
+            return False
+        basic_info = parse_json_dict(row["basic_info_json"])
+        for rk in (remove_basic_keys or ()):
+            basic_info.pop(str(rk), None)
+        if isinstance(basic_info_updates, Mapping):
+            for bk, bv in basic_info_updates.items():
+                basic_info[str(bk)] = bv
+
+        col_updates: dict[str, Any] = {
+            "basic_info_json": json.dumps(basic_info),
+            "updated_at": now,
+        }
+        if isinstance(updates, Mapping):
+            for ck, cv in updates.items():
+                if ck in _ALLOWED_HEAL_ROSTER_COLS:
+                    col_updates[ck] = str(cv or "").strip()
+
+        _update_roster_columns(c, int(row["id"]), col_updates)
+
+        def _sync_contact(c_info: dict[str, Any]) -> None:
+            for rk in (remove_basic_keys or ()):
+                c_info.pop(str(rk), None)
+            if isinstance(basic_info_updates, Mapping):
+                for bk, bv in basic_info_updates.items():
+                    c_info[str(bk)] = bv
+
+        _update_matching_contacts_basic_info(
+            c,
+            sid,
+            str(row["npc_id"] or raw_nid),
+            str(row["name"] or ""),
+            _sync_contact,
+            now,
+        )
+        return True
+
+    with _conn_ctx(conn) as c:
+        return _run(c)
+
+
 def promote_world_roster_to_contact(
     session_id: int,
     character_id: int,
@@ -757,6 +849,8 @@ def promote_world_roster_to_contact(
     has_contact_info: bool = False,
     turn_number: int = 1,
     narrative_text: str = "",
+    *,
+    scenario: str | None = None,
 ) -> dict[str, Any] | None:
     """Promotes a `world_roster` (or legacy adapter) NPC into `contacts` while snapshotting pre-promotion state."""
     if not session_id or not str(npc_key_or_name or "").strip():
@@ -812,6 +906,7 @@ def promote_world_roster_to_contact(
             basic_info=b_info, delta_score=delta_score, new_traits=list(cur.get("traits") or []),
             race=str(cur.get("race") or ""), gender=str(cur.get("gender") or ""),
             appearance=dict(cur.get("appearance") or {}) or None, narrative_text=narrative_text or "",
+            scenario=scenario,
         )
         if not contact_res:
             return None
@@ -1080,6 +1175,7 @@ def batch_commit_opening_npcs(
     party_set = {str(p).strip().lower() for p in (open_party_names or set()) if p}
 
     def _run(c: sqlite3.Connection) -> int:
+        preloaded_sess = db.get_session(sid)
         party_npc_rows = get_session_party_npcs(sid) or []
         for p in party_npc_rows:
             if isinstance(p, dict) and p.get("name"):
@@ -1116,7 +1212,6 @@ def batch_commit_opening_npcs(
                 "origin": (existing_wr.get("origin") if existing_wr else None) or (npc.get("origin") if isinstance(npc, dict) and npc.get("origin") else "venue_seed"),
                 "tier_status": (existing_wr.get("tier_status") if existing_wr else "acquaintance"),
                 "met_in_person": True,
-                "discovered_turn": 0,
                 "basic_info": b_info,
             }
             upsert_world_roster_npc(sid, roster_payload, turn_number=0, conn=c)
@@ -1156,6 +1251,8 @@ def batch_commit_opening_npcs(
                 description=b_info.get("description", ""),
                 scenario=scenario_key,
                 session_id=sid,
+                preloaded_session=preloaded_sess,
+                skip_session_lookup=preloaded_sess is None,
             )
             if eligible:
                 qualifies, promo_reason = should_promote_roster_npc_to_contact(
@@ -1176,14 +1273,17 @@ def batch_commit_opening_npcs(
                         has_contact_info=bool(is_family or in_party or b_info.get("exchanged_contact") or b_info.get("added_via_peerpulse")),
                         turn_number=0,
                         narrative_text=narrative,
+                        scenario=scenario_key,
                     )
             committed += 1
         return committed
 
     if conn is not None:
-        from .core.connection import _resolve_db_path, _uow_conn_var, _uow_db_path_var
+        from .core.connection import _resolve_db_path, _uow_conn_var, _uow_db_path_var, is_in_readonly_uow
 
-        if _uow_conn_var.get() is None:
+        if is_in_readonly_uow():
+            raise RuntimeError("Cannot call batch_commit_opening_npcs inside ReadUnitOfWork")
+        if _uow_conn_var.get() is not conn:
             c_tok = _uow_conn_var.set(conn)
             p_tok = _uow_db_path_var.set(_resolve_db_path())
             try:

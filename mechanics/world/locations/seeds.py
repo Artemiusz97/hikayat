@@ -3,7 +3,7 @@ from .constants import *
 import json
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Mapping, Tuple
 import db
 
 
@@ -26,32 +26,156 @@ def slugify_location(text: str) -> str:
 
 _slugify = slugify_location
 
+def _filter_seed_subs_for_nsfw(subs: list[dict], allow_nsfw: bool) -> list[dict]:
+    if not subs:
+        return []
+    if allow_nsfw:
+        return [dict(s) for s in subs]
+    return [dict(s) for s in subs if not s.get("nsfw_only")]
+
+
+def _filter_seed_primaries_for_nsfw(primaries: list[dict], allow_nsfw: bool) -> list[dict]:
+    if not primaries:
+        return []
+    out: list[dict] = []
+    for p in primaries:
+        if not allow_nsfw and p.get("nsfw_only"):
+            continue
+        p_copy = dict(p)
+        p_copy["sub_locations"] = _filter_seed_subs_for_nsfw(p.get("sub_locations") or [], allow_nsfw)
+        out.append(p_copy)
+    return out
+
+
 def _filter_seed_zones_for_nsfw(zones: list[dict], allow_nsfw: bool) -> list[dict]:
     """Filters out `nsfw_only: True` primary facilities and sub-locations when `allow_nsfw` is False."""
-    if allow_nsfw or not zones:
-        return [dict(z) for z in zones] if zones else []
+    if not zones:
+        return []
     filtered_zones: list[dict] = []
     for z in zones:
-        if z.get("nsfw_only"):
+        if not allow_nsfw and z.get("nsfw_only"):
             continue
         z_copy = dict(z)
-        new_primaries: list[dict] = []
-        for p in z.get("primary_locations") or []:
-            if p.get("nsfw_only"):
-                continue
-            p_copy = dict(p)
-            p_copy["sub_locations"] = [
-                dict(s) for s in (p.get("sub_locations") or [])
-                if not s.get("nsfw_only")
-            ]
-            new_primaries.append(p_copy)
-        z_copy["primary_locations"] = new_primaries
+        z_copy["primary_locations"] = _filter_seed_primaries_for_nsfw(z.get("primary_locations") or [], allow_nsfw)
         filtered_zones.append(z_copy)
     return filtered_zones
 
 
+def _default_primary_realm_meta_for_seed(base_key: str) -> tuple[str, str]:
+    bk = str(base_key or "world").strip().lower()
+    if "anomalous" in bk or "urban" in bk:
+        return (f"realm_{slugify_location(bk)}_city", "Metropolitan District")
+    if "sci_fi" in bk or "space" in bk:
+        return ("realm_scifi_station", "{session_station}")
+    if "high_school" in bk or "slice_of_life" in bk:
+        return (f"realm_{slugify_location(bk)}_primary", "Local World")
+    return (f"realm_{slugify_location(bk)}_primary", "Mortal World")
+
+
+def _normalize_scenario_realms_payload(raw_scen: Mapping[str, Any], base_key: str, allow_nsfw: bool) -> dict:
+    """Normalizes both legacy 'zones' and modern 'realms' scenario payloads into a unified dict."""
+    out = dict(raw_scen)
+    raw_realms = out.get("realms")
+    if isinstance(raw_realms, list) and raw_realms:
+        norm_realms: list[dict] = []
+        primary_zones: list[dict] = []
+        secondary_zones: list[dict] = []
+        for r in raw_realms:
+            if not isinstance(r, Mapping):
+                continue
+            if not allow_nsfw and r.get("nsfw_only"):
+                continue
+            r_copy = dict(r)
+            # Rule 3 enforcement at seed normalization: REALM never carries atmosphere/theme/features/sensory
+            for atm_k in ("theme", "features", "sensory", "atmosphere"):
+                r_copy.pop(atm_k, None)
+            if r_copy.get("zones"):
+                r_copy["zones"] = _filter_seed_zones_for_nsfw(r_copy.get("zones") or [], allow_nsfw)
+            if r_copy.get("primary_locations"):
+                r_copy["primary_locations"] = _filter_seed_primaries_for_nsfw(r_copy.get("primary_locations") or [], allow_nsfw)
+            if r_copy.get("sub_locations"):
+                r_copy["sub_locations"] = _filter_seed_subs_for_nsfw(r_copy.get("sub_locations") or [], allow_nsfw)
+            norm_realms.append(r_copy)
+            target_bucket = primary_zones if r_copy.get("is_primary_realm") else secondary_zones
+            for z in (r_copy.get("zones") or []):
+                target_bucket.append(z)
+        out["realms"] = norm_realms
+        out["zones"] = primary_zones
+        out["realm_portals"] = [dict(p) for p in (out.get("realm_portals") or []) if isinstance(p, Mapping)]
+        out["dynamic_realm_templates"] = [dict(t) for t in (out.get("dynamic_realm_templates") or []) if isinstance(t, Mapping)]
+        return out
+
+    filtered_zones = _filter_seed_zones_for_nsfw(out.get("zones") or [], allow_nsfw)
+    r_id, r_name = _default_primary_realm_meta_for_seed(base_key)
+    out["zones"] = filtered_zones
+    out["realms"] = [{
+        "id": r_id,
+        "name": r_name,
+        "realm_kind": "world",
+        "is_primary_realm": True,
+        "is_hidden": False,
+        "comms_isolated": False,
+        "npc_spillover": False,
+        "time_scale": 1.0,
+        "has_local_safe_hub": True,
+        "exit_mode": "open",
+        "zones": filtered_zones,
+    }]
+    out["realm_portals"] = [dict(p) for p in (out.get("realm_portals") or []) if isinstance(p, Mapping)]
+    out["dynamic_realm_templates"] = [dict(t) for t in (out.get("dynamic_realm_templates") or []) if isinstance(t, Mapping)]
+    return out
+
+
+def _merge_realm_lists_by_id(realm_lists: list[list[dict]]) -> list[dict]:
+    """Merges multi-tag scenario realm lists cleanly by realm id."""
+    merged_by_id: dict[str, dict] = {}
+    ordered_ids: list[str] = []
+    has_primary = False
+    for r_list in realm_lists:
+        for r in r_list:
+            rid = str(r.get("id") or "")
+            if not rid:
+                continue
+            if rid not in merged_by_id:
+                rc = dict(r)
+                if rc.get("is_primary_realm"):
+                    if has_primary:
+                        rc["is_primary_realm"] = False
+                    else:
+                        has_primary = True
+                merged_by_id[rid] = rc
+                ordered_ids.append(rid)
+                continue
+            existing = merged_by_id[rid]
+            if r.get("zones"):
+                ex_z = list(existing.get("zones") or [])
+                ex_z_ids = {str(z.get("id") or "") for z in ex_z}
+                for z in r["zones"]:
+                    if str(z.get("id") or "") not in ex_z_ids:
+                        ex_z.append(dict(z))
+                        ex_z_ids.add(str(z.get("id") or ""))
+                existing["zones"] = ex_z
+            if r.get("primary_locations"):
+                ex_p = list(existing.get("primary_locations") or [])
+                ex_p_ids = {str(p.get("id") or "") for p in ex_p}
+                for p in r["primary_locations"]:
+                    if str(p.get("id") or "") not in ex_p_ids:
+                        ex_p.append(dict(p))
+                        ex_p_ids.add(str(p.get("id") or ""))
+                existing["primary_locations"] = ex_p
+            if r.get("sub_locations"):
+                ex_s = list(existing.get("sub_locations") or [])
+                ex_s_ids = {str(s.get("id") or "") for s in ex_s}
+                for s in r["sub_locations"]:
+                    if str(s.get("id") or "") not in ex_s_ids:
+                        ex_s.append(dict(s))
+                        ex_s_ids.add(str(s.get("id") or ""))
+                existing["sub_locations"] = ex_s
+    return [merged_by_id[rid] for rid in ordered_ids]
+
+
 def get_scenario_seed_data(scenario_key: str) -> dict:
-    """Helper to get seed data for scenario or combine zones across all active tags for multi-genre custom scenarios."""
+    """Helper to get seed data for scenario or combine realms/zones across all active tags for multi-genre custom scenarios."""
     data = _load_seeds()
     allow_nsfw = False
     try:
@@ -62,38 +186,75 @@ def get_scenario_seed_data(scenario_key: str) -> dict:
 
     if not scenario_key:
         raw = data.get("fantasy") or data.get("high_school_drama") or {}
-        return {"zones": _filter_seed_zones_for_nsfw(raw.get("zones") or [], allow_nsfw)}
-    scen_data = data.get(scenario_key) or data.get(TAG_TO_LOCATION_SEED_KEY.get(scenario_key, ""))
+        return _normalize_scenario_realms_payload(raw, "fantasy", allow_nsfw)
+
+    resolved_key = scenario_key if scenario_key in data else TAG_TO_LOCATION_SEED_KEY.get(scenario_key, "")
+    scen_data = data.get(resolved_key) if resolved_key else None
     if not scen_data:
         try:
             from scenario_data import get_scenario
             scen = get_scenario(scenario_key)
             base = scen.get("base_scenario")
             if base and base in data:
+                resolved_key = base
                 scen_data = data.get(base)
             elif base and TAG_TO_LOCATION_SEED_KEY.get(base) in data:
-                scen_data = data.get(TAG_TO_LOCATION_SEED_KEY[base])
+                resolved_key = TAG_TO_LOCATION_SEED_KEY[base]
+                scen_data = data.get(resolved_key)
             if not scen_data:
                 tags = scen.get("tags") or []
-                combined_zones = []
+                tag_realms: list[list[dict]] = []
+                tag_portals: list[dict] = []
+                tag_templates: list[dict] = []
+                seen_portals: set[tuple[str, str, str]] = set()
+                seen_tmpls: set[str] = set()
                 for tag in tags:
                     k = tag if tag in data else TAG_TO_LOCATION_SEED_KEY.get(tag, "")
-                    if k in data and "zones" in data[k]:
-                        combined_zones.extend(data[k]["zones"])
-                if combined_zones:
-                    scen_data = {"zones": combined_zones}
+                    if k in data:
+                        norm_tag = _normalize_scenario_realms_payload(data[k], k, allow_nsfw)
+                        tag_realms.append(norm_tag["realms"])
+                        for p in norm_tag.get("realm_portals") or []:
+                            pk = (str(p.get("from_node_id") or ""), str(p.get("to_node_id") or ""), str(p.get("edge_type") or ""))
+                            if pk not in seen_portals:
+                                seen_portals.add(pk)
+                                tag_portals.append(p)
+                        for tmpl in norm_tag.get("dynamic_realm_templates") or []:
+                            tk = str(tmpl.get("template_id") or tmpl.get("id") or "")
+                            if tk and tk not in seen_tmpls:
+                                seen_tmpls.add(tk)
+                                tag_templates.append(tmpl)
+                if tag_realms:
+                    merged_realms = _merge_realm_lists_by_id(tag_realms)
+                    merged_zones = [
+                        z for r in merged_realms for z in (r.get("zones") or [])
+                    ]
+                    scen_data = {
+                        "realms": merged_realms,
+                        "zones": merged_zones,
+                        "realm_portals": tag_portals,
+                        "dynamic_realm_templates": tag_templates,
+                    }
+                    resolved_key = scenario_key
         except Exception:
             pass
     if not scen_data:
-        scen_data = data.get("fantasy") or data.get("high_school_drama") or {}
-    out = dict(scen_data)
+        resolved_key = "fantasy" if "fantasy" in data else "high_school_drama"
+        scen_data = data.get(resolved_key) or {}
+
+    out = _normalize_scenario_realms_payload(scen_data, resolved_key or scenario_key, allow_nsfw)
     if "zones" in out:
-        filtered = _filter_seed_zones_for_nsfw(out.get("zones") or [], allow_nsfw)
         out["zones"] = ensure_school_club_topology_in_zones(
-            filtered,
+            out.get("zones") or [],
             scenario_key=scenario_key or "",
             allow_nsfw=allow_nsfw,
         )
+        for r in out.get("realms") or []:
+            if r.get("zones"):
+                r["zones"] = ensure_school_club_topology_in_zones(
+                    r.get("zones") or [],
+                    scenario_key=scenario_key or "",
+                    allow_nsfw=allow_nsfw,
+                )
     return out
 
 
@@ -111,11 +272,13 @@ def get_seed_node_metadata(node_id_or_name: str, scenario_key: str = "high_schoo
     else:
         leaf_target = target
 
-    data = _load_seeds()
-    base_key = "high_school_drama" if is_school_scenario(scenario_key) else (
-        scenario_key if scenario_key in data else TAG_TO_LOCATION_SEED_KEY.get(scenario_key, "high_school_drama")
-    )
-    zones = (data.get(base_key) or {}).get("zones") or []
+    scen_data = get_scenario_seed_data(scenario_key)
+    zones = list(scen_data.get("zones") or [])
+    for r in scen_data.get("realms") or []:
+        if r.get("primary_locations"):
+            zones.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": r.get("primary_locations") or []})
+        if r.get("sub_locations"):
+            zones.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": [{"id": r.get("id", ""), "name": r.get("name", ""), "sub_locations": r.get("sub_locations") or []}]})
     for z in zones:
         for p in z.get("primary_locations") or []:
             p_id = str(p.get("id") or "").lower()
@@ -185,6 +348,46 @@ def get_discreet_locations_for_scenario(scenario_key: str = "high_school_drama",
                         "zone_name": z_name,
                         "path": full_path,
                     })
+    for r in scen_data.get("realms") or []:
+        r_id = r.get("id", "")
+        r_name = r.get("name", "")
+        for p in r.get("primary_locations") or []:
+            p_id = p.get("id", "")
+            p_name = p.get("name", "")
+            for s in p.get("sub_locations") or []:
+                if s.get("is_discreet"):
+                    s_id = s.get("id", "")
+                    s_name = s.get("name", "")
+                    full_path = node_path_by_id.get(s_id) or f"{r_name} ➔ {p_name} ➔ {s_name}"
+                    results.append({
+                        "node_id": s_id,
+                        "name": s_name,
+                        "facility_id": p_id,
+                        "facility_name": p_name,
+                        "zone_id": r_id,
+                        "zone_name": r_name,
+                        "path": full_path,
+                    })
+        for rz in r.get("zones") or []:
+            rz_id = rz.get("id", "")
+            rz_name = rz.get("name", "")
+            for p in rz.get("primary_locations") or []:
+                p_id = p.get("id", "")
+                p_name = p.get("name", "")
+                for s in p.get("sub_locations") or []:
+                    if s.get("is_discreet"):
+                        s_id = s.get("id", "")
+                        s_name = s.get("name", "")
+                        full_path = node_path_by_id.get(s_id) or f"{rz_name} ➔ {p_name} ➔ {s_name}"
+                        results.append({
+                            "node_id": s_id,
+                            "name": s_name,
+                            "facility_id": p_id,
+                            "facility_name": p_name,
+                            "zone_id": rz_id,
+                            "zone_name": rz_name,
+                            "path": full_path,
+                        })
     return results
 
 def is_school_scenario(scenario_key: str) -> bool:
@@ -566,8 +769,7 @@ OUTLAW_HQ_EXTRA_WINGS: Dict[str, List[Dict[str, Any]]] = {
 
 def get_outlaw_starter_residence_seeds(scenario_key: str = "anomalous_incursions") -> List[Tuple[str, str, Dict[str, Any]]]:
     """Return `(zone_id, zone_name, facility_dict)` entries for `fac_cult_residence` & `fac_syndicate_residence`."""
-    seeds = _load_seeds()
-    scen_data = seeds.get(scenario_key) or seeds.get("anomalous_incursions") or {}
+    scen_data = get_scenario_seed_data(scenario_key or "anomalous_incursions")
     out: List[Tuple[str, str, Dict[str, Any]]] = []
     targets = {"fac_cult_residence", "fac_syndicate_residence"}
     for z in scen_data.get("zones") or []:
@@ -1898,11 +2100,94 @@ def get_room_contextual_props(room_name: str, primary_name: str = "") -> list[st
     return [f"{r_clean} Main Area", f"{r_clean} Focal Point", "Secluded Corner Alcove", "Inspection Feature"]
 
 
+def _parse_seed_node_state_json(node: Mapping[str, Any] | None) -> dict[str, Any]:
+    from mechanics.world.anomalous_sites.catalog import parse_node_state
+    return parse_node_state(node)
+
+
+def build_node_props_index(
+    session_id: int,
+    scenario_key: str = "high_school_drama",
+    char_name: str = "",
+    *,
+    all_nodes: list[dict[str, Any]] | None = None,
+    node_by_id: Mapping[str, dict[str, Any]] | None = None,
+    state_by_id: Mapping[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Prebuild O(1) lookup tables for seed/runtime node props once per sweep."""
+    resolved_nodes_by_id: dict[str, dict[str, Any]] = {}
+    if isinstance(node_by_id, Mapping):
+        resolved_nodes_by_id = dict(node_by_id)
+    elif all_nodes is not None:
+        for n in all_nodes:
+            if isinstance(n, dict) and n.get("node_id"):
+                resolved_nodes_by_id[str(n["node_id"])] = n
+    elif session_id:
+        try:
+            for n in (db.get_session_world_nodes(session_id) or []):
+                if isinstance(n, dict) and n.get("node_id"):
+                    resolved_nodes_by_id[str(n["node_id"])] = n
+        except Exception:
+            resolved_nodes_by_id = {}
+
+    resolved_state_by_id: dict[str, dict[str, Any]] = {}
+    if isinstance(state_by_id, Mapping):
+        resolved_state_by_id = dict(state_by_id)
+    else:
+        for nid, n in resolved_nodes_by_id.items():
+            resolved_state_by_id[nid] = _parse_seed_node_state_json(n)
+
+    seed_data = get_scenario_seed_data(scenario_key)
+    seed_zones = list(seed_data.get("zones", []))
+    if is_urban_anomalous_scenario(scenario_key):
+        seed_zones = inject_anomalous_faction_hq_facilities(seed_zones, session_id=session_id, scenario_key=scenario_key)
+    for r in seed_data.get("realms") or []:
+        if r.get("primary_locations"):
+            seed_zones.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": r.get("primary_locations") or []})
+        if r.get("sub_locations"):
+            seed_zones.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": [{"id": r.get("id", ""), "name": r.get("name", ""), "sub_locations": r.get("sub_locations") or []}]})
+    desk_name = get_session_player_desk_name(session_id, char_name=char_name) if is_school_scenario(scenario_key) else "Player's Desk"
+
+    props_by_id: dict[str, list[str]] = {}
+    props_by_name_lower: dict[str, list[str]] = {}
+    for z in seed_zones:
+        for p in z.get("primary_locations", []):
+            raw_p = p.get("props")
+            if isinstance(raw_p, list) and raw_p:
+                resolved_p = [desk_name if pr == "Player's Desk" else str(pr) for pr in raw_p]
+                p_id = str(p.get("id") or "")
+                p_name = str(p.get("name") or "").lower()
+                if p_id:
+                    props_by_id.setdefault(p_id, resolved_p)
+                if p_name:
+                    props_by_name_lower.setdefault(p_name, resolved_p)
+            for s in p.get("sub_locations", []):
+                if isinstance(s, dict):
+                    raw_s = s.get("props")
+                    if isinstance(raw_s, list) and raw_s:
+                        resolved_s = [desk_name if pr == "Player's Desk" else str(pr) for pr in raw_s]
+                        s_id = str(s.get("id") or "")
+                        s_name = str(s.get("name") or "").lower()
+                        if s_id:
+                            props_by_id.setdefault(s_id, resolved_s)
+                        if s_name:
+                            props_by_name_lower.setdefault(s_name, resolved_s)
+
+    return {
+        "node_by_id": resolved_nodes_by_id,
+        "state_by_id": resolved_state_by_id,
+        "props_by_id": props_by_id,
+        "props_by_name_lower": props_by_name_lower,
+    }
+
+
 def get_node_props(
     session_id: int,
     node_id: str,
     scenario_key: str = "high_school_drama",
     char_name: str = "",
+    *,
+    props_ctx: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """
     Returns the list of interactive micro-location props for a given spatial node.
@@ -1917,6 +2202,33 @@ def get_node_props(
         nid = session_id.strip()
         node_name = str(node_id or "").strip()
         session_id = 0
+
+    if isinstance(props_ctx, Mapping):
+        ctx_states = props_ctx.get("state_by_id")
+        if session_id and nid and isinstance(ctx_states, Mapping):
+            st = ctx_states.get(nid)
+            if isinstance(st, dict) and isinstance(st.get("props"), list) and st["props"]:
+                return [str(p) for p in st["props"] if p]
+
+        parent_name = ""
+        ctx_nodes = props_ctx.get("node_by_id")
+        if session_id and nid and isinstance(ctx_nodes, Mapping):
+            n_row = ctx_nodes.get(nid)
+            if n_row:
+                node_name = n_row.get("name") or ""
+                p_id = n_row.get("parent_id") or n_row.get("parent_node_id") or ""
+                if p_id:
+                    p_row = ctx_nodes.get(p_id)
+                    if p_row:
+                        parent_name = p_row.get("name") or ""
+
+        props_by_id = props_ctx.get("props_by_id") or {}
+        props_by_name_lower = props_ctx.get("props_by_name_lower") or {}
+        if nid and nid in props_by_id:
+            return list(props_by_id[nid])
+        if node_name and node_name.lower() in props_by_name_lower:
+            return list(props_by_name_lower[node_name.lower()])
+        return get_room_contextual_props(node_name or nid, parent_name)
 
     if session_id and nid:
         try:
@@ -1941,9 +2253,14 @@ def get_node_props(
             pass
 
     seed_data = get_scenario_seed_data(scenario_key)
-    seed_zones = seed_data.get("zones", [])
+    seed_zones = list(seed_data.get("zones", []))
     if is_urban_anomalous_scenario(scenario_key):
         seed_zones = inject_anomalous_faction_hq_facilities(seed_zones, session_id=session_id, scenario_key=scenario_key)
+    for r in seed_data.get("realms") or []:
+        if r.get("primary_locations"):
+            seed_zones.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": r.get("primary_locations") or []})
+        if r.get("sub_locations"):
+            seed_zones.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": [{"id": r.get("id", ""), "name": r.get("name", ""), "sub_locations": r.get("sub_locations") or []}]})
     desk_name = get_session_player_desk_name(session_id, char_name=char_name) if is_school_scenario(scenario_key) else "Player's Desk"
 
     for z in seed_zones:

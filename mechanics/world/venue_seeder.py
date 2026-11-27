@@ -190,7 +190,7 @@ def _build_roster_payload(
     basic: dict[str, Any] = {
         "role": role,
         "occupation": occupation,
-        "age_group": "teen" if shift_profile == "student" else "adult",
+        "age_group": "adult",
         "merchant_archetypes": list(merchant_archetypes or ()),
         "is_24h_station": bool(is_24h_station),
         "is_unique_proprietor": bool(is_unique_proprietor),
@@ -1075,6 +1075,36 @@ def evaluate_shop_staff_availability(
 
     if is_kiosk_location(eff_loc, node=node):
         return _availability_result(available=True, reason="kiosk_bypass", reason_message="An automated self-service kiosk hums softly, ready to dispense stock.", facility_node_id=resolved_node_id)
+
+    from mechanics.combat.merchant import FOLKLORE_CATALOG_MERCHANT_TYPES, is_lantern_tide
+
+    _spirit_shop_node_ids = {
+        "loc_crossroads_night_market",
+        "sub_crossroads_bazaar_walk",
+        "sub_crossroads_kitsune_alley",
+        "sub_crossroads_bunian_arcade",
+        "sub_crossroads_curio_arcade",
+        "sub_kitsune_curio_shop",
+        "sub_bunian_artisan_hall",
+        "sub_ghoul_curio_morgue",
+    }
+    _m_type_clean = str(merchant_type or "").strip()
+    if resolved_node_id in _spirit_shop_node_ids or (
+        not resolved_node_id
+        and _m_type_clean in FOLKLORE_CATALOG_MERCHANT_TYPES
+        and _m_type_clean != "ranger_station_outfitter"
+    ):
+        lantern_note = (
+            " Enclave master-artisans have commuted in for Lantern-Tide with bonus rare stock."
+            if is_lantern_tide(eff_min)
+            else " Permanent stallholders tend the counters day and night."
+        )
+        return _availability_result(
+            available=True,
+            reason="active_staff",
+            reason_message=f"Lantern-lit spirit bazaar counters are open around the clock.{lantern_note}",
+            facility_node_id=resolved_node_id,
+        )
 
     club_shop_decision = _evaluate_school_club_shop(
         sid=sid,

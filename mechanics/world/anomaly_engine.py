@@ -1104,7 +1104,7 @@ def evaluate_anomalous_quest_containment(
 ) -> Dict[str, Any]:
     """
     Pure Layer-2 deterministic evaluator for anomalous quest containment & Taxpayer Mandate rules.
-    Performs zero SQLite I/O; persistence is handled in Layer 3 (`db.persist_anomalous_quest_containment`).
+    Performs zero SQLite I/O; persistence is handled in Layer 3 (`services.anomalous_containment_service.persist_anomalous_quest_containment`).
     """
     from mechanics.narrative.blueprints import has_quest_note_flag
 
@@ -1141,10 +1141,10 @@ def record_anomalous_quest_containment_and_taxpayer(
     *,
     prevent_vault_capture: bool = False,
 ) -> dict:
-    """Backward-compatible wrapper delegating SQLite persistence to Layer 3 (`db.persist_anomalous_quest_containment`)."""
-    import db
+    """Backward-compatible wrapper delegating SQLite persistence to Layer 3 (`services.anomalous_containment_service`)."""
+    from services.anomalous_containment_service import persist_anomalous_quest_containment
 
-    return db.persist_anomalous_quest_containment(
+    return persist_anomalous_quest_containment(
         session_id=session_id,
         quest=quest,
         user_id=user_id,

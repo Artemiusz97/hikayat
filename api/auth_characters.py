@@ -1,8 +1,17 @@
+from __future__ import annotations
+
 import random
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_user_lock
-from .security import extract_actor_token, is_strict_auth_context, issue_actor_token, verify_actor_token, verify_user_access
+from .security import (
+    extract_actor_token,
+    is_strict_auth_context,
+    is_trusted_tailscale_request,
+    issue_actor_token,
+    verify_actor_token,
+    verify_user_access,
+)
 
 import db
 from db import adb
@@ -456,7 +465,7 @@ async def auth_discord(req: DiscordAuthRequest, request: Request = None):
             resolved_id = abs(hash(val)) % (10**18)
 
     user_id = resolved_id
-    if is_strict_auth_context(request):
+    if is_strict_auth_context(request) and not is_trusted_tailscale_request(request):
         existing_tok = extract_actor_token(request)
         if not verify_actor_token(existing_tok, int(user_id)):
             raise HTTPException(
@@ -831,13 +840,53 @@ def _format_character_dict(char: dict | None) -> dict | None:
             pass
     if d.get("scenario"):
         d["scenario_display_name"] = scenario_data.get_scenario_display_name(d["scenario"])
+    if isinstance(d.get("appearance"), dict):
+        from mechanics.social.persona import (
+            classify_asset_size_tier,
+            fuse_asset_size_and_texture,
+            heal_asset_texture_for_context,
+            heal_character_rear_appearance,
+            heal_physique_for_context,
+            normalize_asset_texture,
+            normalize_stature_tier,
+        )
+        app_copy = dict(d["appearance"])
+        if app_copy.get("stature"):
+            app_copy["stature"] = normalize_stature_tier(str(app_copy["stature"]))
+        if app_copy.get("physique"):
+            norm_p = heal_physique_for_context(
+                str(app_copy["physique"]),
+                gender=str(d.get("gender", "")),
+                stature=str(app_copy.get("stature") or "average"),
+                race=str(d.get("race", "human")),
+            )
+            if norm_p:
+                app_copy["physique"] = norm_p
+        is_m = any(kw in str(d.get("gender", "")).lower() for kw in ("male", "man", "boy")) and "female" not in str(d.get("gender", "")).lower()
+        eff_g = "male" if is_m else "female"
+        sz_key = "penis_size" if is_m else "breast_size"
+        raw_sz = str(app_copy.get(sz_key) or "")
+        sz_tier = classify_asset_size_tier(raw_sz, eff_g) if raw_sz else "average"
+        old_tex = str(app_copy.get("asset_texture") or "")
+        healed_tex = ""
+        if old_tex:
+            healed_tex = heal_asset_texture_for_context(old_tex, gender=eff_g, size_tier=sz_tier)
+            if healed_tex:
+                app_copy["asset_texture"] = healed_tex
+        if raw_sz and ((healed_tex and old_tex != healed_tex) or " & " in raw_sz):
+            tex_for_fuse = healed_tex or normalize_asset_texture(raw_sz, gender=eff_g, size_tier=sz_tier)
+            if tex_for_fuse:
+                app_copy[sz_key] = fuse_asset_size_and_texture(raw_sz, tex_for_fuse, gender=eff_g)
+
+        heal_character_rear_appearance(app_copy, race=str(d.get("race") or ""))
+        d["appearance"] = app_copy
     return d
 
 
 @router.get("/api/characters/{user_id}")
 async def get_user_characters(user_id: int, request: Request = None):
-    await verify_user_access(request, user_id)
     """Fetches all characters for a given user (up to 6 maximum)."""
+    await verify_user_access(request, user_id)
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
     chars = await adb(db.get_user_characters, canonical_id)
     return {"characters": [_format_character_dict(c) for c in chars], "max_limit": 6}
@@ -845,8 +894,8 @@ async def get_user_characters(user_id: int, request: Request = None):
 
 @router.post("/api/character/switch")
 async def switch_character(req: CharacterSwitchRequest, request: Request = None):
-    await verify_user_access(request, req.user_id)
     """Switches active character for a user by character_id."""
+    await verify_user_access(request, req.user_id)
     canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
     char = await adb(db.switch_character, canonical_id, req.character_id)
     if not char:
@@ -856,8 +905,8 @@ async def switch_character(req: CharacterSwitchRequest, request: Request = None)
 
 @router.delete("/api/character/{user_id}/{character_id}")
 async def delete_character_endpoint(user_id: int, character_id: int, request: Request = None):
-    await verify_user_access(request, user_id)
     """Deletes a specific character by character_id and returns updated character roster."""
+    await verify_user_access(request, user_id)
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
 
     lock_sids = await adb(db.get_character_session_ids, character_id, canonical_id)
@@ -876,8 +925,8 @@ async def delete_character_endpoint(user_id: int, character_id: int, request: Re
 
 @router.get("/api/character/{user_id}")
 async def get_character(user_id: int, request: Request = None):
-    await verify_user_access(request, user_id)
     """Fetches full character sheet, stats, HP/MP, level, and unspent stat points."""
+    await verify_user_access(request, user_id)
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
     char = await adb(db.get_character, canonical_id)
     if not char:
@@ -890,9 +939,9 @@ async def get_character(user_id: int, request: Request = None):
         if active_sid:
             phys_st = await adb(db.get_session_physical_state, active_sid)
             if isinstance(phys_st, dict):
-                from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
+                from mechanics.social.physical_state import compute_clothing_summary_badge, match_actor_key, find_player_actor_key
                 phys_actors = phys_st.get("actors", {}) or {}
-                matched_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=active_sid) or _match_actor_key(char_dict.get("name", ""), phys_actors)
+                matched_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=active_sid) or match_actor_key(char_dict.get("name", ""), phys_actors)
                 p_data = phys_actors.get(matched_key) or {}
                 char_dict["clothing_status"] = compute_clothing_summary_badge(p_data.get("clothing"), gender=char_dict.get("gender", "Male"))
     except Exception:
@@ -907,10 +956,24 @@ async def get_character(user_id: int, request: Request = None):
     from scenario_data import is_non_combat_scenario
     char_scen = char_dict.get("scenario", "fantasy")
     is_non_combat = is_non_combat_scenario(char_scen)
-    combat_attrs = cd.calculate_combat_attributes(char_dict, equipped_list)
+    combat_attrs = cd.calculate_combat_attributes(char_dict, equipped_list, session_id=active_sid)
 
     from mechanics.combat.spells.awakened_kits import get_actor_spell
-    known_sids = await adb(db.get_learned_spells, canonical_id)
+    known_sids = list(await adb(db.get_learned_spells, canonical_id))
+    if active_sid:
+        try:
+            from mechanics.combat.spells.spirit_court_perks import (
+                get_active_spirit_court_summon_spell_ids,
+                get_spirit_court_stat_bonuses,
+            )
+            _sc_bonuses = await adb(get_spirit_court_stat_bonuses, int(active_sid))
+            if _sc_bonuses:
+                char_dict["spirit_court_stat_bonuses"] = _sc_bonuses
+            for _sc_sid in await adb(get_active_spirit_court_summon_spell_ids, int(active_sid)):
+                if _sc_sid not in known_sids:
+                    known_sids.append(_sc_sid)
+        except Exception:
+            pass
     skill_prog = db.get_skill_progress(char_dict)
     known_spells = [sp for sid in known_sids if (sp := get_actor_spell(sid, skill_prog))]
 
@@ -929,8 +992,8 @@ async def get_character(user_id: int, request: Request = None):
 
 @router.post("/api/character/create")
 async def create_character(req: CharacterCreateRequest, request: Request = None):
-    await verify_user_access(request, req.user_id)
     """Creates a new character in SQLite database."""
+    await verify_user_access(request, req.user_id)
     total_stats = req.str_val + req.per + req.end + req.cha + req.int_val + req.agi + req.luk
     if total_stats > 12:
         raise HTTPException(status_code=400, detail="Stat allocation exceeds maximum allowed points!")
@@ -965,6 +1028,14 @@ async def create_character(req: CharacterCreateRequest, request: Request = None)
                 appearance_payload.pop("penis_size", None)
             if req.asset_texture:
                 appearance_payload["asset_texture"] = req.asset_texture
+            if getattr(req, "rear_size", None):
+                appearance_payload["rear_size"] = req.rear_size
+            if getattr(req, "rear_texture", None):
+                appearance_payload["rear_texture"] = req.rear_texture
+            if getattr(req, "stature", None) and str(req.stature).strip().lower() not in ("auto", "__auto__"):
+                appearance_payload["stature"] = str(req.stature).strip()
+            if getattr(req, "physique", None) and str(req.physique).strip().lower() not in ("auto", "__auto__"):
+                appearance_payload["physique"] = str(req.physique).strip()
             if getattr(req, "origin_mode", None):
                 appearance_payload["origin_mode"] = str(req.origin_mode).strip().lower()
             if getattr(req, "student_grade", None):
@@ -1116,8 +1187,8 @@ async def create_character(req: CharacterCreateRequest, request: Request = None)
 
 @router.post("/api/character/regenerate-gear")
 async def regenerate_character_gear(req: RegenerateGearRequest, request: Request = None):
-    await verify_user_access(request, req.user_id)
     """Regenerates and equips a fresh class-tailored starter outfit for the active character."""
+    await verify_user_access(request, req.user_id)
     canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
     char = await adb(db.get_character, canonical_id)
     if not char:
@@ -1185,8 +1256,8 @@ async def regenerate_character_gear(req: RegenerateGearRequest, request: Request
 
 @router.post("/api/character/allocate")
 async def spend_stat_point(req: SpendStatPointRequest, request: Request = None):
-    await verify_user_access(request, req.user_id)
     """Allocates 1 pending stat point into a stat."""
+    await verify_user_access(request, req.user_id)
     stat = req.stat.upper()
     if stat not in cd.STATS:
         raise HTTPException(status_code=400, detail="Invalid stat name")
@@ -1204,8 +1275,8 @@ async def spend_stat_point(req: SpendStatPointRequest, request: Request = None):
 
 @router.post("/api/character/appearance")
 async def update_character_appearance(req: CharacterAppearanceUpdateRequest, request: Request = None):
-    await verify_user_access(request, req.user_id)
     """Updates appearance attributes (breast_size, penis_size, asset_texture, etc.) for the character."""
+    await verify_user_access(request, req.user_id)
     canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
     char = await adb(db.get_character, canonical_id)
     if req.character_id is not None:
@@ -1232,6 +1303,14 @@ async def update_character_appearance(req: CharacterAppearanceUpdateRequest, req
         appearance_update.pop("penis_size", None)
     if req.asset_texture is not None:
         appearance_update["asset_texture"] = req.asset_texture
+    if getattr(req, "rear_size", None) is not None:
+        appearance_update["rear_size"] = req.rear_size
+    if getattr(req, "rear_texture", None) is not None:
+        appearance_update["rear_texture"] = req.rear_texture
+    if getattr(req, "stature", None) is not None:
+        appearance_update["stature"] = str(req.stature).strip()
+    if getattr(req, "physique", None) is not None:
+        appearance_update["physique"] = str(req.physique).strip()
 
     target_char_id = int(target_char["id"])
     updated = await adb(db.update_character_appearance, target_char_id, appearance_update)

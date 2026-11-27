@@ -685,12 +685,21 @@ def accept_bounty_contract(
             }
 
     from game_engine.quests import can_accept_side_bounty
-    if quest.get("status") == "Available" and not can_accept_side_bounty(session_id, quest):
-        return {
-            "success": False,
-            "status_code": 400,
-            "reason": "Maximum 3 active side bounties reached! Complete or abandon one first.",
-        }
+    from mechanics.narrative.spirit_court_bounties import (
+        can_accept_spirit_court_commission,
+        is_spirit_court_quest,
+    )
+    if quest.get("status") == "Available":
+        if is_spirit_court_quest(quest):
+            sc_ok, sc_reason = can_accept_spirit_court_commission(session_id, quest)
+            if not sc_ok:
+                return {"success": False, "status_code": 400, "reason": sc_reason}
+        elif not can_accept_side_bounty(session_id, quest):
+            return {
+                "success": False,
+                "status_code": 400,
+                "reason": "Maximum 3 active side bounties reached! Complete or abandon one first.",
+            }
 
     was_pitch = str(quest.get("dossier_stage") or "") == "pitch"
     eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess))
@@ -782,6 +791,13 @@ def accept_bounty_contract(
                     "roll": chk.roll,
                     "chance": chk.chance,
                 }
+
+    if is_spirit_court_quest(quest):
+        try:
+            from mechanics.narrative.spirit_court_bounties import record_spirit_court_commission_accepted
+            record_spirit_court_commission_accepted(session_id, quest_id, turn_number=eff_turn)
+        except Exception as _spc_exc:
+            logger.warning("Failed to record accepted spirit commission %s for session %s: %s", quest_id, session_id, _spc_exc)
 
     return {
         "success": True,

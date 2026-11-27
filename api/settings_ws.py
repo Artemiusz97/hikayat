@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
-from .security import is_share_mode_active, verify_session_participant, verify_user_access
+from .security import is_strict_auth_context, verify_session_participant, verify_user_access
 from .adventure import enrich_session_for_client
 from services.examine_service import invalidate_examine_cache
 
@@ -24,9 +24,9 @@ router = APIRouter()
 
 @router.get("/api/settings/debug/telemetry")
 async def get_telemetry(request: Request = None):
-    if is_share_mode_active():
-        raise HTTPException(status_code=403, detail="Debug telemetry is disabled in share mode.")
     """Returns rolling LLM token/latency telemetry and active circuit-breaker cooldowns."""
+    if is_strict_auth_context(request):
+        raise HTTPException(status_code=403, detail="Debug telemetry is disabled under strict auth contexts.")
     raw = llm_client.get_llm_telemetry()
     data = dict(raw) if isinstance(raw, dict) else {}
     primary_model = data.get("primary_model") or getattr(config, "LLM_MODEL", "")
@@ -42,16 +42,16 @@ async def get_telemetry(request: Request = None):
 
 @router.get("/api/settings/{user_id}")
 async def get_settings(user_id: int, request: Request = None):
-    await verify_user_access(request, user_id)
     """Gets user preferences."""
+    await verify_user_access(request, user_id)
     s = await adb(db.get_user_settings, user_id)
     return {"settings": s}
 
 
 @router.post("/api/settings/{user_id}")
 async def save_settings(user_id: int, req: SettingsUpdateRequest, request: Request = None):
-    await verify_user_access(request, user_id)
     """Saves user preferences."""
+    await verify_user_access(request, user_id)
     await adb(
         db.save_user_settings,
         user_id=user_id,
@@ -77,8 +77,8 @@ async def save_settings(user_id: int, req: SettingsUpdateRequest, request: Reque
 
 @router.get("/api/debug/{user_id}")
 async def get_debug_settings(user_id: int, request: Request = None):
-    if is_share_mode_active():
-        raise HTTPException(status_code=403, detail="Debug endpoints are disabled when --share is active.")
+    if is_strict_auth_context(request):
+        raise HTTPException(status_code=403, detail="Debug endpoints are disabled under strict auth contexts.")
     await verify_user_access(request, user_id)
     s = await adb(db.get_settings, user_id)
     return {
@@ -92,9 +92,11 @@ async def get_debug_settings(user_id: int, request: Request = None):
 
 @router.post("/api/debug/{user_id}")
 async def save_debug_settings(user_id: int, req: DebugUpdateRequest, request: Request = None):
-    if is_share_mode_active():
-        raise HTTPException(status_code=403, detail="Debug endpoints are disabled when --share is active.")
+    if is_strict_auth_context(request):
+        raise HTTPException(status_code=403, detail="Debug endpoints are disabled under strict auth contexts.")
     await verify_user_access(request, user_id)
+    if req.session_id is not None:
+        await verify_session_participant(request, req.session_id, user_id)
     updates = {}
     if req.debug_stat_mode is not None:
         await adb(db.apply_stat_mode, user_id, req.debug_stat_mode)

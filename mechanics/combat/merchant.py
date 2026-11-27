@@ -210,11 +210,19 @@ MERCHANT_ARCHETYPES: dict[str, dict] = {
     "online_merchant": {
         "title": "Online Delivery Store",
         "emoji": "📱",
-        "intro_template": "ChronoStore delivery app: Order everyday snacks, drinks, stationery, and study essentials for instant delivery.",
-        "instruction": "Exclusively generate everyday snacks, bottled/canned drinks, stationery, study supplies, and basic daily essentials (Tier 3 and Tier 2 only). Specialty Downtown fashion, jewelry, gifts, hot diner meals, and adult boutique goods require in-person visits.",
-        "allowed_types": ["Item", "Food", "Consumable"],
+        "intro_template": "Order food, drinks, meds, gifts, apparel, and tactical supplies for fast doorstep delivery.",
+        "instruction": "Generate categorized delivery stock across Food, Drinks, Meds, Gifts, Clothing, Accessories, and scenario-appropriate tactical or adult tabs.",
+        "allowed_types": ["Item", "Food", "Drink", "Consumable", "Potion", "Gift", "Clothing", "Accessory", "Weapon", "Armor", "Lingerie"],
         "tier_focus": [3, 3, 2],
-    }
+    },
+    "school_mart": {
+        "title": "SchoolMart Campus Store",
+        "emoji": "🎒",
+        "intro_template": "Welcome to SchoolMart! Verified student discounts (-20%) applied across snacks, study supplies, and campus essentials.",
+        "instruction": "Exclusively generate SFW campus snacks, drinks, stationery, school apparel, gifts, and first-aid items (Tier 3 and Tier 2 only).",
+        "allowed_types": ["Food", "Drink", "Item", "Clothing", "Accessory", "Gift", "Consumable", "Potion"],
+        "tier_focus": [3, 3, 2],
+    },
 }
 
 
@@ -245,7 +253,132 @@ MERCHANT_ARCHETYPES.update({
         "allowed_types": ["Consumable", "Food", "Item", "Accessory", "Top"],
         "tier_focus": [3, 3, 2],
     },
+    "crossroads_bazaar_merchant": {
+        "title": "Tok Dalang Pelita's Dual-Realm Curios",
+        "emoji": "🏮",
+        "intro_template": "Dual rows of Japanese kitsunebi lanterns and Nusantara oil pelita illuminate stacked spice-lacquer wares, silk travel cloaks, and frontier talismans.",
+        "instruction": "Generate Spirit Crossroads twilight bazaar supplies, dual-realm travel cloaks, boundary ward charms, and lantern oil.",
+        "allowed_types": ["Consumable", "Food", "Accessory", "Top", "Item"],
+        "tier_focus": [3, 2, 2, 1],
+        "in_person_only": True,
+        "is_night_market_stall": True,
+    },
+    "ghoul_ossuary_merchant": {
+        "title": "Formalin & Bone-Relic Apothecary",
+        "emoji": "🕯️",
+        "intro_template": "Frost-edged slate shelves display cold myrrh tonics, silver funerary cane-sabres, and dark-tailored obsidian greatcoats.",
+        "instruction": "Generate Pale Ossuary Al-Ghul apothecary remedies, dark-tailored mourning coats, and blackened-silver duelist blades.",
+        "allowed_types": ["Consumable", "Weapon", "Top", "Accessory", "Item"],
+        "tier_focus": [3, 2, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "ghoul",
+    },
+    "bazaar_foxfire_tea_stall": {
+        "title": "Foxfire Tea & Aburaage Stall",
+        "emoji": "🍵",
+        "intro_template": "Steaming cast-iron kettles and glazed ceramic bowls perfume the Lotus-Canal promenade with roasted matcha and honeyed aburaage.",
+        "instruction": "Generate Kitsune twilight canal tea-house delicacies, gyokuro flasks, and spirit-clarity refreshments.",
+        "allowed_types": ["Consumable", "Food", "Drink", "Accessory"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "kitsune",
+        "is_night_market_stall": True,
+    },
+    "bazaar_cempaka_kuih_stall": {
+        "title": "Cempaka Kuih & Jamuan Stall",
+        "emoji": "🍡",
+        "intro_template": "Bamboo steamers vent fragrant pandan mist and warm clove-spiced jamuan tonics beside glowing pelita oil lamps.",
+        "instruction": "Generate Bunian canal-promenade kuih delicacies, bunga telang rice parcels, and royal jamu tonics.",
+        "allowed_types": ["Consumable", "Food", "Drink", "Accessory"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "bunian",
+        "is_night_market_stall": True,
+    },
+    "bazaar_kagura_mask_stall": {
+        "title": "Kagura Mask & Lacquer Stall",
+        "emoji": "🎭",
+        "intro_template": "Hand-carved urushi fox masks and braided cinnabar kagura cords gleam beneath strings of azure fox-fire chochin.",
+        "instruction": "Generate Kitsune lacquer theatre masks, urushi mantles, and ceremonial kagura accessories.",
+        "allowed_types": ["Accessory", "Armor", "Top"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "kitsune",
+        "is_night_market_stall": True,
+    },
+    "bazaar_inari_ofuda_stall": {
+        "title": "Inari Ofuda & Scroll Stall",
+        "emoji": "📜",
+        "intro_template": "Stacks of cinnabar-inked cypress ofuda and gilded shrine binding scrolls line a quiet cedar folding counter.",
+        "instruction": "Generate Kitsune consecrated ofuda charms, purification scrolls, and calligraphy seal ribbons.",
+        "allowed_types": ["Consumable", "Accessory", "Item"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "kitsune",
+        "is_night_market_stall": True,
+    },
+    "bazaar_songket_silk_stall": {
+        "title": "Songket & Kebaya Silk Stall",
+        "emoji": "🪡",
+        "intro_template": "Bolts of gold-threaded Nusantara songket and mist-light kebaya coats catch the warm canal lanternlight.",
+        "instruction": "Generate Bunian royal songket garments, pendekar sashes, and refined ceremonial silk accessories.",
+        "allowed_types": ["Armor", "Top", "Accessory"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "bunian",
+        "is_night_market_stall": True,
+    },
+    "bazaar_empu_pusaka_stall": {
+        "title": "Empu Pusaka & Brassware Stall",
+        "emoji": "🗡️",
+        "intro_template": "Hand-hammered Nusantara brassware bowls and pattern-welded pamur blades rest on indigo velvet.",
+        "instruction": "Generate Bunian empu pusaka knives, meteoric-iron spearheads, and engraved brass curio tools.",
+        "allowed_types": ["Weapon", "Accessory", "Item"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "bunian",
+        "is_night_market_stall": True,
+    },
+    "bazaar_ghoul_curio_stall": {
+        "title": "Ghoul Bone-Charm, Myrrh & Embalming Blade Stall",
+        "emoji": "🦴",
+        "intro_template": "Behind cold camphor glass, a poised Al-Ghul purveyor arranges silver-edged lancets, carved onyx bone-charms, and myrrh vials open to all Dusk Confluence travelers.",
+        "instruction": "Generate Al-Ghul bone-charms, cold myrrh balms, and silver surgical embalming blades.",
+        "allowed_types": ["Consumable", "Weapon", "Accessory"],
+        "tier_focus": [3, 2, 1],
+        "in_person_only": True,
+        "home_spirit_court": "ghoul",
+        "is_night_market_stall": True,
+        "open_while_distrusted": True,
+    },
 })
+
+SPIRIT_COURT_MERCHANT_HOME_COURT: Dict[str, str] = {
+    "kitsune_spirit_merchant": "kitsune",
+    "bunian_pusaka_merchant": "bunian",
+    "ghoul_ossuary_merchant": "ghoul",
+    "bazaar_foxfire_tea_stall": "kitsune",
+    "bazaar_kagura_mask_stall": "kitsune",
+    "bazaar_inari_ofuda_stall": "kitsune",
+    "bazaar_cempaka_kuih_stall": "bunian",
+    "bazaar_songket_silk_stall": "bunian",
+    "bazaar_empu_pusaka_stall": "bunian",
+    "bazaar_ghoul_curio_stall": "ghoul",
+}
+
+FOLKLORE_CATALOG_MERCHANT_TYPES: frozenset[str] = frozenset({
+    *SPIRIT_COURT_MERCHANT_HOME_COURT.keys(),
+    "ranger_station_outfitter",
+    "crossroads_bazaar_merchant",
+})
+
+
+def is_lantern_tide(current_minute: Optional[int]) -> bool:
+    """Returns True during Lantern-Tide (18:00-05:59) when enclave master-artisans commute to the Night Market."""
+    if current_minute is None:
+        return False
+    m = int(current_minute) % 1440
+    return m >= 1080 or m < 360
 
 
 def _get_village_merchant_max_trust(session_id: int | None, village_key: str) -> tuple[int, bool]:
@@ -262,6 +395,7 @@ def _get_village_merchant_max_trust(session_id: int | None, village_key: str) ->
             is_match = (
                 (village_key == "kitsune" and ("kitsune" in race or '"kitsune"' in p_raw or '"kitsune"' in b_raw))
                 or (village_key == "bunian" and ("bunian" in race or '"bunian"' in p_raw or '"bunian"' in b_raw))
+                or (village_key == "ghoul" and ("ghoul" in race or '"ghoul"' in p_raw or '"ghoul"' in b_raw))
             )
             if is_match:
                 max_score = max(max_score, int(ct.get("relationship_score") or 0))
@@ -277,25 +411,145 @@ def _build_folklore_catalog_shop_stock(
     merchant_type: str,
     scen_key: str,
 ) -> tuple[list[dict], str, list[str]]:
-    """Builds deterministic trust-tiered shop stock, clerk name, and rumors for folklore enclave & ranger shops."""
+    """Builds deterministic standing-tiered shop stock, clerk name, and rumors for folklore enclave, 4-wing bazaar, & ranger shops."""
     from mechanics.world.locations.folklore_veil import (
         is_folklore_permission_token_name,
         load_folklore_villages_catalog,
     )
     from mechanics.combat.items.envelope import serialize_item as _serialize_item
+    from mechanics.combat.spells.spirit_court_perks import get_spirit_court_standing_tier_boost
 
     cat = load_folklore_villages_catalog()
     m_cat = (cat.get("merchant_catalogs") or {}).get(merchant_type) or {}
     clerk_name = str(m_cat.get("merchant_name") or "")
     sid = int(session["id"]) if isinstance(session, dict) and session.get("id") else None
+    cur_day = int((session or {}).get("current_day") or 1) if isinstance(session, dict) else 1
+    cur_min = (session or {}).get("current_minute") if isinstance(session, dict) else None
 
     raw_items = list(m_cat.get("open_stock") or m_cat.get("base_stock") or [])
-    if merchant_type in ("kitsune_spirit_merchant", "bunian_pusaka_merchant"):
-        v_key = "kitsune" if merchant_type == "kitsune_spirit_merchant" else "bunian"
-        max_trust, has_rom = _get_village_merchant_max_trust(sid, v_key)
+    price_mult = 1.0
+    home_court = str(SPIRIT_COURT_MERCHANT_HOME_COURT.get(merchant_type) or m_cat.get("home_court") or "").strip().lower()
+
+    if home_court in ("kitsune", "bunian", "ghoul"):
+        from mechanics.world.locations.folklore_spirit_realm import (
+            get_effective_village_standing,
+            get_spirit_court_discount_multiplier,
+        )
+        court_standing = get_effective_village_standing(sid or 0, home_court)
+        if home_court == "ghoul":
+            eff_standing = court_standing
+            has_rom = False
+        else:
+            max_trust, has_rom = _get_village_merchant_max_trust(sid, home_court)
+            eff_standing = max(max_trust, court_standing)
+
+        tier_boost = get_spirit_court_standing_tier_boost(eff_standing)
+        hi_pool = list(m_cat.get("high_tier_themed_stock") or [])
+        if hi_pool and tier_boost > 0:
+            spawn_prob = min(1.0, 0.35 + tier_boost)
+            det_rng = random.Random(f"spirit_shop:{sid}:{cur_day}:{merchant_type}")
+            added_hi: list[dict] = []
+            for h_item in hi_pool:
+                if eff_standing >= 50 or det_rng.random() < spawn_prob:
+                    added_hi.append(h_item)
+            if not added_hi:
+                added_hi.append(hi_pool[0])
+            for hi in added_hi:
+                hi_copy = dict(hi)
+                hi_meta = dict(hi_copy.get("metadata") or {})
+                hi_meta["tier_spawn_boost_pct"] = int(round(tier_boost * 100))
+                hi_copy["metadata"] = hi_meta
+                raw_items.append(hi_copy)
+
         req_trust = int(m_cat.get("trust_tier_1_min_affinity") or 60)
-        if max_trust >= req_trust or has_rom:
+        if eff_standing >= 70 or eff_standing >= req_trust or has_rom:
+            for relic in (m_cat.get("trusted_tier1_stock") or []):
+                r_copy = dict(relic)
+                r_meta = dict(r_copy.get("metadata") or {})
+                if eff_standing >= 70:
+                    r_meta["cottage_honoree_relic"] = True
+                r_copy["metadata"] = r_meta
+                raw_items.append(r_copy)
+        if sid:
+            price_mult = get_spirit_court_discount_multiplier(sid, home_court)
+    elif merchant_type == "crossroads_bazaar_merchant":
+        from mechanics.world.locations.folklore_spirit_realm import (
+            get_effective_village_standing,
+            get_spirit_court_discount_multiplier,
+        )
+        standings = {
+            vk: get_effective_village_standing(sid or 0, vk)
+            for vk in ("kitsune", "bunian", "ghoul")
+        }
+        best_vk = max(standings, key=lambda k: standings[k])
+        best_stand = standings[best_vk]
+        if best_stand >= 60:
             raw_items.extend(list(m_cat.get("trusted_tier1_stock") or []))
+        if sid and (best_stand >= 20 or best_stand < -10):
+            price_mult = get_spirit_court_discount_multiplier(sid, best_vk)
+
+    if is_lantern_tide(cur_min) and m_cat.get("lantern_tide_rare_stock"):
+        for lt_item in m_cat["lantern_tide_rare_stock"]:
+            lt_copy = dict(lt_item)
+            lt_meta = dict(lt_copy.get("metadata") or {})
+            lt_meta["lantern_tide_artisan"] = True
+            lt_copy["metadata"] = lt_meta
+            raw_items.append(lt_copy)
+
+    if sid:
+        from mechanics.world.world_events.spirit_realm_events import has_active_spirit_event
+
+        is_nm_stall = bool(MERCHANT_ARCHETYPES.get(merchant_type, {}).get("is_night_market_stall") or merchant_type == "crossroads_bazaar_merchant")
+        if is_nm_stall and has_active_spirit_event(sid, "evt_spirit_twin_moon_fair"):
+            combined_fair = list(m_cat.get("lantern_tide_rare_stock") or []) + list(m_cat.get("high_tier_themed_stock") or [])
+            if combined_fair:
+                existing_fair_names = {
+                    str(x.get("name") or "").strip().lower()
+                    for x in raw_items
+                    if isinstance(x, dict)
+                }
+                unseen_fair = [
+                    x for x in combined_fair
+                    if str(x.get("name") or "").strip().lower() not in existing_fair_names
+                ]
+                fair_pool = unseen_fair or combined_fair
+                det_fair = random.Random(f"twin_moon_fair:{sid}:{cur_day}:{merchant_type}")
+                picked_fair = dict(det_fair.choice(fair_pool))
+                picked_name_l = str(picked_fair.get("name") or "").strip().lower()
+                existing_idx = next(
+                    (
+                        idx for idx, x in enumerate(raw_items)
+                        if isinstance(x, dict) and str(x.get("name") or "").strip().lower() == picked_name_l
+                    ),
+                    None,
+                )
+                if existing_idx is not None:
+                    ex_item = dict(raw_items[existing_idx])
+                    ex_meta = dict(ex_item.get("metadata") or {})
+                    ex_meta["twin_moon_fair_bonus"] = True
+                    ex_item["metadata"] = ex_meta
+                    raw_items[existing_idx] = ex_item
+                else:
+                    f_meta = dict(picked_fair.get("metadata") or {})
+                    f_meta["twin_moon_fair_bonus"] = True
+                    picked_fair["metadata"] = f_meta
+                    raw_items.append(picked_fair)
+
+        is_curio_arcade_stall = merchant_type in ("crossroads_bazaar_merchant", "bazaar_ghoul_curio_stall")
+        if is_curio_arcade_stall and has_active_spirit_event(sid, "evt_spirit_midnight_curio_auction"):
+            existing_names_pre = {str(x.get("name") or "").strip().lower() for x in raw_items if isinstance(x, dict)}
+            for pool_key in ("trusted_tier1_stock", "high_tier_themed_stock", "lantern_tide_rare_stock"):
+                c_pool = list(m_cat.get(pool_key) or [])
+                if not c_pool:
+                    continue
+                picked_c = dict(c_pool[0])
+                p_name_l = str(picked_c.get("name") or "").strip().lower()
+                if p_name_l and p_name_l not in existing_names_pre:
+                    c_meta = dict(picked_c.get("metadata") or {})
+                    c_meta["midnight_curio_auction"] = True
+                    picked_c["metadata"] = c_meta
+                    raw_items.append(picked_c)
+                    existing_names_pre.add(p_name_l)
 
     built: list[dict] = []
     for spec in raw_items:
@@ -305,14 +559,18 @@ def _build_folklore_catalog_shop_stock(
         raw_itype = str(spec.get("item_type") or "Item")
         is_perm = bool(spec.get("quest_locked")) or is_folklore_permission_token_name(it_name)
         desc_text = str(spec.get("description") or spec.get("effect") or "")
+        base_price = int(spec.get("price") or 50)
+        eff_price = base_price if is_perm else max(1, int(round(base_price * price_mult)))
         it_copy: dict = {
             "name": it_name,
             "item_type": "Accessory" if is_perm else raw_itype.title(),
             "description": desc_text,
-            "price": int(spec.get("price") or 50),
+            "price": eff_price,
             "quantity": int(spec.get("quantity") or 1),
             "tier": int(spec.get("tier") or 2),
         }
+        if home_court:
+            it_copy["home_court"] = home_court
         if spec.get("slot"):
             it_copy["slot"] = str(spec["slot"])
         elif is_perm:
@@ -321,6 +579,8 @@ def _build_folklore_catalog_shop_stock(
         meta.setdefault("name", it_copy["name"])
         meta.setdefault("tier", it_copy["tier"])
         meta.setdefault("item_type", it_copy["item_type"])
+        if home_court:
+            meta.setdefault("home_court", home_court)
         if it_copy.get("slot"):
             meta.setdefault("slot", it_copy["slot"])
         if spec.get("attack") is not None:
@@ -396,8 +656,8 @@ def _inject_folklore_permission_tokens_into_shop_stock(
 
     existing_names = {str(s.get("name") or "").strip().lower() for s in stock if isinstance(s, dict)}
 
-    # 1. Enclave shops always carry their deterministic folklore catalog wares (even if LLM was mocked)
-    if merchant_type in ("kitsune_spirit_merchant", "bunian_pusaka_merchant", "ranger_station_outfitter"):
+    # 1. Enclave & 4-wing Night Market stalls always carry their deterministic folklore catalog wares (even if LLM was mocked)
+    if merchant_type in FOLKLORE_CATALOG_MERCHANT_TYPES:
         enclave_items, _, _ = _build_folklore_catalog_shop_stock(session, merchant_type, scen_key)
         for eit in enclave_items:
             eit_low = eit["name"].strip().lower()
@@ -473,6 +733,39 @@ def _inject_folklore_permission_tokens_into_shop_stock(
             "effect": f"[ITEM_JSON]{json.dumps(b_meta)}",
         })
         existing_names.add(b_name.lower())
+
+    # 4. Bone-Etched Catacomb Signet at Undercity Drifter Bazaar / Salvage Stalls
+    at_drifter_bazaar = (
+        loc_id in ("loc_uc_drifter_bazaar", "sub_uc_salvage_stalls", "sub_uc_tunnel_cantina")
+        or any(k in loc_low for k in ("drifter bazaar", "salvage stall", "salvage bazaar", "undercity bazaar"))
+    )
+    g_tok = tokens_meta.get("bone_etched_catacomb_signet") or tokens_meta.get("ghoul") or {}
+    g_name = str(g_tok.get("name") or "Bone-Etched Catacomb Signet")
+    if at_drifter_bazaar and g_name.lower() not in owned_low and g_name.lower() not in existing_names:
+        g_meta = {
+            "name": g_name,
+            "item_type": "Accessory",
+            "slot": "Accessory",
+            "tier": 2,
+            "is_permission_token": True,
+            "is_quest_locked": 1,
+            "veil_village_key": "ghoul",
+            "description": str(g_tok.get("description") or ""),
+        }
+        stock.append({
+            "name": g_name,
+            "item_type": "Accessory",
+            "slot": "Accessory",
+            "description": str(g_tok.get("description") or "Blackened silver catacomb signet that unlocks the Undercity Black-Water Font toward The Pale Ossuary."),
+            "price": int(g_tok.get("price") or g_tok.get("shop_price") or 180),
+            "quantity": 1,
+            "tier": 2,
+            "is_permission_token": True,
+            "is_quest_locked": 1,
+            "metadata": g_meta,
+            "effect": f"[ITEM_JSON]{json.dumps(g_meta)}",
+        })
+        existing_names.add(g_name.lower())
 
 
 def _apply_world_event_shop_multiplier(ctx: dict, session: dict | None, is_phone_shop: bool = False) -> dict:
@@ -1287,12 +1580,52 @@ def _apply_anomalous_shop_overlays(
     return stock
 
 
-async def generate_merchant_shop(party: list, merchant_name: str, merchant_description: str,
-                                  session: dict, is_phone_shop: bool = False, merchant_type: str = "general_merchant") -> dict:
-    """Generate shop stock and rumors via LLM for a specific merchant archetype."""
+async def generate_merchant_shop(
+    party: list,
+    merchant_name: str,
+    merchant_description: str,
+    session: dict,
+    is_phone_shop: bool = False,
+    merchant_type: str = "general_merchant",
+    store_mode: str | None = None,
+) -> dict:
+    """Generate shop stock and rumors via LLM or deterministic catalog for a specific merchant archetype."""
     names = ", ".join(char["name"] for char, _ in party)
     scen_key = session.get("scenario", "fantasy")
     scen_info = scenario_data.get_scenario(scen_key)
+
+    _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    effective_store_mode = ""
+    if is_phone_shop or merchant_type in ("online_merchant", "school_mart"):
+        from mechanics.combat.online_store import (
+            build_phone_store_catalog,
+            normalize_phone_store_mode,
+        )
+        from mechanics.social.origin_mode import resolve_player_age_profile
+
+        lead_char = {}
+        if party and isinstance(party[0], (tuple, list)) and len(party[0]) > 0 and isinstance(party[0][0], dict):
+            lead_char = party[0][0]
+        elif party and isinstance(party[0], dict):
+            lead_char = party[0]
+
+        player_profile = resolve_player_age_profile(session, lead_char)
+        requested_mode = store_mode or ("school_mart" if merchant_type == "school_mart" else None)
+        effective_store_mode = normalize_phone_store_mode(
+            requested_mode, is_student=bool(player_profile.get("is_student"))
+        )
+        if not _is_llm_mocked:
+            cur_day = int((session or {}).get("current_day") or (session or {}).get("in_game_day") or 1)
+            p_lvl = int(lead_char.get("level", 1) or 1)
+            cur_meta = scenario_data.get_scenario_currency(scen_key)
+            return build_phone_store_catalog(
+                scen_key,
+                store_mode=effective_store_mode,
+                day=cur_day,
+                is_nsfw=scenario_data.is_nsfw_scenario(scen_key),
+                player_level=p_lvl,
+                currency=cur_meta.get("name", "Credits"),
+            )
 
     archetype = MERCHANT_ARCHETYPES.get(merchant_type, MERCHANT_ARCHETYPES["general_merchant"])
     arch_title = archetype["title"]
@@ -1593,7 +1926,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                     "tier": 2,
                 },
             ])
-        elif merchant_type in ("kitsune_spirit_merchant", "bunian_pusaka_merchant", "ranger_station_outfitter"):
+        elif merchant_type in FOLKLORE_CATALOG_MERCHANT_TYPES:
             cat_items, cat_clerk, _ = _build_folklore_catalog_shop_stock(session, merchant_type, scen_key)
             if cat_clerk and (not merchant_name or merchant_name.strip().lower() in ("merchant", "clerk", "shopkeeper", "vendor", arch_title.lower())):
                 merchant_name = cat_clerk
@@ -1633,8 +1966,15 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         }
 
     from mechanics.combat.items import parse_item_tier
+    from mechanics.combat.online_store import (
+        STORE_MODE_SCHOOL_MART,
+        compute_phone_item_badges,
+        get_eligible_phone_store_categories,
+        infer_item_category,
+    )
     from mechanics.world.locations import is_school_scenario as _is_hs_scen
     stock = []
+    is_phone_like = bool(is_phone_shop or merchant_type in ("online_merchant", "school_mart"))
     for entry in result.get("stock", []) or []:
         if not isinstance(entry, dict) or not entry.get("name"):
             continue
@@ -1645,12 +1985,15 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             or any(item_name.lower().startswith(p) for p in ("spellbook:", "grimoire:", "tome:", "scroll:"))
         ):
             continue
-        if (is_phone_shop or merchant_type == "online_merchant") and _is_hs_scen(scen_key):
-            if item_type.lower() in ("lingerie", "weapon", "shield", "armor", "spellbook"):
+        if is_phone_like and (
+            effective_store_mode == STORE_MODE_SCHOOL_MART
+            or (_is_hs_scen(scen_key) and not scenario_data.is_nsfw_scenario(scen_key))
+        ):
+            if item_type.lower() in ("lingerie", "weapon", "shield", "armor", "spellbook", "novelty"):
                 continue
         desc = str(entry.get("description", ""))[:200]
         tier = parse_item_tier({"name": item_name, "description": desc, "item_type": item_type, "metadata": entry.get("metadata")})
-        if (is_phone_shop or merchant_type == "online_merchant") and _is_hs_scen(scen_key) and tier == 1:
+        if is_phone_like and tier == 1:
             tier = 2
 
         # Calculate balanced pricing
@@ -1668,9 +2011,13 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             "quantity": quantity,
             "tier": tier,
         }
-        for keep_k in ("effect", "metadata", "slot", "slot_cost"):
+        for keep_k in ("effect", "metadata", "slot", "slot_cost", "category", "category_label", "badges"):
             if entry.get(keep_k) is not None:
                 st_entry[keep_k] = entry[keep_k]
+        if is_phone_like:
+            cat_key = infer_item_category(st_entry, store_mode=effective_store_mode or "online_general")
+            st_entry.setdefault("category", cat_key)
+            st_entry.setdefault("badges", compute_phone_item_badges(st_entry))
         stock.append(st_entry)
 
     # Integrate Procedural Potions for Potion Merchants
@@ -1806,6 +2153,11 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         "shop_faction_archetype": shop_ctx.get("shop_faction_archetype"),
         "is_cult_discounted_shop": bool(shop_ctx.get("is_cult_discounted_shop")),
     }
+    if is_phone_like:
+        out_shop["store_mode"] = effective_store_mode
+        out_shop["categories"] = get_eligible_phone_store_categories(
+            scen_key, store_mode=effective_store_mode
+        )
     if shop_ctx.get("pricing_badge"):
         out_shop["pricing_badge"] = shop_ctx["pricing_badge"]
     if active_hs_clerk:
@@ -2174,9 +2526,17 @@ def get_total_buy_discount(haggle_discount_pct: int, faction_discount_pct: int) 
     return min(40, haggle_discount_pct + faction_discount_pct)
 
 
-def get_store_key(merchant: dict, is_phone_shop: bool = False, merchant_type: str = "general_merchant", location: str = "") -> str:
+def get_store_key(
+    merchant: dict,
+    is_phone_shop: bool = False,
+    merchant_type: str = "general_merchant",
+    location: str = "",
+    store_mode: str = "",
+) -> str:
     """Return a unique, stable key for a store instance."""
-    if is_phone_shop or merchant_type == "online_merchant":
+    if is_phone_shop or merchant_type in ("online_merchant", "school_mart"):
+        if str(store_mode or "").strip().lower() == "school_mart" or merchant_type == "school_mart":
+            return "phone_school_mart"
         return "phone_shop"
     if merchant.get("is_faction_quartermaster") or merchant_type == "faction_quartermaster":
         return f"faction_{location or 'hq'}"

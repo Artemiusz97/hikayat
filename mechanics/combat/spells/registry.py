@@ -808,6 +808,14 @@ for spell_id, spell in SPELL_REGISTRY.items():
             spell["decay_rate"] = 0.25
 
 
+try:
+    from .procedural import SUMMON_TEMPLATES as _SUMMON_TEMPLATES_REF
+    from .spirit_court_perks import register_spirit_court_summons as _register_spirit_court_summons
+    _register_spirit_court_summons(SPELL_REGISTRY, _SUMMON_TEMPLATES_REF)
+except Exception:
+    pass
+
+
 def register_spell(spell_def: Dict[str, Any]) -> None:
     if "id" in spell_def:
         # Guarantee streamlined targeting metadata exists
@@ -854,6 +862,13 @@ def get_spell(spell_id: str) -> Optional[Dict[str, Any]]:
         try:
             from mechanics.pacts.catalog import ensure_pact_spells_registered
             ensure_pact_spells_registered()
+        except Exception:
+            pass
+    if spell_id not in SPELL_REGISTRY and str(spell_id).startswith("spirit_summon_"):
+        try:
+            from .procedural import SUMMON_TEMPLATES as _SUMMON_TEMPLATES_LAZY
+            from .spirit_court_perks import register_spirit_court_summons
+            register_spirit_court_summons(SPELL_REGISTRY, _SUMMON_TEMPLATES_LAZY)
         except Exception:
             pass
     sp = SPELL_REGISTRY.get(spell_id)

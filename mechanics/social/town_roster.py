@@ -1933,7 +1933,7 @@ def get_active_shop_clerk_for_location(
         if pt_spec and remap_town_node_for_scenario(pt_spec["venue_node_id"], scen_key) == target_venue:
             char_id = 0
             if user_id:
-                ch = db.get_character(user_id)
+                ch = db.get_character(user_id, session_id=session_id)
                 char_id = int(ch.get("id", 0)) if ch else 0
             contact = db.get_contact(session_id, entry["name"], character_id=char_id)
             affinity = int((contact or {}).get("relationship_score") or entry.get("affinity_score") or 0)

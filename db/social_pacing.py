@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .core import _restore_session_table_rows, get_conn
 
@@ -622,6 +622,13 @@ def record_contact_dossier_discoveries(
                     continue
                 if not f_key:
                     f_key = f"{f_cat}:{f_val.lower()}"
+                if f_cat == "openness":
+                    c.execute(
+                        """DELETE FROM contact_dossier_discoveries
+                           WHERE session_id = ? AND character_id = ? AND npc_id = ?
+                             AND fact_category = 'openness' AND fact_key != ?""",
+                        (sid, cid, nid, f_key),
+                    )
                 cur = c.execute(
                     """INSERT OR IGNORE INTO contact_dossier_discoveries (
                            session_id, character_id, npc_id, fact_category, fact_key,
@@ -969,7 +976,12 @@ def rollback_social_pacing_state_after_turn(
 
 
 
-def get_player_fow_exemption_sets(session_id: int) -> dict[str, set[str]]:
+def get_player_fow_exemption_sets(
+    session_id: int,
+    *,
+    resolve_npc_id_fn: Callable[..., str | None] | None = None,
+    romantic_types: Iterable[str] | None = None,
+) -> dict[str, set[str]]:
     """Returns canonical NPC keys exempt from Fog-of-War via party membership, kinship, or active romance."""
     party_npc_keys: set[str] = set()
     kin_npc_keys: set[str] = set()
@@ -981,7 +993,13 @@ def get_player_fow_exemption_sets(session_id: int) -> dict[str, set[str]]:
             "romantic_npc_keys": romantic_npc_keys,
         }
     sid = int(session_id)
-    import mechanics.social.relationship_graph as rg
+    if resolve_npc_id_fn is None or romantic_types is None:
+        import mechanics.social.relationship_graph as rg
+        eff_resolve_fn = resolve_npc_id_fn if resolve_npc_id_fn is not None else rg.resolve_npc_id_for_person
+        eff_romantic_types = set(romantic_types) if romantic_types is not None else rg.ROMANTIC_TYPES
+    else:
+        eff_resolve_fn = resolve_npc_id_fn
+        eff_romantic_types = set(romantic_types)
 
     with get_conn() as conn:
         try:
@@ -1004,12 +1022,12 @@ def get_player_fow_exemption_sets(session_id: int) -> dict[str, set[str]]:
             ).fetchall()
             for tr in t_rows:
                 other_raw = tr["person_b_key"] if tr["person_a_key"] == "player" else tr["person_a_key"]
-                resolved_nid = rg.resolve_npc_id_for_person(sid, other_raw, conn=conn)
+                resolved_nid = eff_resolve_fn(sid, other_raw, conn=conn)
                 other_key = canon_social_npc_id(resolved_nid or other_raw)
                 if not other_key:
                     continue
                 tt = str(tr["tie_type"] or "").lower()
-                if tt in rg.ROMANTIC_TYPES:
+                if tt in eff_romantic_types:
                     romantic_npc_keys.add(other_key)
                 elif tt in _KIN_TIE_TYPES:
                     kin_npc_keys.add(other_key)

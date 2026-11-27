@@ -176,6 +176,19 @@ def get_folklore_sanctuary_label(key: str, language: str = "en") -> str:
     return getattr(en, "FOLKLORE_SANCTUARY_LABELS", {}).get(key, key)
 
 
+SPIRIT_COURT_LABELS = getattr(en, "SPIRIT_COURT_LABELS", {})
+
+
+def get_spirit_court_label(key: str, language: str = "en") -> str:
+    """Returns a localized Spirit Court / Expansion v2 UI string across all 5 languages."""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "SPIRIT_COURT_LABELS", {}) or {}
+    if key in labels:
+        return labels[key]
+    return getattr(en, "SPIRIT_COURT_LABELS", {}).get(key, key)
+
+
 def get_quest_ui_label(key: str, language: str = "en") -> str:
     """Returns a localized Quest/Chronicle UI string with fallback to English."""
     lang = (language or "en").lower().strip()[:2]
@@ -222,6 +235,164 @@ def get_anomalous_site_ui_label(key: str, language: str = "en") -> str:
     return getattr(en, "ANOMALOUS_SITE_UI_LABELS", {}).get(key, key)
 
 
+def get_stature_label(key: str, language: str = "en") -> str:
+    """Return a localized stature tier label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm:
+        return ""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "STATURE_LABELS", {}) or {}
+    if norm in labels:
+        return labels[norm]
+    return getattr(en, "STATURE_LABELS", {}).get(norm, norm.replace("_", " ").title())
+
+
+_PHYSIQUE_LABEL_ALIASES = {
+    "slender": "slim",
+    "petite": "slim",
+    "curvy": "voluptuous",
+}
+
+
+def get_physique_label(key: str, language: str = "en") -> str:
+    """Return a localized physique tier label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm:
+        return ""
+    norm = _PHYSIQUE_LABEL_ALIASES.get(norm, norm)
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "PHYSIQUE_LABELS", {}) or {}
+    if norm in labels:
+        return labels[norm]
+    return getattr(en, "PHYSIQUE_LABELS", {}).get(norm, norm.replace("_", " ").title())
+
+
+def get_asset_texture_label(key: str, language: str = "en") -> str:
+    """Return a localized single-word BB/PP tactile texture label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm:
+        return ""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "ASSET_TEXTURE_LABELS", {}) or {}
+    if norm in labels:
+        return labels[norm]
+    return getattr(en, "ASSET_TEXTURE_LABELS", {}).get(norm, norm.replace("_", " ").title())
+
+
+def get_species_surface_label(key: str, language: str = "en") -> str:
+    """Return a localized species surface label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm or norm == "natural":
+        return ""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "SPECIES_SURFACE_LABELS", {}) or {}
+    if norm in labels:
+        return labels[norm]
+    return getattr(en, "SPECIES_SURFACE_LABELS", {}).get(norm, norm.replace("_", " ").title())
+
+
+_REAR_SIZE_ALIASES = {
+    "flat": "flat",
+    "minimal": "flat",
+    "tiny": "flat",
+    "narrow": "flat",
+    "slim": "flat",
+    "small": "small",
+    "compact": "small",
+    "petite": "small",
+    "modest": "small",
+    "perky": "small",
+    "average": "average",
+    "shapely": "average",
+    "medium": "average",
+    "proportional": "average",
+    "toned": "average",
+    "rounded": "average",
+    "large": "large",
+    "plump": "large",
+    "full": "large",
+    "curvy": "large",
+    "voluptuous": "large",
+    "thick": "large",
+    "chubby": "large",
+    "huge": "huge",
+    "bountiful": "huge",
+    "massive": "huge",
+    "heavy": "huge",
+    "plus_size": "huge",
+}
+
+_REAR_TEXTURE_ALIASES = {
+    "firm": "firm",
+    "toned": "firm",
+    "perky": "firm",
+    "muscular": "firm",
+    "taut": "taut",
+    "tight": "taut",
+    "fit": "taut",
+    "supple": "supple",
+    "smooth": "supple",
+    "yielding": "supple",
+    "rounded": "rounded",
+    "round": "rounded",
+    "curvy": "rounded",
+    "heart_shaped": "rounded",
+    "plush": "plush",
+    "soft": "plush",
+    "pillowy": "plush",
+    "cushioned": "plush",
+    "jiggly": "jiggly",
+    "jiggle": "jiggly",
+    "bouncy": "jiggly",
+    "heavy": "jiggly",
+}
+
+
+def get_rear_size_label(key: str, language: str = "en") -> str:
+    """Return a localized 5-tier rear size label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm:
+        return ""
+    tier = _REAR_SIZE_ALIASES.get(norm, norm)
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "REAR_SIZE_LABELS", {}) or {}
+    if tier in labels:
+        return labels[tier]
+    return getattr(en, "REAR_SIZE_LABELS", {}).get(tier, norm.replace("_", " ").title())
+
+
+def get_rear_texture_label(key: str, language: str = "en") -> str:
+    """Return a localized single-word rear tactile texture label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm:
+        return ""
+    canon = _REAR_TEXTURE_ALIASES.get(norm, norm)
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "REAR_TEXTURE_LABELS", {}) or {}
+    if canon in labels:
+        return labels[canon]
+    return getattr(en, "REAR_TEXTURE_LABELS", {}).get(canon, canon.replace("_", " ").title())
+
+
+def get_body_preference_label(key: str, language: str = "en") -> str:
+    """Return a localized intimate body preference label with English fallback."""
+    norm = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not norm:
+        return ""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "BODY_PREFERENCE_LABELS", {}) or {}
+    if norm in labels:
+        return labels[norm]
+    return getattr(en, "BODY_PREFERENCE_LABELS", {}).get(norm, norm.replace("_", " ").title())
+
+
 __all__ = [
     "SUPPORTED_LOCALES",
     "LOCALES",
@@ -242,11 +413,20 @@ __all__ = [
     "get_all_movement_prefixes",
     "get_realty_label",
     "get_folklore_sanctuary_label",
+    "SPIRIT_COURT_LABELS",
+    "get_spirit_court_label",
     "get_quest_ui_label",
     "format_quest_travel_label",
     "format_quest_dialogue_handoff_label",
     "get_pact_ui_label",
     "get_anomalous_site_ui_label",
+    "get_stature_label",
+    "get_physique_label",
+    "get_asset_texture_label",
+    "get_species_surface_label",
+    "get_rear_size_label",
+    "get_rear_texture_label",
+    "get_body_preference_label",
     "en",
     "pl",
     "ms",

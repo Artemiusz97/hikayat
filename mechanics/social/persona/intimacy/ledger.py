@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import time
 from typing import Dict, Any, List, Optional, Tuple
+from ..core import is_female_gender, is_male_gender
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,9 @@ VALID_DIRECTIONS = {"give", "receive", "mutual"}
 
 def normalize_gender(raw_gender: str) -> str:
     """Normalizes gender string to 'female', 'male', or 'unknown'."""
-    raw = str(raw_gender or "").strip().lower()
-    if any(kw in raw for kw in ("female", "woman", "girl", "lady", "she", "her")):
+    if is_female_gender(raw_gender):
         return "female"
-    if any(kw in raw for kw in ("male", "man", "boy", "lord", "he", "him", "his")):
+    if is_male_gender(raw_gender):
         return "male"
     return "unknown"
 
@@ -246,6 +246,7 @@ def record_intimate_event(
                 pass
 
         if session_id:
+            from mechanics.social.races import is_folklore_beast_race
             for _probe_key in (canon_char_id, canon_partner_id or "", partner_name or ""):
                 _pk = str(_probe_key or "").strip()
                 if not _pk or _pk == "player":
@@ -254,8 +255,8 @@ def record_intimate_event(
                     "SELECT race FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?) LIMIT 1",
                     (session_id, _pk, _pk.lower()),
                 ).fetchone()
-                if _fox_row and str(_fox_row["race"] or "").strip().lower() == "kitsune:myobu_fox":
-                    raise ValueError("Cannot record intimate events while Kitsune is in non-humanoid Myōbu Spirit Fox form (kitsune:myobu_fox).")
+                if _fox_row and is_folklore_beast_race(str(_fox_row["race"] or "")):
+                    raise ValueError(f"Cannot record intimate events while NPC is in non-humanoid beast form ({_fox_row['race']}).")
 
         sanitized_direction = enforce_biological_invariants(
             gender=eff_char_gender,

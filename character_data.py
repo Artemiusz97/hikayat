@@ -804,10 +804,17 @@ def calculate_combat_attributes(
     equipped_items: list | None = None,
     scenario: str | None = None,
     allow_non_combat: bool = False,
+    session_id: int | None = None,
 ) -> dict:
     """Convenience alias delegating to mechanics.social.attributes.calculate_combat_attributes."""
     from mechanics.social.attributes import calculate_combat_attributes as _calc
-    return _calc(character, equipped_items, scenario=scenario, allow_non_combat=allow_non_combat)
+    return _calc(
+        character,
+        equipped_items,
+        scenario=scenario,
+        allow_non_combat=allow_non_combat,
+        session_id=session_id,
+    )
 
 
 def generate_equipment(scenario: str = "fantasy", slot: str = "Weapon", tier: int | None = None, archetype: str | None = None, name: str | None = None) -> dict:

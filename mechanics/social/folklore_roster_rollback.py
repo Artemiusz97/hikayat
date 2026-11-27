@@ -43,7 +43,7 @@ def rollback_folklore_roster_state_after_turn(
     catalog = load_folklore_villages_catalog()
     kits = catalog.get("combat_kits") or {}
 
-    ctx = nullcontext(conn) if conn is not None else db.get_conn()
+    ctx = nullcontext(conn) if conn is not None else db.UnitOfWork()
     with ctx as c:
         s_row = c.execute(
             "SELECT extra_json, party_npcs_json FROM sessions WHERE id = ?",
@@ -134,6 +134,11 @@ def rollback_folklore_roster_state_after_turn(
                         "DELETE FROM social_persons WHERE session_id = ? AND (person_key = ? OR contact_npc_id = ?)",
                         (int(session_id), canon_key, npc_id),
                     )
+                    if npc_id:
+                        c.execute(
+                            "DELETE FROM contact_dossier_discoveries WHERE session_id = ? AND npc_id = ?",
+                            (int(session_id), npc_id),
+                        )
                     entry["hydrated"] = False
                     entry.pop("hydrated_turn", None)
                     entry["befriended"] = False
@@ -160,10 +165,12 @@ def rollback_folklore_roster_state_after_turn(
                             bi = json.loads(ct_r["basic_info_json"] or "{}")
                         except Exception:
                             bi = {}
-                        bi["contact_added"] = False
-                        bi["is_contact"] = False
+                        keep_ghoul_relay = str(entry.get("folklore_village") or "").strip().lower() == "ghoul"
+                        bi["contact_added"] = keep_ghoul_relay
+                        bi["is_contact"] = keep_ghoul_relay
+                        bi["has_contact_info"] = keep_ghoul_relay
                         bi["unlocked_via_friendship"] = False
-                        bi["spirit_relay_unlocked"] = False
+                        bi["spirit_relay_unlocked"] = keep_ghoul_relay
                         c.execute(
                             "UPDATE contacts SET basic_info_json = ? WHERE id = ?",
                             (json.dumps(bi), ct_r["id"]),
@@ -174,6 +181,7 @@ def rollback_folklore_roster_state_after_turn(
                 after_shifts = [h for h in hist if isinstance(h, dict) and int(h.get("turn") or 0) > t_num]
                 if after_shifts:
                     revert_form = str(after_shifts[0].get("prev_form") or entry.get("initial_form") or entry.get("race") or "")
+                    prev_track = str(after_shifts[0].get("prev_track") or "").strip()
                     kept_hist = [h for h in hist if isinstance(h, dict) and int(h.get("turn") or 0) <= t_num]
                     entry["form_history"] = kept_hist
                     if int(entry.get("bond_unlocked_turn") or 0) > t_num:
@@ -209,7 +217,11 @@ def rollback_folklore_roster_state_after_turn(
                             bi["race"] = revert_form
                             bi["combat_kit_key"] = r_kit
                             bi["innate_abilities"] = r_abils
-                            r_track = "platonic" if revert_form == "kitsune:myobu_fox" else str(ct_r["track"] or "platonic")
+                            r_track = (
+                                "platonic"
+                                if revert_form == "kitsune:myobu_fox"
+                                else (prev_track or str(ct_r["track"] or "platonic"))
+                            )
                             c.execute(
                                 "UPDATE contacts SET race = ?, track = ?, basic_info_json = ?, appearance_json = ? WHERE id = ?",
                                 (revert_form, r_track, json.dumps(bi), json.dumps(app), ct_r["id"]),
@@ -221,9 +233,58 @@ def rollback_folklore_roster_state_after_turn(
                         _sync_villager_physical_garments(c, int(session_id), name, revert_form, h_outfit)
                         forms_reverted += 1
                         dirty = True
-                elif entry.get("hydrated") and str(entry.get("folklore_village") or "") == "kitsune":
+                    elif revert_form in ("ghoul:humanoid", "ghoul:canid"):
+                        from .folklore_ghoul import normalize_canid_species
+                        h_kit = str(entry.get("humanoid_kit_key") or "ghoul_humanoid_duelist")
+                        r_kit = "ghoul_canid_beast" if revert_form == "ghoul:canid" else h_kit
+                        r_abils = list(kits.get(r_kit) or [])
+                        app = dict(entry.get("appearance") or {})
+                        canid_sp = normalize_canid_species(app.get("canid_species") or entry.get("canid_species"), seed=name)
+                        h_outfit = str(app.get("humanoid_outfit") or "Tailored dark charcoal wool coat over black silk attire")
+                        app["ghoul_form"] = revert_form
+                        app["canid_species"] = canid_sp
+                        app["coat_color"] = str(app.get("fur_coat") or "") if revert_form == "ghoul:canid" else ""
+                        app["outfit_style"] = "" if revert_form == "ghoul:canid" else h_outfit
+                        app["outfit_summary"] = (
+                            f"Quadruped {canid_sp.replace('_', ' ')} canid form wearing only an iron-silver pack collar"
+                            if revert_form == "ghoul:canid"
+                            else h_outfit
+                        )
+                        entry["race"] = revert_form
+                        entry["combat_kit_key"] = r_kit
+                        entry["innate_abilities"] = r_abils
+                        entry["appearance"] = app
+                        ct_r = c.execute(
+                            "SELECT id, basic_info_json, track FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+                            (int(session_id), npc_id, name.lower()),
+                        ).fetchone()
+                        if ct_r:
+                            try:
+                                bi = json.loads(ct_r["basic_info_json"] or "{}")
+                            except Exception:
+                                bi = {}
+                            bi["race"] = revert_form
+                            bi["combat_kit_key"] = r_kit
+                            bi["innate_abilities"] = r_abils
+                            r_track = (
+                                "platonic"
+                                if revert_form == "ghoul:canid"
+                                else (prev_track or str(ct_r["track"] or "platonic"))
+                            )
+                            c.execute(
+                                "UPDATE contacts SET race = ?, track = ?, basic_info_json = ?, appearance_json = ? WHERE id = ?",
+                                (revert_form, r_track, json.dumps(bi), json.dumps(app), ct_r["id"]),
+                            )
+                        c.execute(
+                            "UPDATE lorebook SET race = ?, appearance_json = ? WHERE session_id = ? AND lower(name) = ?",
+                            (revert_form, json.dumps(app), int(session_id), name.lower()),
+                        )
+                        _sync_villager_physical_garments(c, int(session_id), name, revert_form, h_outfit)
+                        forms_reverted += 1
+                        dirty = True
+                elif entry.get("hydrated") and str(entry.get("folklore_village") or "") in ("kitsune", "ghoul"):
                     cur_form = str(entry.get("race") or "kitsune:humanoid")
-                    h_outfit = str((entry.get("appearance") or {}).get("humanoid_outfit") or "Vermilion-and-ivory Inari shrine kimono")
+                    h_outfit = str((entry.get("appearance") or {}).get("humanoid_outfit") or "Folklore shrine attire")
                     _sync_villager_physical_garments(c, int(session_id), name, cur_form, h_outfit)
 
             if dirty:
@@ -236,7 +297,7 @@ def rollback_folklore_roster_state_after_turn(
                 raw_p_npcs = []
             if isinstance(raw_p_npcs, list) and raw_p_npcs:
                 from .folklore_roster_lifecycle import _build_folklore_weapon_profile
-                from .folklore_roster import is_myobu_fox_race
+                from .folklore_roster import is_folklore_beast_race
 
                 roster_by_key: Dict[str, Dict[str, Any]] = {}
                 for r_ent in roster:
@@ -291,7 +352,7 @@ def rollback_folklore_roster_state_after_turn(
                             r_tier = int(r_match.get("agent_tier") or p_ent.get("agent_tier") or 3)
                             r_vk = str(r_match.get("folklore_village") or p_ent.get("folklore_village") or "kitsune")
                             p_ent["race"] = r_form
-                            p_ent["is_beast_companion"] = is_myobu_fox_race(r_form)
+                            p_ent["is_beast_companion"] = is_folklore_beast_race(r_form)
                             p_ent["innate_abilities"] = r_abils
                             p_ent["spells"] = r_abils
                             p_ent["weapon_profile"] = _build_folklore_weapon_profile(r_form, r_vk, r_tier)
@@ -302,6 +363,71 @@ def rollback_folklore_roster_state_after_turn(
                         "UPDATE sessions SET party_npcs_json = ? WHERE id = ?",
                         (json.dumps(kept_p_npcs, default=str), int(session_id)),
                     )
+
+        xr_roster = ex.get("spirit_crossroads_roster")
+        if isinstance(xr_roster, list):
+            for x_ent in xr_roster:
+                if not isinstance(x_ent, dict):
+                    continue
+                x_id = str(x_ent.get("npc_id") or "")
+                x_nm = str(x_ent.get("name") or "")
+                if int(x_ent.get("hydrated_turn") or 0) > t_num and x_ent.get("hydrated"):
+                    x_canon = _slugify_id(x_nm)
+                    c.execute(
+                        "DELETE FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+                        (int(session_id), x_id, x_nm.lower()),
+                    )
+                    if x_nm:
+                        c.execute(
+                            "DELETE FROM lorebook WHERE session_id = ? AND lower(name) = ?",
+                            (int(session_id), x_nm.lower()),
+                        )
+                    if x_canon:
+                        c.execute(
+                            "DELETE FROM actor_garments WHERE session_id = ? AND actor_key = ?",
+                            (int(session_id), x_canon),
+                        )
+                        c.execute(
+                            "DELETE FROM actor_physical_states WHERE session_id = ? AND canonical_key = ?",
+                            (int(session_id), x_canon),
+                        )
+                        c.execute(
+                            "DELETE FROM social_ties WHERE session_id = ? AND (person_a_key = ? OR person_b_key = ?)",
+                            (int(session_id), x_canon, x_canon),
+                        )
+                    if x_canon or x_id:
+                        c.execute(
+                            "DELETE FROM social_persons WHERE session_id = ? AND (person_key = ? OR contact_npc_id = ?)",
+                            (int(session_id), x_canon, x_id),
+                        )
+                    if x_id:
+                        c.execute(
+                            "DELETE FROM contact_dossier_discoveries WHERE session_id = ? AND npc_id = ?",
+                            (int(session_id), x_id),
+                        )
+                    x_ent["hydrated"] = False
+                    x_ent.pop("hydrated_turn", None)
+                    x_ent["befriended"] = False
+                    x_ent.pop("befriended_turn", None)
+                    hydrations_reverted += 1
+                    dirty = True
+                elif int(x_ent.get("befriended_turn") or 0) > t_num and x_ent.get("befriended"):
+                    x_ent["befriended"] = False
+                    x_ent.pop("befriended_turn", None)
+                    ct_x = c.execute(
+                        "SELECT id, basic_info_json FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+                        (int(session_id), x_id, x_nm.lower()),
+                    ).fetchone()
+                    if ct_x:
+                        bi_x = json.loads(ct_x["basic_info_json"] or "{}") if ct_x["basic_info_json"] else {}
+                        bi_x["contact_added"] = False
+                        bi_x["is_contact"] = False
+                        bi_x["unlocked_via_friendship"] = False
+                        bi_x["spirit_relay_unlocked"] = False
+                        c.execute("UPDATE contacts SET basic_info_json = ? WHERE id = ?", (json.dumps(bi_x), ct_x["id"]))
+                    dirty = True
+            if dirty:
+                ex["spirit_crossroads_roster"] = xr_roster
 
         if dirty:
             c.execute(
@@ -332,12 +458,21 @@ def commit_staged_folklore_ops(
         session.pop("_staged_attuned_villages", None)
     if not session_id or not isinstance(pending_ops, dict) or not pending_ops:
         return {}
+    from mechanics.world.locations.folklore_spirit_realm import (
+        on_enter_village_overland_from_spirit_realm,
+        on_exit_village_to_human_threshold,
+        on_visit_spirit_crossroads,
+        resolve_crossroads_neutral_truce_ejection,
+        resolve_spirit_sparring_drill,
+        unseal_chinatown_shortcut,
+    )
     from mechanics.world.locations.folklore_veil import (
         apply_sanctuary_treaty_violation,
         attune_folklore_village,
         unlock_leyline_spirit_passage,
     )
     from .folklore_roster_lifecycle import (
+        hydrate_crossroads_cast_for_node,
         hydrate_village_cast_for_node,
         resolve_glamour_wanderer_interaction,
     )
@@ -361,12 +496,26 @@ def commit_staged_folklore_ops(
             committed["treaty_violation"] = exp_res
             return committed
 
+        if pending_ops.get("crossroads_truce_ejection"):
+            committed["crossroads_truce"] = resolve_crossroads_neutral_truce_ejection(
+                session_id,
+                turn_number=eff_turn,
+                advance_clock=advance_clock_on_expel,
+            )
+            return committed
+
         atone_spec = pending_ops.get("atonement_payment")
         if isinstance(atone_spec, dict) and not pending_ops.get("is_retry"):
             atone_uid = int(atone_spec.get("user_id") or 0)
             atone_cost = int(atone_spec.get("cost") or 0)
-            if atone_uid > 0 and atone_cost > 0 and db.get_character(atone_uid):
-                db.apply_hp_mp_delta(atone_uid, gold_delta=-atone_cost)
+            atone_char = db.get_character(atone_uid, session_id=session_id) if atone_uid > 0 else None
+            if atone_uid > 0 and atone_cost > 0 and atone_char:
+                db.apply_hp_mp_delta(
+                    atone_uid,
+                    gold_delta=-atone_cost,
+                    character_id=atone_char.get("id"),
+                    session_id=session_id,
+                )
                 committed["atonement_gold_paid"] = atone_cost
 
         att_spec = pending_ops.get("attune_village")
@@ -376,11 +525,75 @@ def commit_staged_folklore_ops(
                 str(att_spec["village_key"]),
                 turn_number=eff_turn,
                 reason=str(att_spec.get("reason") or "veil_attunement"),
+                reveal_human_portal=bool(att_spec.get("reveal_human_portal", True)),
+            )
+
+        if pending_ops.get("visit_spirit_crossroads"):
+            committed["crossroads_visited"] = on_visit_spirit_crossroads(session_id, turn_number=eff_turn)
+
+        ov_vk = str(pending_ops.get("overland_enter_village") or "").strip()
+        if ov_vk in ("kitsune", "bunian", "ghoul"):
+            committed["overland_entered"] = on_enter_village_overland_from_spirit_realm(
+                session_id,
+                ov_vk,
+                turn_number=eff_turn,
+            )
+
+        bd_vk = str(pending_ops.get("backdoor_attune_village") or "").strip()
+        if bd_vk in ("kitsune", "bunian", "ghoul"):
+            committed["backdoor_attuned"] = on_exit_village_to_human_threshold(
+                session_id,
+                bd_vk,
+                turn_number=eff_turn,
+            )
+
+        ct_spec = pending_ops.get("unseal_chinatown")
+        if isinstance(ct_spec, dict) and ct_spec.get("method"):
+            committed["chinatown_unsealed"] = unseal_chinatown_shortcut(
+                session_id,
+                method=str(ct_spec["method"]),
+                user_id=int(ct_spec.get("user_id") or 0) or None,
+                per_roll=ct_spec.get("per_roll"),
+                turn_number=eff_turn,
+                from_node_id=str(ct_spec.get("from_node_id") or ""),
+            )
+
+        sent_spec = pending_ops.get("ghoul_sentinel_clearance")
+        if isinstance(sent_spec, dict) and sent_spec.get("method") and not pending_ops.get("is_retry"):
+            from .folklore_ghoul import resolve_ghoul_sentinel_clearance
+            committed["ghoul_sentinel_clearance"] = resolve_ghoul_sentinel_clearance(
+                session_id,
+                method=str(sent_spec["method"]),
+                stat=str(sent_spec.get("stat") or "CHA"),
+                user_id=int(sent_spec.get("user_id") or 0) or None,
+                roll_override=12 if str(sent_spec["method"]) == "nerve" else None,
+                turn_number=eff_turn,
+            )
+
+        spar_spec = pending_ops.get("sparring_drill")
+        if isinstance(spar_spec, dict) and spar_spec.get("node_id"):
+            committed["sparring_drill"] = resolve_spirit_sparring_drill(
+                session_id,
+                str(spar_spec["node_id"]),
+                stat=str(spar_spec.get("stat") or "AGI"),
+                user_id=int(spar_spec.get("user_id") or 0) or None,
+                turn_number=eff_turn,
             )
 
         ley_reason = str(pending_ops.get("unlock_leyline_reason") or "").strip()
         if ley_reason:
             committed["leyline"] = unlock_leyline_spirit_passage(session_id, turn_number=eff_turn, reason=ley_reason)
+
+        hyd_xr_spec = pending_ops.get("hydrate_crossroads_node")
+        if isinstance(hyd_xr_spec, dict) and hyd_xr_spec.get("node_id"):
+            committed["hydrated_crossroads_count"] = len(
+                hydrate_crossroads_cast_for_node(
+                    session_id,
+                    str(hyd_xr_spec["node_id"]),
+                    current_minute=int(hyd_xr_spec.get("current_minute", 480) or 480),
+                    turn_number=eff_turn,
+                )
+            )
 
         hyd_spec = pending_ops.get("hydrate_node")
         if isinstance(hyd_spec, dict) and hyd_spec.get("node_id"):

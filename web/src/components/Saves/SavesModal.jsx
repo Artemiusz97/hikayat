@@ -208,6 +208,13 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
                   </span>
                 </div>
 
+                {slot.show_realm_badge && slot.realm_name && (
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-600/40 text-[10px] font-semibold text-cyan-200">
+                    <span aria-hidden="true">🌀</span>
+                    <span>{slot.realm_name}</span>
+                  </div>
+                )}
+
                 {slot.current_location && (
                   <div className="text-[11px] text-gray-400 flex items-center gap-1 truncate">
                     <MapPin size={11} className="text-amber-400 shrink-0" />

@@ -1,0 +1,78 @@
+{
+  "anomalous_rift_open": {
+    "template_id": "anomalous_rift_open",
+    "name": "Fractured Echo Rift",
+    "realm_kind": "anomalous_dimension",
+    "comms_isolated": true,
+    "npc_spillover": false,
+    "time_scale": 0.0,
+    "has_local_safe_hub": false,
+    "exit_mode": "open",
+    "is_ephemeral": true,
+    "portal_icon": "🌀",
+    "sub_locations": [
+      {
+        "id": "sub_rift_open_landing",
+        "name": "Shifting Glass Landing",
+        "is_entrance": 1,
+        "sensory": "Fractured obsidian tiles hover over silent static mist while pale violet sparks drift across warped masonry.",
+        "props": [
+          "Cracked Obsidian Tile",
+          "Static Survey Beacon",
+          "Warped Iron Railing",
+          "Humming Prism Shard"
+        ]
+      },
+      {
+        "id": "sub_rift_open_sanctum",
+        "name": "Resonant Anomaly Core",
+        "is_entrance": 0,
+        "sensory": "Concentric rings of suspended dust hang motionless around a fractured crystal spindle humming in low dissonance.",
+        "props": [
+          "Fractured Crystal Spindle",
+          "Suspended Dust Ring",
+          "Chalk Containment Sigil",
+          "Tarnished Brass Pendulum"
+        ]
+      }
+    ]
+  },
+  "anomalous_rift_lockdown": {
+    "template_id": "anomalous_rift_lockdown",
+    "name": "Sealed Labyrinth Pocket",
+    "realm_kind": "anomalous_dimension",
+    "comms_isolated": true,
+    "npc_spillover": false,
+    "time_scale": 0.0,
+    "has_local_safe_hub": false,
+    "exit_mode": "lockdown_until_cleared",
+    "is_ephemeral": true,
+    "portal_icon": "🌀",
+    "sub_locations": [
+      {
+        "id": "sub_rift_lock_vestibule",
+        "name": "Collapsed Threshold Vault",
+        "is_entrance": 1,
+        "sensory": "Heavy basalt ribs curve overhead like a ribcage while cold iron chimes rattle in windless darkness.",
+        "props": [
+          "Basalt Rib Column",
+          "Cold Iron Chimes",
+          "Shattered Lantern Casing",
+          "Etched Boundary Marker"
+        ]
+      },
+      {
+        "id": "sub_rift_lock_nexus",
+        "name": "Inverted Pendulum Chamber",
+        "is_entrance": 0,
+        "sensory": "An inverted brass pendulum ticks backward above a mirror-still pool that reflects no faces.",
+        "props": [
+          "Inverted Brass Pendulum",
+          "Mirror-Still Basin",
+          "Rusted Anchor Chain",
+          "Scorched Ritual Brazier"
+        ]
+      }
+    ]
+  }
+}

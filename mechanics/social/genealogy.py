@@ -21,6 +21,7 @@ from typing import Dict, Any, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 import namegen
+from mechanics.social.persona.core import is_female_gender, is_male_gender
 from mechanics.social.races import (
     normalize_race,
 )
@@ -179,8 +180,8 @@ def get_deterministic_firstname(scenario: str, gender: str, hash_val: int, cultu
     if not isinstance(data, dict):
         data = {}
     g = str(gender or "").lower().strip()
-    is_female = ("female" in g or "woman" in g or "girl" in g or "feminine" in g or "she" in g)
-    is_male = ("male" in g or "man" in g or "boy" in g or "masculine" in g or "he" in g) and not is_female
+    is_female = is_female_gender(g)
+    is_male = is_male_gender(g)
 
     cultures_dict, weights_dict = _get_cultures_dict_for_scenario(scenario, data)
 
@@ -761,7 +762,7 @@ def generate_relationship_status(
     """
     name = contact.get("name", "Unknown NPC")
     contact_gender = contact.get("gender") or "female"
-    is_char_male = any(kw in str(contact_gender).lower() for kw in ("male", "man", "boy", "he")) and not any(kw in str(contact_gender).lower() for kw in ("female", "woman"))
+    is_char_male = is_male_gender(contact_gender)
     partner_gender = "female" if is_char_male else "male"
 
     # 1. Check if contact has established past intimate partner in intimate_memories
@@ -781,11 +782,26 @@ def generate_relationship_status(
     p_intercourse = app_data.get("predetermined_intercourse") or app_data.get("intercourse_experience")
     p_oral = app_data.get("oral_experience") or "inexperienced"
     p_manual = app_data.get("manual_experience") or "inexperienced"
-    if not past_partner_name and (p_intercourse and p_intercourse != "virgin" or p_oral != "inexperienced" or p_manual != "inexperienced") and not app_data.get("had_first_time_with_player"):
-        from mechanics.social.persona import generate_past_intimate_history
-        seed_str = (name + "_past_history").encode("utf-8")
+    p_anal = app_data.get("anal_experience") or "inexperienced"
+    if not past_partner_name and ((p_intercourse and p_intercourse != "virgin") or p_oral != "inexperienced" or p_manual != "inexperienced" or p_anal != "inexperienced") and not app_data.get("had_first_time_with_player"):
+        from mechanics.social.persona import compute_past_history_seed, generate_past_intimate_history
+        c_race_val = str(contact.get("race") or app_data.get("race") or "human")
+        sess_seed = contact.get("session_id") or 0
+        seed_str = compute_past_history_seed(name, race=c_race_val, session_seed=str(sess_seed)).encode("utf-8")
         h_val = int(hashlib.md5(seed_str).hexdigest(), 16)
-        past_data = generate_past_intimate_history(intercourse=p_intercourse, oral=p_oral, manual=p_manual, hash_val=h_val, gender=contact_gender, scenario=scenario)
+        open_val = str(app_data.get("erotic_openness") or app_data.get("openness") or contact.get("openness") or "moderate")
+        past_data = generate_past_intimate_history(
+            intercourse=p_intercourse,
+            oral=p_oral,
+            manual=p_manual,
+            anal=p_anal,
+            openness=open_val,
+            act_likes=app_data.get("act_likes") or "",
+            hash_val=h_val,
+            race=c_race_val,
+            gender=contact_gender,
+            scenario=scenario,
+        )
         if past_data:
             past_partner_name = past_data.get("partner_name", "")
             past_partner_role = past_data.get("partner_role", "Former Classmate")
@@ -1585,9 +1601,9 @@ def build_family_tree_for_member(
             g_val = str(c.get("gender", "")).strip().lower()
             f_name_c = str(c.get("first_name", "")).strip()
             from namegen import is_known_male_name, is_known_female_name
-            is_female = any(kw in g_val for kw in ("female", "woman", "girl", "lady", "she", "her"))
+            is_female = is_female_gender(g_val)
             if not is_female and g_val:
-                is_male = any(kw in g_val for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in g_val for kw in ("female", "woman"))
+                is_male = is_male_gender(g_val)
                 is_female = not is_male
             elif not g_val:
                 is_female = not is_known_male_name(f_name_c) if is_known_male_name(f_name_c) else is_known_female_name(f_name_c)
@@ -1635,9 +1651,9 @@ def build_family_tree_for_member(
         f_name_c = str(c.get("first_name", "")).strip()
 
         from namegen import is_known_male_name, is_known_female_name
-        is_female = any(kw in g_val for kw in ("female", "woman", "girl", "lady", "she", "her"))
+        is_female = is_female_gender(g_val)
         if not is_female and g_val:
-            is_male = any(kw in g_val for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in g_val for kw in ("female", "woman"))
+            is_male = is_male_gender(g_val)
             is_female = not is_male
         elif not g_val:
             if is_known_male_name(f_name_c):

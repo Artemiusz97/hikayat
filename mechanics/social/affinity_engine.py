@@ -285,7 +285,9 @@ def calculate_social_affinity_delta(
 
     intimate_demeanor = str(appearance.get("intimate_demeanor") or "").strip()
     intimate_dynamic = str(appearance.get("intimate_dynamic") or appearance.get("dynamic") or "").strip()
-    turn_ons = str(appearance.get("turn_ons") or appearance.get("sensitive_spots") or "").strip()
+    turn_ons = str(appearance.get("turn_ons") or appearance.get("desires_and_kinks") or "").strip()
+    sensitive_spots = str(appearance.get("sensitive_spots") or "").strip()
+    fetishes = str(appearance.get("fetishes") or "").strip()
     turn_offs = str(appearance.get("turn_offs") or "").strip()
     act_likes = str(appearance.get("act_likes") or "").strip()
     act_dislikes = str(appearance.get("act_dislikes") or "").strip()
@@ -496,37 +498,45 @@ def calculate_social_affinity_delta(
     breakdown["demeanor_dynamic_delta"] = dem_dyn_delta
 
     # -------------------------------------------------------------------------
-    # 5. CRITERION D: TURN-ONS & TURN-OFFS
+    # 5. CRITERION D: SENSITIVE SPOTS, DESIRES & KINKS, & TURN-OFFS
     # -------------------------------------------------------------------------
     to_delta = 0
+    from mechanics.social.persona import (
+        evaluate_environmental_turn_offs,
+        is_turn_off_triggered,
+        match_act_preferences,
+        match_desires_and_kinks,
+        match_sensitive_spots,
+    )
 
-    # Turn-ons check
-    if turn_ons and turn_ons.lower() not in ("none", "unknown"):
-        triggers = [t.replace("(physical)", "").replace("(action)", "").strip().lower() for t in turn_ons.split(",") if t.strip()]
-        for trig in triggers:
-            if not trig or len(trig) < 3:
-                continue
-            words = [w for w in trig.split() if len(w) >= 3]
-            stems = [re.sub(r'(ing|ed|s)$', '', w) for w in words if len(w) >= 3]
-            matched = (
-                matches_keyword_boundary(act_low, trig, allow_negated=False) or
-                _matches_pattern(trig, act_low) or
-                (bool(stems) and all(matches_keyword_boundary(act_low, s, allow_negated=False) for s in stems))
-            )
-            if matched:
-                if succeeded:
-                    to_delta += 2
-                    reasons.append(f"Turn-on triggered: {trig.title()} (+2)")
-                else:
-                    to_delta -= 1
-                    reasons.append(f"Turn-on botched on failed check: {trig.title()} (-1)")
-                break
+    m_spots = match_sensitive_spots(act_low, sensitive_spots)
+    m_desires, m_kinks = match_desires_and_kinks(act_low, turn_ons, fetishes)
+    if m_spots or m_desires or m_kinks:
+        if m_kinks:
+            trig_label = m_kinks[0]
+            hit_bonus = 3 if succeeded else 0
+        else:
+            trig_label = re.sub(r'\([^)]*\)', '', (m_spots or m_desires)[0]).strip()
+            hit_bonus = 2 if succeeded else 0
+        if hit_bonus:
+            to_delta += hit_bonus
+            reasons.append(f"Turn-on triggered: {trig_label.title()} (+{hit_bonus})")
+        else:
+            to_delta -= 1
+            reasons.append(f"Turn-on botched on failed check: {trig_label.title()} (-1)")
 
-    # Turn-offs check
+    # Turn-offs check (action text + context-strict environmental turn-offs)
     hit_turn_off = False
     if turn_offs and turn_offs.lower() not in ("none", "unknown"):
-        from mechanics.social.persona import is_turn_off_triggered
-        hit_turn_off = is_turn_off_triggered(act_label, turn_offs)
+        env_offs = evaluate_environmental_turn_offs(
+            turn_offs,
+            player_is_bloodied=bool(action.get("player_is_bloodied")),
+            has_bystanders=bool(action.get("has_bystanders")),
+            intent_category=action_cat,
+            is_active_intimacy=bool(action.get("is_active_intimacy")),
+            action_text=act_low,
+        )
+        hit_turn_off = is_turn_off_triggered(act_label, turn_offs, act_likes or turn_ons) or bool(env_offs)
         if hit_turn_off:
             penalty = -4 if not succeeded else -2
             to_delta += penalty
@@ -538,36 +548,55 @@ def calculate_social_affinity_delta(
     # 6. CRITERION E: INTIMATE PREFERENCES & EROTIC OPENNESS
     # -------------------------------------------------------------------------
     act_delta = 0
-    from mechanics.social.persona import ACT_PREFERENCE_REGISTRY
+    sub_intent_str = str(action.get("sub_intent") or "").strip().lower()
+    liked_hits, disliked_hits = match_act_preferences(
+        act_low,
+        act_likes,
+        act_dislikes,
+        sub_intent=sub_intent_str,
+    )
+    for lh in liked_hits:
+        bonus = 2 if succeeded else 1
+        act_delta += bonus
+        reasons.append(f"Favored intimate act: {lh} (+{bonus})")
+    for dh in disliked_hits:
+        penalty = -2 if not succeeded else -1
+        act_delta += penalty
+        reasons.append(f"Disliked intimate act: {dh} ({penalty})")
 
-    for pref_item in ACT_PREFERENCE_REGISTRY:
-        if matches_keyword_boundary(act_low, pref_item["keywords"], allow_negated=False):
-            p_name = pref_item["name"].lower()
-            p_id = pref_item["id"]
-            if p_name in act_likes.lower() or p_id in act_likes.lower():
-                bonus = 2 if succeeded else 1
-                act_delta += bonus
-                reasons.append(f"Favored intimate act: {pref_item['name']} (+{bonus})")
-            if p_name in act_dislikes.lower() or p_id in act_dislikes.lower():
-                penalty = -2 if not succeeded else -1
-                act_delta += penalty
-                reasons.append(f"Disliked intimate act: {pref_item['name']} ({penalty})")
-
-    # Erotic Openness Modesty Guard
+    # Erotic Openness Modesty Guard (canonical tier + With-You Comfort)
     is_intimate_action = action_cat in (
         IntentCategory.INTIMATE_ACT.value,
         IntentCategory.DISCLOSURE_INQUIRY.value
     ) or matches_keyword_boundary(act_low, PRYING_INQUIRY_KEYWORDS, allow_negated=False)
 
     if is_intimate_action and erotic_openness:
-        if "prude" in erotic_openness or "modest" in erotic_openness:
+        from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+        op_tier = normalize_openness_tier(erotic_openness)
+        rel_score_aff = int(contact.get("relationship_score", contact.get("score", 0)) or 0)
+        rel_track_aff = str(contact.get("relationship_track") or contact.get("track") or "platonic")
+        shared_cnt_aff = int(
+            (contact.get("shared_intimacy_stats") or {}).get("shared_encounters")
+            or len(contact.get("gameplay_intimate_events") or [])
+            or 0
+        )
+        comfort_aff = compute_with_you_comfort(
+            op_tier,
+            relationship_score=rel_score_aff,
+            relationship_track=rel_track_aff,
+            shared_intimate_count=shared_cnt_aff,
+            is_hostile=(str(contact.get("disposition") or "").lower() == "hostile"),
+        )
+        if op_tier == "prude" and comfort_aff["stage"] == "guarded":
             penalty = -2 if not succeeded else -1
             act_delta += penalty
             reasons.append(f"Modest/prude demeanor recoils at premature intimacy ({penalty})")
-        elif "shameless" in erotic_openness or "uninhibited" in erotic_openness:
-            # Receptive to bold banter, no penalty
-            if succeeded and act_delta > 0:
+        elif op_tier in ("bold", "shameless"):
+            # Receptive to bold/shameless banter and direct spark, no penalty
+            if succeeded and act_delta >= 0:
                 act_delta += 1
+                reasons.append(f"Matches {op_tier} openness (+1)")
 
     breakdown["act_prefs_delta"] = act_delta
 

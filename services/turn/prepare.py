@@ -229,10 +229,72 @@ async def _reconcile_client_direct_choice(
         cleaned.pop("property_id", None)
         cleaned.pop("price", None)
 
+    # 3c. Verified Portal Crossing / Mobile Vessel Direct Choice
+    _req_sub_int = str(cleaned.get("sub_intent") or "").strip().lower()
+    if _req_sub_int in ("portal_cross", "starship_jump", "recall_starship"):
+        if not active_enemies and session_id:
+            from mechanics.world.locations.realms import get_portal_choices_at_node
+            curr_nid = (session.get("current_node_id") if isinstance(session, dict) else None) or ""
+            if not curr_nid and isinstance(session, dict) and session.get("current_location"):
+                curr_nid = await adb(db.resolve_node_id_from_location, session_id, session["current_location"]) or ""
+            if curr_nid:
+                valid_portals = await adb(get_portal_choices_at_node, session_id, curr_nid)
+                req_tr = str(cleaned.get("target_realm_id") or "").strip()
+                req_vr = str(cleaned.get("vessel_realm_id") or "").strip()
+                req_tn = str(cleaned.get("target_node_id") or "").strip()
+                for vp in valid_portals:
+                    if str(vp.get("sub_intent") or "").lower() != _req_sub_int:
+                        continue
+                    if req_tr and str(vp.get("target_realm_id") or "") != req_tr:
+                        continue
+                    if req_vr and str(vp.get("vessel_realm_id") or "") != req_vr:
+                        continue
+                    if req_tn and str(vp.get("target_node_id") or "") != req_tn:
+                        continue
+                    return dict(vp)
+        cleaned.pop("sub_intent", None)
+        cleaned.pop("target_realm_id", None)
+        cleaned.pop("vessel_realm_id", None)
+        cleaned.pop("portal_edge_type", None)
+        cleaned.pop("target_node_id", None)
+        cleaned.pop("target_location", None)
+
     # 4. Verified World Node Fast-Travel
     if cleaned.get("target_node_id") and session_id:
         cand_nid = str(cleaned["target_node_id"])
-        wn_row = await adb(db.get_world_node, session_id, cand_nid)
+        curr_nid_ft = (session.get("current_node_id") if isinstance(session, dict) else None) or ""
+        curr_loc_ft = (session.get("current_location") if isinstance(session, dict) else None) or ""
+
+        def _validate_same_realm_fast_travel_node() -> dict[str, Any] | None:
+            from mechanics.world.locations.realms import (
+                get_node_realm_id_in_memory,
+                is_node_or_realm_hidden_in_memory,
+            )
+
+            nodes_list = db.get_session_world_nodes(session_id) or []
+            nodes_by_id = {
+                str(n["node_id"]): n
+                for n in nodes_list
+                if isinstance(n, dict) and n.get("node_id")
+            }
+            target_row = nodes_by_id.get(cand_nid)
+            if not target_row:
+                return None
+            if str(target_row.get("node_type") or "").upper() == "REALM":
+                return None
+            if is_node_or_realm_hidden_in_memory(cand_nid, nodes_by_id):
+                return None
+            eff_curr_nid = curr_nid_ft or (
+                (db.resolve_node_id_from_location(session_id, curr_loc_ft) or "") if curr_loc_ft else ""
+            )
+            if eff_curr_nid and eff_curr_nid in nodes_by_id:
+                curr_realm_id = get_node_realm_id_in_memory(eff_curr_nid, nodes_by_id)
+                cand_realm_id = get_node_realm_id_in_memory(cand_nid, nodes_by_id)
+                if curr_realm_id and cand_realm_id and cand_realm_id != curr_realm_id:
+                    return None
+            return target_row
+
+        wn_row = (await adb(_validate_same_realm_fast_travel_node)) if not active_enemies else None
         if wn_row and not active_enemies:
             cleaned["stat"] = "FREE"
             cleaned["requirement"] = 0
@@ -242,6 +304,7 @@ async def _reconcile_client_direct_choice(
             cleaned["label"] = raw_lbl or f"Travel to {wn_row.get('name', cand_nid)}"
             return cleaned
         cleaned.pop("target_node_id", None)
+        cleaned.pop("target_location", None)
 
     # 5. Verified Inventory Item Use (ownership validated strictly below at stat == 'ITEM')
     if str(raw_dc.get("stat") or "").upper() == "ITEM" or cleaned.get("item_name"):
@@ -1187,6 +1250,11 @@ async def prepare_and_roll_action(
 
     # ── Awakened Resonance 3-Pip Ultimate Gate, 0-MP Basic Strike & Entity Contracts ─
     chosen_spell_id = str(chosen.get("spell_id") or "").strip()
+    if chosen_spell_id.startswith("spirit_summon_") and isinstance(session, dict) and session.get("id"):
+        from mechanics.combat.spells.spirit_court_perks import is_spirit_court_summon_spell_active
+        _sc_active = await adb(is_spirit_court_summon_spell_active, int(session["id"]), chosen_spell_id)
+        if not _sc_active and not is_custom and enforce_explicit_mp:
+            raise PermissionError("This Spirit Court summon requires Sworn Ally standing (90+).")
     if chosen_spell_id.startswith("awk_basic_") or (chosen.get("is_basic_strike") and not chosen_spell_id):
         mp_cost = 0
         mp_spent = 0
@@ -1302,6 +1370,7 @@ async def prepare_and_roll_action(
 
     # ── Persona DC Modifiers ─────────────────────────────────────────
     act_cat = str(chosen.get("action_category") or ("custom" if is_custom else "")).strip()
+    deferred_dossier_discoveries: List[Dict[str, Any]] = []
 
     sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
     explicit_target = (
@@ -1327,25 +1396,160 @@ async def prepare_and_roll_action(
             explicit_target = named_dps[0]
 
     target_candidates = [explicit_target] if explicit_target else list(sess_dp)
-    if target_candidates and isinstance(session, dict) and session.get("id") and stat not in ("NONE", "FREE", "ITEM"):
-        is_romantic_attempt = (
-            act_cat in ("romantic_confession", "affection", "intimate_act")
-            or any(
-                kw in label_text.lower()
-                for kw in ("confess", "kiss", "flirt", "seduc", "intimate", "make out", "ask out", "romantic")
-            )
+    is_romantic_attempt = (
+        act_cat in ("romantic_confession", "affection", "intimate_act")
+        or any(
+            kw in label_text.lower()
+            for kw in ("confess", "kiss", "flirt", "seduc", "intimate", "make out", "ask out", "romantic")
         )
+    )
+    if target_candidates and isinstance(session, dict) and session.get("id") and (
+        stat not in ("NONE", "FREE", "ITEM") or is_romantic_attempt
+    ):
+        _pl_app = char.get("appearance") or {}
+        if isinstance(_pl_app, str):
+            try:
+                _pl_app = json.loads(_pl_app)
+            except Exception:
+                _pl_app = {}
+        _pl_app_dict = _pl_app if isinstance(_pl_app, dict) else {}
         for dp_name in target_candidates:
             if dp_name:
                 c_rec = await adb(db.get_contact, session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
                 if c_rec:
-                    c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
-                    t_mods = get_combined_dc_modifiers(c_traits)
-                    req_val += t_mods.get(stat, 0)
+                    if stat not in ("NONE", "FREE", "ITEM"):
+                        c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
+                        t_mods = get_combined_dc_modifiers(c_traits)
+                        req_val += t_mods.get(stat, 0)
                     app_rec = c_rec.get("appearance", {})
                     if isinstance(app_rec, dict):
-                        req_val += calculate_intimate_action_dc_modifier(label_text, app_rec)
-                if is_romantic_attempt:
+                        _is_active_int = False
+                        if stat not in ("NONE", "FREE", "ITEM"):
+                            _phys_s = session.get("physical_state") or {}
+                            _exc_s = _phys_s.get("excitement") or {}
+                            _exc_actors = _exc_s.get("actors") or {}
+                            _dp_exc = _exc_actors.get(dp_name)
+                            if not isinstance(_dp_exc, dict):
+                                _dp_low = str(dp_name or "").strip().lower()
+                                for _ak, _av in _exc_actors.items():
+                                    if str(_ak).strip().lower() == _dp_low and isinstance(_av, dict):
+                                        _dp_exc = _av
+                                        break
+                            _p_exc_val = int((_dp_exc or {}).get("meter", 0) or 0)
+
+                            _pl_hp = int(char.get("hp", 10) or 10)
+                            _pl_max_hp = max(1, int(char.get("max_hp", 10) or 10))
+                            _pl_effs = char.get("status_effects") or []
+                            if isinstance(_pl_effs, str):
+                                try:
+                                    _pl_effs = json.loads(_pl_effs)
+                                except Exception:
+                                    _pl_effs = [_pl_effs]
+                            _player_bloodied = (_pl_hp <= (_pl_max_hp * 0.5)) or any(
+                                any(w in str(ef).lower() for w in ("blood", "wound", "bleed", "filth", "dirty", "mud"))
+                                for ef in (_pl_effs if isinstance(_pl_effs, list) else [])
+                            )
+                            _room_npcs = session.get("npcs_present") or session.get("current_npcs") or []
+                            _t_lows = {str(t or "").strip().lower() for t in target_candidates if t}
+                            _pl_low_nm = str(char.get("name") or "").strip().lower()
+                            from mechanics.social.physical_state import is_erotic_intimate_contact
+                            _is_active_int = bool(_exc_s.get("active")) or is_erotic_intimate_contact(str(_phys_s.get("intimate_contact") or ""))
+                            _co_partner_lows = set(_t_lows)
+                            if _is_active_int:
+                                for _cp_n in (_exc_s.get("current_partners") or []):
+                                    if str(_cp_n or "").strip():
+                                        _co_partner_lows.add(str(_cp_n).strip().lower())
+                                for _dp_n in (sess_dp or []):
+                                    if str(_dp_n or "").strip():
+                                        _co_partner_lows.add(str(_dp_n).strip().lower())
+                            _has_bystanders = any(
+                                (isinstance(rn, dict) and str(rn.get("name") or "").strip().lower() not in _co_partner_lows and str(rn.get("name") or "").strip().lower() != _pl_low_nm)
+                                or (isinstance(rn, str) and rn.strip().lower() not in _co_partner_lows and rn.strip().lower() != _pl_low_nm)
+                                for rn in (_room_npcs if isinstance(_room_npcs, list) else [])
+                            )
+                            _chosen_sub = str(chosen.get("sub_intent") or (classification.get("sub_intent") if is_custom else "") or "").strip()
+                            _c_shared_cnt = len(c_rec.get("gameplay_intimate_events") or [])
+                            _c_rel_score = int(c_rec.get("relationship_score", c_rec.get("score", 0)) or 0)
+                            _c_rel_track = str(c_rec.get("relationship_track") or c_rec.get("track") or "platonic")
+                            _c_is_hostile = str(c_rec.get("disposition") or "").strip().lower() == "hostile"
+
+                            req_val += calculate_intimate_action_dc_modifier(
+                                label_text,
+                                app_rec,
+                                player_appearance=_pl_app_dict,
+                                partner_excitement=_p_exc_val,
+                                player_is_bloodied=_player_bloodied,
+                                has_bystanders=_has_bystanders,
+                                intent_category=act_cat,
+                                is_active_intimacy=_is_active_int,
+                                sub_intent=_chosen_sub,
+                                relationship_score=_c_rel_score,
+                                relationship_track=_c_rel_track,
+                                shared_intimate_count=_c_shared_cnt,
+                                is_hostile=_c_is_hostile,
+                            )
+                        from scenario_data import is_nsfw_scenario as _is_nsfw_prep
+                        if _is_nsfw_prep(str(session.get("scenario") or "fantasy")) and (is_romantic_attempt or _is_active_int if stat not in ("NONE", "FREE", "ITEM") else is_romantic_attempt):
+                            from mechanics.social.persona import (
+                                get_erotic_openness_label,
+                                match_act_preferences,
+                                match_desires_and_kinks,
+                                match_sensitive_spots,
+                                normalize_openness_tier,
+                            )
+                            _prep_recs = []
+                            _raw_op_prep = app_rec.get("erotic_openness") or app_rec.get("openness")
+                            if _raw_op_prep not in (None, ""):
+                                _op_t_prep = normalize_openness_tier(_raw_op_prep)
+                                _prep_recs.append({
+                                    "fact_category": "openness",
+                                    "fact_key": f"openness:{_op_t_prep}",
+                                    "fact_value": get_erotic_openness_label(_op_t_prep).split("(")[0].strip(),
+                                })
+                            for _sp in match_sensitive_spots(label_text, app_rec.get("sensitive_spots"))[:1]:
+                                _spc = re.sub(r'\([^)]*\)', '', _sp).strip()
+                                if _spc:
+                                    _prep_recs.append({"fact_category": "sensitive_spot", "fact_key": f"sensitive_spot:{_spc.lower()}", "fact_value": _spc})
+                            _pd_list, _pk_list = match_desires_and_kinks(label_text, app_rec.get("desires_and_kinks") or app_rec.get("turn_ons"), app_rec.get("fetishes"))
+                            for _pd in _pd_list[:1]:
+                                _prep_recs.append({"fact_category": "desire", "fact_key": f"desire:{_pd.lower()}", "fact_value": _pd})
+                            for _pk in _pk_list[:1]:
+                                _prep_recs.append({"fact_category": "kink", "fact_key": f"kink:{_pk.lower()}", "fact_value": _pk})
+                            _plk, _pdk = match_act_preferences(label_text, app_rec.get("act_likes"), app_rec.get("act_dislikes"), sub_intent=str(chosen.get("sub_intent") or ""))
+                            for _pa in (_plk + _pdk)[:1]:
+                                _prep_recs.append({"fact_category": "act_pref", "fact_key": f"act_pref:{_pa.lower()}", "fact_value": _pa})
+                            if _prep_recs:
+                                deferred_dossier_discoveries.append({
+                                    "npc_name": dp_name,
+                                    "records": list(_prep_recs),
+                                    "primary_character_id": int(char.get("id") or 0),
+                                    "discovery_source": "intimacy",
+                                })
+                        if is_romantic_attempt:
+                            from mechanics.social.persona import evaluate_height_preference
+                            _h_eval = evaluate_height_preference(
+                                _pl_app_dict,
+                                app_rec,
+                                npc_gender=str(c_rec.get("gender") or ""),
+                                npc_race=str(c_rec.get("race") or ""),
+                                npc_name=dp_name,
+                                player_race=str(char.get("race") or ""),
+                            )
+                            if stat not in ("NONE", "FREE", "ITEM"):
+                                req_val += int(_h_eval.get("dc_mod") or 0)
+                            _h_tp = _h_eval.get("triggered_pref")
+                            if isinstance(_h_tp, dict) and _h_tp.get("fact_key"):
+                                deferred_dossier_discoveries.append({
+                                    "npc_name": dp_name,
+                                    "records": [{
+                                        "fact_category": "body_pref",
+                                        "fact_key": _h_tp["fact_key"],
+                                        "fact_value": _h_tp["fact_value"],
+                                    }],
+                                    "primary_character_id": int(char.get("id") or 0),
+                                    "discovery_source": "romance",
+                                })
+                if is_romantic_attempt and stat not in ("NONE", "FREE", "ITEM"):
                     try:
                         from mechanics.social import relationship_graph as rg
                         curr_p = await adb(rg.get_current_partner, session["id"], rg.canonical_person_key(dp_name))
@@ -1598,7 +1802,15 @@ async def prepare_and_roll_action(
         )
         rate = 100
     else:
-        stat_val = max(1, int(char.get(stat_col, 5) or 5) + _domain_stat_bonus)
+        _sc_stat_bonus = 0
+        if isinstance(session, dict) and session.get("id"):
+            try:
+                from mechanics.combat.spells.spirit_court_perks import get_spirit_court_stat_bonuses
+                _sc_bonuses_chk = await adb(get_spirit_court_stat_bonuses, int(session["id"]))
+                _sc_stat_bonus = int(_sc_bonuses_chk.get(stat, 0) or 0)
+            except Exception:
+                _sc_stat_bonus = 0
+        stat_val = max(1, int(char.get(stat_col, 5) or 5) + _domain_stat_bonus + _sc_stat_bonus)
         luk_val = char.get("luk", 3)
         rate = skill_check.success_chance(stat_val, req_val, check_mode=check_mode)
         res = skill_check.resolve_check(stat_val, req_val, luk_val, check_mode=check_mode)
@@ -1827,6 +2039,9 @@ async def prepare_and_roll_action(
         "combat_tactical_archetype": chosen.get("combat_tactical_archetype") or (classification.get("combat_tactical_archetype", "") if is_custom else "") or "",
         "target_node_id": chosen.get("target_node_id") or "",
         "target_location": chosen.get("target_location") or (classification.get("target_location", "") if is_custom else "") or "",
+        "target_realm_id": str(chosen.get("target_realm_id") or ""),
+        "vessel_realm_id": str(chosen.get("vessel_realm_id") or ""),
+        "portal_edge_type": str(chosen.get("portal_edge_type") or ""),
         "spawns_npc_role": chosen.get("spawns_npc_role") or (classification.get("spawns_npc_role", "") if is_custom else "") or "",
         "triggers_loot_roll": bool(chosen.get("triggers_loot_roll") or (classification.get("triggers_loot_roll", False) if is_custom else False)),
         "is_quest_action": bool(chosen.get("is_quest_action", False)),
@@ -1834,7 +2049,7 @@ async def prepare_and_roll_action(
         "is_climax_action": bool(chosen.get("is_climax_action", False)),
         "_python_verified_quest": bool(chosen.get("_python_verified_quest", False)),
         "quest_approach": str(chosen.get("quest_approach") or ""),
-        "approach": str(chosen.get("approach") or ""),
+        "approach": str(chosen["approach"]) if chosen.get("approach") else None,
         "rush_climax": bool(chosen.get("rush_climax", False)),
         "off_hours_fallback": bool(chosen.get("off_hours_fallback", False)),
         "clue_source_id": str(chosen.get("clue_source_id") or ""),
@@ -1875,6 +2090,7 @@ async def prepare_and_roll_action(
         "step_index": chosen.get("step_index"),
         "use_ward": bool(chosen.get("use_ward")),
         "ward_item_name": str(chosen.get("ward_item_name") or ""),
+        "_deferred_dossier_discoveries": deferred_dossier_discoveries,
     })
     if not action.get("active_recall") and isinstance(session, dict) and session.get("id") and label_text:
         from game_engine.turn.generation import extract_deterministic_recall_query

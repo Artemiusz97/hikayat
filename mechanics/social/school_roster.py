@@ -2148,10 +2148,21 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
                 outfit_default = f"Tailored professional faculty blazer and pressed slacks at {school_name}"
         else:
             from scenario_data import is_nsfw_scenario
+            from mechanics.social.persona import normalize_openness_tier
             is_nsfw = is_nsfw_scenario(scen_key)
-            openness = int(char_dict.get("openness", 50) or 50) if isinstance(char_dict.get("openness"), (int, float, str)) and str(char_dict.get("openness")).isdigit() else 50
+            raw_openness = char_dict.get("erotic_openness") if char_dict.get("erotic_openness") not in (None, "") else char_dict.get("openness", 50)
+            openness_tier = normalize_openness_tier(raw_openness)
+            openness_num = None
+            if isinstance(raw_openness, (int, float)) and not isinstance(raw_openness, bool):
+                openness_num = float(raw_openness)
+            elif str(raw_openness or "").strip().isdigit():
+                openness_num = float(str(raw_openness).strip())
             traits = [str(t).lower() for t in (char_dict.get("traits") or [])]
-            is_provocative = is_nsfw and (openness >= 70 or any(t in ("bold", "flirtatious", "rebellious", "exhibitionist", "uninhibited") for t in traits))
+            is_provocative = is_nsfw and (
+                (openness_num is not None and openness_num >= 70)
+                or openness_tier in ("bold", "shameless")
+                or any(t in ("bold", "flirtatious", "rebellious", "exhibitionist", "uninhibited") for t in traits)
+            )
 
             if is_provocative:
                 if str(char_gender).lower() == "female":

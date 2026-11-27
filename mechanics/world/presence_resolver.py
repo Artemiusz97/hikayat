@@ -169,6 +169,28 @@ def _compute_commitment_abs_window(row: Mapping[str, Any]) -> tuple[int, int, in
 
 
 def _resolve_tier1_party(ctx: _PresenceContext, party_names: set[str] | None) -> None:
+    if ctx.eff_node_id and ctx.nodes_by_id:
+        from mechanics.world.locations.realms import get_node_realm_id_in_memory, get_realm_rules
+
+        _eff_realm_id = get_node_realm_id_in_memory(ctx.eff_node_id, ctx.nodes_by_id)
+        _eff_realm_rules = get_realm_rules(ctx.nodes_by_id.get(_eff_realm_id)) if _eff_realm_id else {}
+        if _eff_realm_rules.get("restrict_companions"):
+            return
+
+    _raw_wait = (
+        ctx.session_dict.get("waiting_outside_companions")
+        if "waiting_outside_companions" in ctx.session_dict
+        else (ctx.session_dict.get("extra") or {}).get("waiting_outside_companions")
+    )
+    _waiting_low: set[str] = set()
+    for _w in (_raw_wait or ()):
+        if isinstance(_w, Mapping):
+            for _wk in (_w.get("name"), _w.get("npc_id")):
+                if _wk and str(_wk).strip():
+                    _waiting_low.add(str(_wk).strip().lower())
+        elif isinstance(_w, str) and _w.strip():
+            _waiting_low.add(_w.strip().lower())
+
     tier1_entries: list[dict[str, Any]] = []
     raw_party_lists = [
         list(party_names or ()),
@@ -187,6 +209,10 @@ def _resolve_tier1_party(ctx: _PresenceContext, party_names: set[str] | None) ->
         if str(r.get("staff_status") or "").strip().lower() == "in_party":
             tier1_entries.append(dict(r))
     for entry in tier1_entries:
+        _e_nm = str(entry.get("name") or "").strip().lower()
+        _e_id = str(entry.get("npc_id") or "").strip().lower()
+        if (_e_nm and _e_nm in _waiting_low) or (_e_id and _e_id in _waiting_low):
+            continue
         ctx.stage(entry, 1, "party")
 
 
@@ -373,17 +399,27 @@ def _hydrate_and_backfill_quest_waypoint_npc(
         or default_role
     ).strip()
 
+    from mechanics.social.employment_policy import (
+        is_prohibited_teen_civilian_role,
+        is_prohibited_teen_civilian_workplace,
+        is_teen_student_civilian,
+    )
+
     is_hs_scen = bool(
         scenario_data.is_high_school_scenario(ctx.scen_key)
         or scenario_data.is_anomalous_high_school_scenario(ctx.scen_key)
     )
-    default_age = "teen" if (is_hs_scen and slot_name in ("informant", "accomplice", "witness")) else "adult"
+    cand_wp = str(wp_node or ctx.eff_node_id or "").strip()
+    is_adult_emp = is_prohibited_teen_civilian_role(eff_role) or is_prohibited_teen_civilian_workplace(cand_wp, "")
+    default_age = "teen" if (is_hs_scen and not is_adult_emp and slot_name in ("informant", "accomplice", "witness")) else "adult"
     eff_age = str(
         (cast_meta or {}).get("age_group")
         or ex_bi.get("age_group")
         or ex_merged.get("age_group")
         or default_age
     ).strip()
+    if is_adult_emp and not (ex_bi.get("is_special_agent") or ex_merged.get("is_special_agent")):
+        eff_age = "adult"
 
     if eff_g and not base_stage_rec.get("gender"):
         base_stage_rec["gender"] = eff_g
@@ -401,6 +437,12 @@ def _hydrate_and_backfill_quest_waypoint_npc(
     base_stage_rec.setdefault("origin", "quest_seed")
 
     if r_row is None and c_row is None and not is_transient_synthetic and not is_placeholder and ctx.sid > 0:
+        eff_wp_payload = cand_wp
+        if is_teen_student_civilian(
+            {"role": eff_role, "basic_info": {"age_group": eff_age, "grade": ex_bi.get("grade") or ex_merged.get("grade") or ""}},
+            scen_key=ctx.scen_key,
+        ) and is_prohibited_teen_civilian_workplace(eff_wp_payload, ""):
+            eff_wp_payload = ""
         roster_payload: dict[str, Any] = {
             "npc_id": str(base_stage_rec.get("npc_id") or slugify_key(t_npc)),
             "name": t_npc,
@@ -409,7 +451,7 @@ def _hydrate_and_backfill_quest_waypoint_npc(
             "role": eff_role,
             "origin": "quest_seed",
             "tier_status": "seeded",
-            "workplace_node_id": str(wp_node or ctx.eff_node_id or "").strip(),
+            "workplace_node_id": eff_wp_payload,
             "basic_info": {
                 "role": eff_role,
                 "occupation": eff_role,
@@ -796,6 +838,10 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
     display_loc = format_node_display_label(ctx.eff_node_id, ctx.eff_loc, ctx.nodes_by_id)
     day_kind = "weekend" if is_weekend(ctx.safe_day) else "weekday"
     protected_aliases = ctx.tier2_aliases | ctx.tier3_crisis_aliases
+    from mechanics.world.locations.realms import get_node_realm_id_in_memory, get_realm_rules
+    _eff_realm_id = get_node_realm_id_in_memory(ctx.eff_node_id, ctx.nodes_by_id)
+    _eff_realm_rules = get_realm_rules(ctx.nodes_by_id.get(_eff_realm_id)) if _eff_realm_id else {}
+    _block_cross_realm_spillover = bool(_eff_realm_id and not _eff_realm_rules.get("npc_spillover", False))
     target_is_room = isinstance(ctx.target_node, Mapping) and str(ctx.target_node.get("node_type") or "").strip().upper() == "ROOM"
     node_name_low = str((ctx.target_node or {}).get("name") or "").strip().lower()
     eff_loc_low = str(ctx.eff_loc or display_loc or "").strip().lower()
@@ -885,6 +931,18 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
                     sched_match = False
         if not (eff_work_match or sched_match):
             continue
+        if _block_cross_realm_spillover and not (aliases & protected_aliases):
+            _home_ref_nid = str(
+                r_row.get("workplace_node_id")
+                or work_nid
+                or sched_nid
+                or ""
+            ).strip()
+            _npc_realm = get_node_realm_id_in_memory(_home_ref_nid, ctx.nodes_by_id) if _home_ref_nid else ""
+            if _npc_realm and _npc_realm != _eff_realm_id:
+                continue
+            if not _npc_realm and origin_val == "roaming_merchant" and not _eff_realm_rules.get("is_primary_realm", True):
+                continue
 
         aff_val = int((c_row or {}).get("relationship_score") or (c_row or {}).get("affinity") or merged_npc.get("affinity_score") or merged_npc.get("affinity") or 0)
         is_dropby = bool(isinstance(ov, Mapping) and ov.get("is_dropby"))
@@ -958,6 +1016,12 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
             continue
 
         sched_nid = _resolve_legacy_scheduled_node(ctx, leg_npc)
+        if _block_cross_realm_spillover and not (aliases & protected_aliases):
+            _leg_realm = get_node_realm_id_in_memory(str(sched_nid or ""), ctx.nodes_by_id) if sched_nid else ""
+            if _leg_realm and _leg_realm != _eff_realm_id:
+                continue
+            if not _leg_realm and not _eff_realm_rules.get("is_primary_realm", True):
+                continue
         if not schedule_matches_node(
             sched_nid,
             ctx.eff_node_id,

@@ -248,3 +248,94 @@ CROWD_DENSITY_LABELS = {
     "crowd_label": "人潮",
     "nearby_bystanders": "周围路人"
 }
+
+STATURE_LABELS = {
+    "miniature": "娇小迷你",
+    "short": "矮小",
+    "below_average": "偏矮",
+    "average": "中等",
+    "tall": "高挑",
+    "towering": "魁梧高大",
+}
+
+PHYSIQUE_LABELS = {
+    "slim": "纤瘦",
+    "average": "匀称",
+    "athletic": "健美",
+    "muscular": "魁梧健硕",
+    "voluptuous": "丰满妖娆",
+    "stocky": "结实敦厚",
+    "chubby": "圆润丰腴",
+}
+
+ASSET_TEXTURE_LABELS = {
+    "perky": "挺翘",
+    "firm": "紧实",
+    "supple": "柔韧",
+    "teardrop": "水滴型",
+    "plush": "丰软",
+    "pillowy": "绵软",
+    "bouncy": "弹润",
+    "delicate": "娇嫩",
+    "sensitive": "敏感",
+    "veined": "青筋分明",
+    "smooth": "光洁",
+    "thick": "粗壮",
+    "heavy": "沉实",
+    "curved": "微弯",
+    "tapered": "修长渐细",
+}
+
+SPECIES_SURFACE_LABELS = {
+    "furred": "柔软绒毛",
+    "scaled": "温润细鳞",
+    "feathered": "丝绒羽绒",
+    "aquatic": "水润光泽肌",
+    "fever_warm": "炽热肌肤",
+    "porcelain_silky": "瓷滑丝肌",
+    "bio_synthetic": "仿生肌肤",
+}
+
+REAR_SIZE_LABELS = {
+    "flat": "平坦",
+    "small": "小巧紧致",
+    "average": "匀称挺翘",
+    "large": "丰满圆润",
+    "huge": "饱满傲人",
+}
+
+REAR_TEXTURE_LABELS = {
+    "firm": "紧实",
+    "taut": "紧致",
+    "supple": "柔韧",
+    "rounded": "圆润",
+    "plush": "丰软",
+    "jiggly": "弹软",
+}
+
+BODY_PREFERENCE_LABELS = {
+    "smaller_bb": "偏小胸部",
+    "bigger_bb": "丰满胸部",
+    "smaller_ass": "小巧臀部",
+    "bigger_ass": "丰翘臀部",
+    "taller_partner": "更高挑的伴侣",
+    "shorter_partner": "更娇小的伴侣",
+}
+
+SPIRIT_COURT_LABELS = {
+    "badge_human_world": "🏙️ 现世人间",
+    "badge_veiled_realm": "⛩️ 隐雾灵界",
+    "sworn_ally_active_header": "誓约盟友 — 九十声望宫廷契约",
+    "sworn_ally_summon_ready": "三回合战斗召唤已激活",
+    "sworn_ally_stat_bonus": "被动属性灵气",
+    "autonomous_spirit_court_badge": "自治灵族宫廷",
+    "spirit_court_non_joinable_note": "独立灵族宫廷 — 通过善举、比武切磋与宫廷委托赢取声望。",
+    "ghoul_track_dark_crime": "暗黑秘行（快速升望）",
+    "ghoul_track_grey_neutral": "灰白中立（无跨族波及）",
+    "night_market_wing_selector": "选择鬼市四翼摊位…",
+    "spirit_relay_neon_static_note": "⚡ 霓虹静电灵脉暴走：灵讯中继信号夹杂星界静电杂音。",
+    "spirit_relay_ghoul_channel": "🦴 骨堂灵波中继已连通",
+    "pale_wake_toll_waived": "🕯️ 苍白守夜祭 — 骨堂入城税暂免",
+    "lantern_tide_ferry_waived": "🏮 千灯漂流潮 — 渡口摆渡费暂免",
+    "event_crisis_commission_badge": "紧急灵界危机",
+}

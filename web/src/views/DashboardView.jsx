@@ -1,4 +1,4 @@
-import { lazy, useState, useEffect, useCallback } from 'react';
+import { lazy, useState, useEffect, useCallback, useRef } from 'react';
 import {
   Bookmark,
   ChevronRight,
@@ -26,6 +26,7 @@ import {
   MultiplayerSubModal,
 } from '../components/Menu/MainMenuSubModals';
 import { useSettings } from '../hooks/useSettings';
+import { isValidSessionId } from '../utils/session';
 
 const SettingsModal = lazy(() => import('../components/Settings/SettingsModal'));
 const CharacterCreatorModal = lazy(() => import('../components/Character/CharacterCreatorModal'));
@@ -47,7 +48,6 @@ const DashboardView = ({
   onEndSession,
   onEndSlot,
   refreshCharacter,
-  refreshSession,
   actionError,
   clearActionError,
   onSessionLoaded,
@@ -73,56 +73,131 @@ const DashboardView = ({
   const [joinCode, setJoinCode] = useState('');
   const [confirmState, setConfirmState] = useState(null); // { mode: 'delete_save' | 'end_session', target }
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [dashboardError, setDashboardError] = useState(null);
+  const lobbiesAbortRef = useRef(null);
+  const savesAbortRef = useRef(null);
+  const sessionsAbortRef = useRef(null);
 
   const settings = useSettings(user?.user_id);
 
-  const fetchLobbies = useCallback(() => {
-    setLoadingLobbies(true);
-    apiCall('/api/adventure/lobbies')
-      .then((data) => setLobbies(data.lobbies || []))
-      .catch(() => {})
-      .finally(() => setLoadingLobbies(false));
-  }, []);
-
-  const fetchSaves = useCallback(() => {
-    if (!user?.user_id || !character?.id) return;
-    setLoadingSaves(true);
-    apiCall(`/api/saves/${user.user_id}`)
-      .then((data) => setSaves(data.saves || []))
-      .catch(() => {})
-      .finally(() => setLoadingSaves(false));
-  }, [user?.user_id, character?.id]);
-
-  const fetchCharacterSessions = useCallback(() => {
-    if (!character?.id) {
-      setCharacterSessions([]);
-      return;
+  const fetchLobbies = useCallback((externalSignal = null) => {
+    if (lobbiesAbortRef.current) {
+      lobbiesAbortRef.current.abort();
     }
-    setLoadingSessions(true);
-    apiCall(`/api/adventure/character-sessions/${character.id}`)
+    const ctrl = new AbortController();
+    lobbiesAbortRef.current = ctrl;
+    if (externalSignal) {
+      if (externalSignal.aborted) ctrl.abort();
+      else externalSignal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    }
+    setLoadingLobbies(true);
+    apiCall('/api/adventure/lobbies', { signal: ctrl.signal })
       .then((data) => {
-        setCharacterSessions(data.sessions || []);
+        if (!ctrl.signal.aborted) {
+          setLobbies(data.lobbies || []);
+        }
       })
       .catch((err) => {
-        console.error('Failed to fetch character sessions:', err);
+        if (err?.isUserAbort || err?.name === 'AbortError' || ctrl.signal.aborted) return;
+        setDashboardError(err?.message || 'Failed to load multiplayer lobbies.');
       })
       .finally(() => {
-        setLoadingSessions(false);
+        if (lobbiesAbortRef.current === ctrl) {
+          lobbiesAbortRef.current = null;
+          setLoadingLobbies(false);
+        }
+      });
+  }, []);
+
+  const fetchSaves = useCallback((externalSignal = null) => {
+    if (savesAbortRef.current) {
+      savesAbortRef.current.abort();
+      savesAbortRef.current = null;
+    }
+    if (!user?.user_id || !character?.id) {
+      setSaves([]);
+      setLoadingSaves(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    savesAbortRef.current = ctrl;
+    if (externalSignal) {
+      if (externalSignal.aborted) ctrl.abort();
+      else externalSignal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    }
+    setLoadingSaves(true);
+    apiCall(`/api/saves/${user.user_id}`, { signal: ctrl.signal })
+      .then((data) => {
+        if (!ctrl.signal.aborted) {
+          setSaves(data.saves || []);
+        }
+      })
+      .catch((err) => {
+        if (err?.isUserAbort || err?.name === 'AbortError' || ctrl.signal.aborted) return;
+        setDashboardError(err?.message || 'Failed to load saved checkpoints.');
+      })
+      .finally(() => {
+        if (savesAbortRef.current === ctrl) {
+          savesAbortRef.current = null;
+          setLoadingSaves(false);
+        }
+      });
+  }, [user?.user_id, character?.id]);
+
+  const fetchCharacterSessions = useCallback((externalSignal = null) => {
+    if (sessionsAbortRef.current) {
+      sessionsAbortRef.current.abort();
+      sessionsAbortRef.current = null;
+    }
+    if (!character?.id) {
+      setCharacterSessions([]);
+      setLoadingSessions(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    sessionsAbortRef.current = ctrl;
+    if (externalSignal) {
+      if (externalSignal.aborted) ctrl.abort();
+      else externalSignal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    }
+    setLoadingSessions(true);
+    apiCall(`/api/adventure/character-sessions/${character.id}`, { signal: ctrl.signal })
+      .then((data) => {
+        if (!ctrl.signal.aborted) {
+          setCharacterSessions(data.sessions || []);
+        }
+      })
+      .catch((err) => {
+        if (err?.isUserAbort || err?.name === 'AbortError' || ctrl.signal.aborted) return;
+        console.error('Failed to fetch character sessions:', err);
+        setDashboardError(err?.message || 'Failed to load character sessions.');
+      })
+      .finally(() => {
+        if (sessionsAbortRef.current === ctrl) {
+          sessionsAbortRef.current = null;
+          setLoadingSessions(false);
+        }
       });
   }, [character?.id]);
 
   useEffect(() => {
-    apiCall(`/api/scenarios?lang=${encodeURIComponent(activeUiLang)}`)
+    const ctrl = new AbortController();
+    apiCall(`/api/scenarios?lang=${encodeURIComponent(activeUiLang)}`, { signal: ctrl.signal })
       .then((data) => {
+        if (ctrl.signal.aborted) return;
         const list =
           data.scenario_list ||
           (Array.isArray(data.scenarios) ? data.scenarios : []);
         if (list.length > 0) setScenarios(list);
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (err?.isUserAbort || err?.name === 'AbortError' || ctrl.signal.aborted) return;
+        setDashboardError(err?.message || 'Failed to load scenarios catalog.');
+      });
 
-    apiCall(`/api/genres?lang=${encodeURIComponent(activeUiLang)}`)
+    apiCall(`/api/genres?lang=${encodeURIComponent(activeUiLang)}`, { signal: ctrl.signal })
       .then((data) => {
+        if (ctrl.signal.aborted) return;
         const list =
           data.genre_list ||
           data.tag_list ||
@@ -134,14 +209,24 @@ const DashboardView = ({
               })));
         if (list.length > 0) setAvailableTags(list);
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (err?.isUserAbort || err?.name === 'AbortError' || ctrl.signal.aborted) return;
+        setDashboardError(err?.message || 'Failed to load genres catalog.');
+      });
 
-    fetchLobbies();
+    fetchLobbies(ctrl.signal);
+    return () => {
+      ctrl.abort();
+    };
   }, [fetchLobbies, activeUiLang]);
 
   useEffect(() => {
-    fetchSaves();
-    fetchCharacterSessions();
+    const ctrl = new AbortController();
+    fetchSaves(ctrl.signal);
+    fetchCharacterSessions(ctrl.signal);
+    return () => {
+      ctrl.abort();
+    };
   }, [fetchSaves, fetchCharacterSessions, character?.id]);
 
   const handleEmbark = async (config) => {
@@ -165,7 +250,6 @@ const DashboardView = ({
       if (refreshCharacter) {
         await refreshCharacter();
       }
-      fetchCharacterSessions();
     } catch (err) {
       console.error('Failed to embark from dashboard:', err);
     }
@@ -182,6 +266,7 @@ const DashboardView = ({
       }
     } catch (e) {
       console.error('Failed to load save', e);
+      setDashboardError(e?.message || 'Failed to load checkpoint.');
     }
   };
 
@@ -236,8 +321,10 @@ const DashboardView = ({
         fetchCharacterSessions();
       }
       setConfirmState(null);
+      setDashboardError(null);
     } catch (err) {
       console.error('Failed to perform confirmed action:', err);
+      setDashboardError(err?.message || 'Failed to complete requested action.');
     } finally {
       setConfirmBusy(false);
     }
@@ -251,8 +338,13 @@ const DashboardView = ({
     if (
       !found &&
       activeSession &&
+      isValidSessionId(activeSession.id) &&
+      (!activeSession.character_id ||
+        !character?.id ||
+        String(activeSession.character_id) === String(character.id)) &&
       (Number(activeSession.slot) === slotNum ||
         (slotNum === 1 &&
+          !(Number(activeSession.slot) >= 1 && Number(activeSession.slot) <= 6) &&
           !characterSessions.some((s) => s.id === activeSession.id)))
     ) {
       found = activeSession;
@@ -299,7 +391,6 @@ const DashboardView = ({
 
   const selectCharacter = async (c) => {
     await switchCharacter(c.id);
-    if (refreshSession) refreshSession();
   };
 
   const handleStartNewAdventure = () => {
@@ -337,7 +428,7 @@ const DashboardView = ({
 
       {/* Centered Title + Vertical Main Menu Stack */}
       <main className="my-auto w-full max-w-[26rem] flex flex-col items-center min-w-0">
-        {actionError && (
+        {(actionError || dashboardError) && (
           <div
             role="alert"
             className="w-full mb-3 hk-acrylic-pill border-red-500/50 bg-red-950/75 px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs text-red-200"
@@ -346,11 +437,14 @@ const DashboardView = ({
               <span className="text-red-400 font-bold shrink-0">
                 {t('common.error', 'Error')}:
               </span>
-              <span className="break-words min-w-0">{actionError}</span>
+              <span className="break-words min-w-0">{actionError || dashboardError}</span>
             </div>
-            {clearActionError && (
+            {(clearActionError || dashboardError) && (
               <MotionButton
-                onClick={clearActionError}
+                onClick={() => {
+                  setDashboardError(null);
+                  if (clearActionError) clearActionError();
+                }}
                 aria-label={t('common.close', 'Close')}
                 className="hk-icon-btn h-7 min-w-7 text-gray-300 hover:text-white shrink-0"
               >

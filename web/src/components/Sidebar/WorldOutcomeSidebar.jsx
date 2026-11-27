@@ -16,7 +16,8 @@ import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
 import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 import { resolveNpcDemographics } from '../../utils/npcDemographics';
-import { isAnomalousNpc } from '../../utils/sceneTargets';
+import { isAnomalousNpc, normalizeActorName } from '../../utils/sceneTargets';
+import { resolveDialoguePartnerSet as resolveDialoguePartners } from '../../utils/npcProfile';
 import { formatScenarioCurrency } from '../../utils/currency';
 import {
   AcrylicPanel,
@@ -298,35 +299,6 @@ export const extractTurnOutcomes = (
   };
 };
 
-const resolveDialoguePartners = (session) => {
-  let list = [];
-  if (Array.isArray(session?.dialogue_partners)) {
-    list = session.dialogue_partners;
-  } else if (session?.dialogue_partner) {
-    const dp = session.dialogue_partner;
-    if (Array.isArray(dp)) {
-      list = dp;
-    } else if (typeof dp === 'string') {
-      const trimmed = dp.trim();
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          list = Array.isArray(parsed) ? parsed : [dp];
-        } catch {
-          list = [dp];
-        }
-      } else {
-        list = [dp];
-      }
-    }
-  }
-  return new Set(
-    list
-      .map((n) => String(n || '').toLowerCase().trim())
-      .filter(Boolean)
-  );
-};
-
 const computeTurnOutcomesList = (session) => {
   const rawHistory = Array.isArray(session?.history) ? session.history : [];
   let actionCount = 0;
@@ -491,6 +463,7 @@ export const PresentNpcsCard = ({
   session,
   onSelectContact,
   onQuickAction,
+  selectedNpcName = null,
   collapsed = false,
   onToggleCollapse,
   isSheet = false,
@@ -755,36 +728,55 @@ export const PresentNpcsCard = ({
               );
             }
 
+            const isSelected =
+              !isAnomaly &&
+              Boolean(selectedNpcName) &&
+              normalizeActorName(name).toLowerCase() ===
+                normalizeActorName(selectedNpcName).toLowerCase();
+
             return (
               <div
                 key={`${name}-${idx}`}
-                className={`py-2.5 flex flex-col gap-1.5 text-xs ${
-                  isPartner
-                    ? 'border-l-2 border-purple-400 pl-2.5'
-                    : isAnomaly
-                      ? 'border-l-2 border-amber-400/80 pl-2.5'
-                      : ''
+                className={`py-2.5 flex flex-col gap-1.5 text-xs transition-colors ${
+                  isSelected
+                    ? 'bg-fantasy-accent/10 border-l-2 border-fantasy-accent pl-2.5 pr-1.5 -mx-1 rounded-r-md'
+                    : isPartner
+                      ? 'border-l-2 border-purple-400 pl-2.5'
+                      : isAnomaly
+                        ? 'border-l-2 border-amber-400/80 pl-2.5'
+                        : ''
                 }`}
               >
                 {/* Row 1: Dot + Name + Badges + Clothing */}
                 <div className="flex items-center justify-between gap-1.5 min-w-0 flex-wrap">
                   <button
                     type="button"
+                    aria-pressed={!isAnomaly && onSelectContact ? isSelected : undefined}
                     onClick={() =>
                       !isAnomaly && onSelectContact && onSelectContact(name)
                     }
                     className={`inline-flex items-center gap-1.5 font-semibold text-left min-w-0 max-w-full transition-colors ${
                       isAnomaly
                         ? 'cursor-default text-amber-100'
-                        : isPartner
-                          ? 'text-purple-200 hover:text-purple-100'
-                          : 'text-gray-100 hover:text-fantasy-accent'
+                        : isSelected
+                          ? 'text-fantasy-accent'
+                          : isPartner
+                            ? 'text-purple-200 hover:text-purple-100'
+                            : 'text-gray-100 hover:text-fantasy-accent'
                     }`}
                     title={
                       isAnomaly
                         ? `${name}${npc?.role ? ` — ${npc.role}` : ''}`
                         : onSelectContact
-                          ? `View ${name} in Codex`
+                          ? isSelected
+                            ? t('scene.close_npc_profile', {
+                                name,
+                                defaultValue: `Close ${name}'s profile`,
+                              })
+                            : t('scene.inspect_npc_profile', {
+                                name,
+                                defaultValue: `Inspect ${name}'s profile`,
+                              })
                           : name
                     }
                   >
@@ -1506,6 +1498,7 @@ const WorldOutcomeSidebar = ({
   onSelectContact,
   onQuickAction,
   onOpenHistory,
+  selectedNpcName = null,
   isMobileDrawer = false,
 }) => {
   return (
@@ -1515,6 +1508,7 @@ const WorldOutcomeSidebar = ({
         session={session}
         onSelectContact={onSelectContact}
         onQuickAction={onQuickAction}
+        selectedNpcName={selectedNpcName}
         isSheet={isMobileDrawer}
         className="flex-1"
       />

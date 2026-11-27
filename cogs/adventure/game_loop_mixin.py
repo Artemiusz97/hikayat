@@ -185,8 +185,8 @@ class GameLoopMixin:
                         await interaction.response.send_message('Still processing, hang on...', ephemeral=True)
                     else:
                         await interaction.followup.send('Still processing, hang on...', ephemeral=True)
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed sending lock-busy notice: %s", exc)
 
     async def handle_retry(self, interaction: discord.Interaction, session_id: int):
             if not interaction.response.is_done():
@@ -365,8 +365,8 @@ class GameLoopMixin:
                         await interaction.response.send_message('Still processing, hang on...', ephemeral=True)
                     else:
                         await interaction.followup.send('Still processing, hang on...', ephemeral=True)
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed sending lock-busy notice: %s", exc)
 
     async def handle_sync_pick(self, interaction: discord.Interaction, session_id: int,
                                choice_index: int | None = None, custom_text: str | None = None,
@@ -604,6 +604,6 @@ class GameLoopMixin:
                         await interaction.response.send_message('Still processing, hang on...', ephemeral=True)
                     else:
                         await interaction.followup.send('Still processing, hang on...', ephemeral=True)
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed sending lock-busy notice: %s", exc)
 

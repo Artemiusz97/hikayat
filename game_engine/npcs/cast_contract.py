@@ -117,14 +117,17 @@ async def repair_cast_contract_violations(
         f"FLAGGED PEOPLE (register only these):\n{json.dumps(violations, ensure_ascii=False)}"
     )
 
+    scen_key = (session.get("scenario") if isinstance(session, dict) else None) or scenario_label or ""
     try:
         from llm_client import call_llm_json
+        from scenario_data import uses_nsfw_model
         raw = await call_llm_json(
             _REPAIR_SYSTEM_PROMPT,
             user_prompt,
             temperature=0.3,
             max_tokens=380,
             retries=0,
+            is_nsfw=uses_nsfw_model(scen_key),
             use_utility=True,
             timeout=8,
         )

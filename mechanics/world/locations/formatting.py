@@ -2,10 +2,11 @@ from __future__ import annotations
 from .constants import *
 import json
 import re
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Mapping
 import db
 import scenario_data
 from .seeds import *
+from .seeds import build_node_props_index
 
 def _is_npc_aware_of_secret_residue(
     npc: Any,
@@ -657,8 +658,39 @@ def format_llm_location_context(
             f"  2. If the player is NOT traveling (dialogue, social chat, skill check, observation, romantic/intimate encounter, sitting down): leave `destination_node_id` as null/empty, keep `location` identical, and update `focal_point` for micro-positioning (e.g. 'Leaning against the glass panes', 'At the teacher\\'s desk'). The macro location will strictly NOT change.\n\n"
         )
 
+    realm_block = ""
+    if session_id and curr_node_id:
+        try:
+            from .realms import build_session_realm_summary
+            r_sum = build_session_realm_summary(session_id, curr_node_id)
+            curr_r = r_sum.get("current_realm")
+            if r_sum.get("show_realm_badge") and isinstance(curr_r, dict):
+                flags = []
+                if curr_r.get("is_mobile_vessel") and curr_r.get("docked_realm_name"):
+                    flags.append(f"Docked at: {curr_r['docked_realm_name']}")
+                if curr_r.get("realm_kind") == "spirit_world":
+                    safe_m_fmt = int(curr_min or 480) % 1440
+                    tide_lbl = (
+                        "Silver Mist-Tide (06:00-17:59; soft perpetual twilight mist)"
+                        if 360 <= safe_m_fmt < 1080
+                        else "Lantern-Tide / Deep Starlight (18:00-05:59; glowing kitsunebi & humanoid shrine forms active)"
+                    )
+                    flags.append(tide_lbl)
+                    flags.append("Comms Isolated (Befriended Spirit Relay contacts reachable)")
+                elif curr_r.get("comms_isolated"):
+                    flags.append("Comms Isolated (no signal)")
+                if float(curr_r.get("time_scale", 1.0)) <= 0.0:
+                    flags.append("Temporal Stasis (outside clock frozen)")
+                if curr_r.get("exit_mode") == "lockdown_until_cleared" and not curr_r.get("pacified"):
+                    flags.append("Return Portal Sealed (lockdown until cleared)")
+                flag_txt = f" [{', '.join(flags)}]" if flags else ""
+                realm_block = f"- Current Realm: {curr_r.get('name', '')}{flag_txt}\n"
+        except Exception:
+            realm_block = ""
+
     return (
         f"CURRENT SCENE LOCATION (Tiered 3-Level Spatial System):\n"
+        f"{realm_block}"
         f"- Current Position: {formatted_current}{env_text}\n"
         f"- Current Breakdown: [Tier 1: Zone/Biome] = '{zone}' | [Tier 2: Physical Place ({arch_label})] = '{primary}' | [Tier 3: Sub-Location/Spot] = '{sub}'\n\n"
         f"{graph_section}"
@@ -685,7 +717,13 @@ def format_llm_location_context(
 
     )
 
-def get_discovered_location_tree(session_id: int, scenario_key: str = "high_school_drama") -> Dict[str, Dict[str, List[str]]]:
+def get_discovered_location_tree(
+    session_id: int,
+    scenario_key: str = "high_school_drama",
+    *,
+    already_seeded: bool = False,
+    preloaded_rows: list[dict] | None = None,
+) -> Dict[str, Dict[str, List[str]]]:
 
     """
 
@@ -695,9 +733,11 @@ def get_discovered_location_tree(session_id: int, scenario_key: str = "high_scho
 
     """
 
-    ensure_session_locations_seeded(session_id, scenario_key)
+    if not already_seeded:
 
-    rows = db.get_session_locations(session_id)
+        ensure_session_locations_seeded(session_id, scenario_key)
+
+    rows = preloaded_rows if preloaded_rows is not None else db.get_session_locations(session_id)
 
 
 
@@ -733,7 +773,13 @@ def get_discovered_location_tree(session_id: int, scenario_key: str = "high_scho
 
     return tree
 
-def get_discovered_primary_locations(session_id: int, scenario_key: str = "high_school_drama") -> Dict[str, List[str]]:
+def get_discovered_primary_locations(
+    session_id: int,
+    scenario_key: str = "high_school_drama",
+    *,
+    realm_id: str | None = None,
+    all_realms: bool = False,
+) -> Dict[str, List[str]]:
 
     """
 
@@ -751,7 +797,74 @@ def get_discovered_primary_locations(session_id: int, scenario_key: str = "high_
 
         result[zone_name] = list(primaries.keys())
 
-    return result
+    if all_realms or not session_id:
+        return result
+
+    try:
+        all_nodes = db.get_session_world_nodes(session_id) or []
+    except Exception:
+        all_nodes = []
+
+    if not any(str(n.get("node_type") or "").upper() == "REALM" for n in all_nodes):
+        return result
+
+    from .realms import get_node_realm_id_in_memory, get_primary_realm_in_memory
+
+    nodes_map = {str(n["node_id"]): n for n in all_nodes if isinstance(n, dict) and n.get("node_id")}
+    eff_realm_id = str(realm_id or "").strip()
+    if not eff_realm_id:
+        sess_row = db.get_session(session_id)
+        c_nid = str((sess_row or {}).get("current_node_id") or "").strip()
+        if c_nid and c_nid in nodes_map:
+            eff_realm_id = get_node_realm_id_in_memory(c_nid, nodes_map)
+        if not eff_realm_id:
+            prim_r = get_primary_realm_in_memory(nodes_map)
+            eff_realm_id = str((prim_r or {}).get("node_id") or "")
+
+    if not eff_realm_id:
+        return result
+
+    realm_nodes_only = [
+        n for n in all_nodes
+        if str(n.get("node_type") or "").upper() != "REALM"
+        and get_node_realm_id_in_memory(str(n.get("node_id") or ""), nodes_map) == eff_realm_id
+    ]
+    eff_r_name = str((nodes_map.get(eff_realm_id) or {}).get("name") or eff_realm_id)
+    allowed_zone_names = {
+        str(n.get("name") or "").strip().lower()
+        for n in realm_nodes_only
+        if str(n.get("node_type") or "").upper() == "ZONE" and n.get("name")
+    }
+    has_direct = any(
+        str(n.get("parent_id") or "") == eff_realm_id
+        and str(n.get("node_type") or "").upper() in ("FACILITY", "ROOM")
+        for n in realm_nodes_only
+    )
+    if has_direct:
+        allowed_zone_names.add(eff_r_name.strip().lower())
+
+    filtered: Dict[str, List[str]] = {
+        zk: zv for zk, zv in result.items()
+        if zk.strip().lower() in allowed_zone_names
+    }
+    for rn in realm_nodes_only:
+        r_type = str(rn.get("node_type") or "").upper()
+        r_pid = str(rn.get("parent_id") or "")
+        if r_type == "FACILITY":
+            p_obj = nodes_map.get(r_pid)
+            p_type = str((p_obj or {}).get("node_type") or "").upper()
+            zn_nm = eff_r_name if p_type == "REALM" else str((p_obj or {}).get("name") or "")
+            fac_nm = str(rn.get("name") or "")
+            if zn_nm and fac_nm and fac_nm not in filtered.setdefault(zn_nm, []):
+                filtered[zn_nm].append(fac_nm)
+        elif r_type == "ROOM":
+            p_obj = nodes_map.get(r_pid)
+            if p_obj and str(p_obj.get("node_type") or "").upper() == "REALM":
+                rm_nm = str(rn.get("name") or "")
+                if rm_nm and eff_r_name not in filtered.get(eff_r_name, []):
+                    filtered.setdefault(eff_r_name, []).append(eff_r_name)
+
+    return filtered
 
 def format_travel_eta_tag(minutes: int, is_same_zone: bool = False, scen_key: str = "fantasy", is_here: bool = False) -> str:
     """Formats a human-readable ETA badge string (e.g. 'Here', '~3m walk', '~12m transit', '~45m trek')."""
@@ -1064,7 +1177,190 @@ def _assign_tier3_markers_for_place(
     p_item["sub_quest_tags"] = [t for t in _QUEST_TAG_PRIORITY if t in sub_tags_acc]
 
 
-def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_loc: str = "", char_name: str = "") -> list[dict]:
+def build_location_occupancy_index(
+    session_id: int,
+    *,
+    scen_key: str,
+    curr_day: int,
+    curr_min: int,
+    node_by_id: Mapping[str, dict[str, Any]],
+    contacts: list[dict] | None = None,
+    world_roster_rows: list[dict] | None = None,
+    school_roster: list[dict] | None = None,
+    rendezvous_commitments: list[dict] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Compute unified Tier-2 facility and Tier-3 room NPC occupancy across appointments, contacts, world_roster, and school_roster."""
+    from mechanics.world.schedules import get_npc_scheduled_node_id
+    from mechanics.world.anchor_schedule import is_npc_on_active_shift, resolve_anchor_schedule_nodes
+    from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
+    from mechanics.world.schedule_blocks import get_detailed_npc_time_phase, get_time_block_key
+
+    occ_by_node: dict[str, dict[str, Any]] = {}
+
+    def _get_occ(nid: str) -> dict[str, Any]:
+        if nid not in occ_by_node:
+            occ_by_node[nid] = {"known_npcs": [], "unmet_count": 0}
+        return occ_by_node[nid]
+
+    def _target_occ_ids(raw_nid: str) -> list[str]:
+        if not raw_nid:
+            return []
+        n_obj = node_by_id.get(raw_nid)
+        is_room = bool(n_obj and n_obj.get("node_type") == "ROOM")
+        fac_id = n_obj.get("parent_id") if is_room else raw_nid
+        if is_room and fac_id and fac_id != raw_nid:
+            return [raw_nid, fac_id]
+        if fac_id:
+            return [fac_id]
+        return [raw_nid]
+
+    def _record_npc_occ(raw_nid: str, npc_name: str, status: str) -> None:
+        if not raw_nid or not npc_name:
+            return
+        npc_low = npc_name.lower()
+        for oid in _target_occ_ids(raw_nid):
+            occ = _get_occ(oid)
+            if not any(kn["name"].lower() == npc_low for kn in occ["known_npcs"]):
+                occ["known_npcs"].append({"name": npc_name, "status": status})
+
+    def _increment_unmet_occ(raw_nid: str) -> None:
+        for oid in _target_occ_ids(raw_nid):
+            _get_occ(oid)["unmet_count"] += 1
+
+    phone_appts: list[dict] = []
+    if session_id and hasattr(db, "get_phone_appointments"):
+        phone_appts = (
+            (db.get_phone_appointments(session_id, status="pending") or [])
+            + (db.get_phone_appointments(session_id, status="arrived") or [])
+        )
+    commitments: list[dict] = []
+    if rendezvous_commitments is not None:
+        commitments = list(rendezvous_commitments)
+    elif session_id:
+        try:
+            from mechanics.system.commitments_engine import get_active_commitments
+            commitments = get_active_commitments(session_id, commitment_type="rendezvous", limit=25) or []
+        except Exception:
+            commitments = []
+
+    for appt in list(phone_appts) + list(commitments):
+        if not isinstance(appt, dict):
+            continue
+        tgt = appt.get("target_node_id")
+        a_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
+        if not tgt and a_loc and session_id:
+            tgt = db.resolve_node_id_from_location(session_id, a_loc, prefer_facility=False)
+        if not tgt:
+            continue
+        a_nm = (appt.get("npc_name") or "").strip()
+        if not a_nm and appt.get("participants"):
+            for pt in appt["participants"]:
+                if isinstance(pt, dict) and pt.get("role") != "organizer" and pt.get("person_key") != "player":
+                    a_nm = (pt.get("name") or pt.get("person_key") or "").strip()
+                    if a_nm:
+                        break
+        if not a_nm and appt.get("target_entity") and appt.get("target_entity") not in ("player", "group"):
+            a_nm = str(appt["target_entity"]).replace("_", " ").title()
+        if a_nm:
+            _record_npc_occ(str(tgt), a_nm, "Rendezvous")
+
+    contacts_list = contacts if contacts is not None else ((db.get_contacts(session_id) or []) if session_id else [])
+    world_roster_list = (
+        world_roster_rows
+        if world_roster_rows is not None
+        else ((db.get_world_roster(session_id, include_legacy_rosters=False) or []) if (session_id and hasattr(db, "get_world_roster")) else [])
+    )
+    roster_list = (
+        school_roster
+        if school_roster is not None
+        else ((db.get_school_roster(session_id) or []) if (session_id and hasattr(db, "get_school_roster")) else [])
+    )
+
+    world_roster_by_low = {
+        str(w.get("name") or "").strip().lower(): w
+        for w in world_roster_list
+        if isinstance(w, dict) and w.get("name")
+    }
+
+    c_names_lower: set[str] = set()
+    for c in contacts_list:
+        if not isinstance(c, dict):
+            continue
+        cn = (c.get("name") or "").strip()
+        if not cn:
+            continue
+        c_names_lower.add(cn.lower())
+        c_probe = c
+        c_wr = world_roster_by_low.get(cn.lower())
+        if isinstance(c_wr, dict):
+            c_bi = c.get("basic_info") if isinstance(c.get("basic_info"), dict) else {}
+            w_bi = c_wr.get("basic_info") if isinstance(c_wr.get("basic_info"), dict) else {}
+            c_probe = {
+                **c_wr,
+                **c,
+                "basic_info": {**w_bi, **c_bi},
+                "_roster_premerged": True,
+                "_db_hydrated": True,
+            }
+        snid = get_npc_scheduled_node_id(c_probe, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+        if snid:
+            _record_npc_occ(str(snid), cn, "Routine")
+
+    seen_roster_names_lower: set[str] = set()
+    curr_phase_occ = get_detailed_npc_time_phase(curr_min, current_day=curr_day, scen_key=scen_key)
+    curr_blk_occ = get_time_block_key(curr_min)
+    eff_sid = session_id if session_id else None
+    for wr in world_roster_list:
+        if not isinstance(wr, dict):
+            continue
+        wr_nm = str(wr.get("name") or "").strip()
+        if not wr_nm or wr_nm.lower() in c_names_lower:
+            continue
+        if str(wr.get("origin") or "").strip().lower() == "legacy_adapter":
+            continue
+        if str(wr.get("staff_status") or "active").strip().lower() != "active":
+            continue
+        wr_pre = {**wr, "_roster_premerged": True}
+        a_map = resolve_anchor_schedule_nodes(
+            wr_pre, current_day=curr_day, scen_key=scen_key, session_id=eff_sid, current_minute=curr_min
+        )
+        on_sh, work_nid = is_npc_on_active_shift(
+            wr_pre, curr_min, current_day=curr_day, scen_key=scen_key, session_id=eff_sid
+        )
+        sched_nid = (
+            (work_nid if (on_sh and work_nid) else "")
+            or str((a_map or {}).get(curr_phase_occ) or (a_map or {}).get(curr_blk_occ) or "").strip()
+        )
+        if not sched_nid or sched_nid in (SHARED_ABSTRACT_RESIDENCE_NODE, "loc_rival_academy_away"):
+            continue
+        if wr.get("met_in_person") or int(wr.get("affinity_score") or 0) != 0:
+            _record_npc_occ(sched_nid, wr_nm, "Routine")
+        else:
+            _increment_unmet_occ(sched_nid)
+        seen_roster_names_lower.add(wr_nm.lower())
+
+    for r in roster_list:
+        if not isinstance(r, dict):
+            continue
+        rn = (r.get("name") or "").strip()
+        if not rn or rn.lower() in c_names_lower or rn.lower() in seen_roster_names_lower:
+            continue
+        snid = get_npc_scheduled_node_id(r, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+        if snid:
+            _increment_unmet_occ(str(snid))
+
+    return occ_by_node
+
+
+def get_zone_summary_tree(
+    session_id: int,
+    scen_key: str = "fantasy",
+    current_loc: str = "",
+    char_name: str = "",
+    *,
+    ensure_waypoints: bool = True,
+    realm_id: str | None = None,
+) -> list[dict]:
 
     """
 
@@ -1074,15 +1370,28 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
     """
 
-    ensure_session_locations_seeded(session_id, scen_key, char_name=char_name)
+    readonly_mode = db.is_in_readonly_uow()
+    if not readonly_mode:
+        ensure_session_locations_seeded(session_id, scen_key, char_name=char_name)
 
-    tree = get_discovered_location_tree(session_id, scen_key)
+    rows = db.get_session_locations(session_id)
 
-    from mechanics.world.waypoints import get_location_waypoint_markers, get_location_waypoint_entries
+    tree = get_discovered_location_tree(
+        session_id,
+        scen_key,
+        already_seeded=True,
+        preloaded_rows=rows,
+    )
+
+    from mechanics.world.waypoints import get_location_waypoint_markers_and_entries
     from mechanics.world.waypoints.core import _classify_waypoint_marker
     from mechanics.world.mobility import calculate_route_travel_time
 
-    waypoint_markers = get_location_waypoint_markers(session_id)
+    waypoint_markers, wp_entries = get_location_waypoint_markers_and_entries(
+        session_id,
+        existing_locs=rows,
+        ensure_waypoints=ensure_waypoints and not readonly_mode,
+    )
 
     sess_row = db.get_session(session_id) if session_id else None
     eff_curr_loc = current_loc or (sess_row.get("current_location") if sess_row else "") or ""
@@ -1096,12 +1405,175 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
     # Fetch atmosphere for each zone, preferring authoritative ZONE world_nodes before session_locations
 
-    rows = db.get_session_locations(session_id)
+    all_nodes: list[dict] = []
+    if session_id:
+        try:
+            all_nodes = db.get_session_world_nodes(session_id) or []
+        except Exception:
+            all_nodes = []
+
+    from .realms import (
+        PORTAL_EDGE_TYPES,
+        get_node_realm_id_in_memory,
+        get_primary_realm_in_memory,
+        get_realm_rules,
+    )
+
+    realm_nodes_map = {n["node_id"]: n for n in all_nodes if isinstance(n, dict) and n.get("node_id")}
+    has_realms = any(str(n.get("node_type") or "").upper() == "REALM" for n in all_nodes)
+    eff_realm_id = str(realm_id or "").strip()
+    if has_realms and not eff_realm_id:
+        _c_nid = (sess_row.get("current_node_id") if sess_row else "") or ""
+        if not _c_nid and eff_curr_loc:
+            _c_nid = db.resolve_node_id_from_location(session_id, eff_curr_loc) or ""
+        if _c_nid and _c_nid in realm_nodes_map:
+            eff_realm_id = get_node_realm_id_in_memory(_c_nid, realm_nodes_map)
+        if not eff_realm_id:
+            _prim_r = get_primary_realm_in_memory(realm_nodes_map)
+            eff_realm_id = str((_prim_r or {}).get("node_id") or "")
+
+    # Realm-scoped structural tree supplementation & filtering
+    if has_realms and eff_realm_id:
+        eff_r_node = realm_nodes_map.get(eff_realm_id)
+        eff_r_name = str((eff_r_node or {}).get("name") or eff_realm_id)
+        realm_nodes_only = [
+            n for n in all_nodes
+            if str(n.get("node_type") or "").upper() != "REALM"
+            and get_node_realm_id_in_memory(str(n.get("node_id") or ""), realm_nodes_map) == eff_realm_id
+        ]
+        curr_nid_vis = str((sess_row or {}).get("current_node_id") or "").strip()
+        curr_zone_vis = ""
+        curr_fac_vis = ""
+        if curr_nid_vis and curr_nid_vis in realm_nodes_map:
+            _cn = realm_nodes_map[curr_nid_vis]
+            _ct = str(_cn.get("node_type") or "").upper()
+            if _ct == "ZONE":
+                curr_zone_vis = curr_nid_vis
+            elif _ct == "FACILITY":
+                curr_fac_vis = curr_nid_vis
+                curr_zone_vis = str(_cn.get("parent_id") or "")
+            elif _ct == "ROOM":
+                curr_fac_vis = str(_cn.get("parent_id") or "")
+                _cf = realm_nodes_map.get(curr_fac_vis) or {}
+                curr_zone_vis = str(_cf.get("parent_id") or "")
+
+        def _node_is_hidden_unrevealed(n_dict: dict) -> bool:
+            raw_st = n_dict.get("state_json")
+            if isinstance(raw_st, str) and raw_st.strip():
+                try:
+                    st = json.loads(raw_st)
+                except Exception:
+                    st = {}
+            elif isinstance(raw_st, dict):
+                st = raw_st
+            else:
+                st = {}
+            if not isinstance(st, dict):
+                return False
+            return bool(st.get("is_hidden")) and not bool(st.get("discovered", False))
+
+        hidden_zone_ids = {
+            str(zn.get("node_id") or "")
+            for zn in realm_nodes_only
+            if str(zn.get("node_type") or "").upper() == "ZONE"
+            and zn.get("node_id")
+            and str(zn.get("node_id")) != curr_zone_vis
+            and _node_is_hidden_unrevealed(zn)
+        }
+        hidden_fac_ids = {
+            str(fn.get("node_id") or "")
+            for fn in realm_nodes_only
+            if str(fn.get("node_type") or "").upper() == "FACILITY"
+            and fn.get("node_id")
+            and str(fn.get("node_id")) != curr_fac_vis
+            and (
+                str(fn.get("parent_id") or "") in hidden_zone_ids
+                or _node_is_hidden_unrevealed(fn)
+            )
+        }
+        # Ensure standard (ZONE->FACILITY->ROOM), compact (REALM->FACILITY->ROOM), and pocket (REALM->ROOM) layouts appear cleanly
+        for rn in realm_nodes_only:
+            rn_id = str(rn.get("node_id") or "")
+            r_type = str(rn.get("node_type") or "").upper()
+            r_pid = str(rn.get("parent_id") or "")
+            if r_type == "ZONE":
+                if rn_id in hidden_zone_ids:
+                    continue
+                zn_nm = str(rn.get("name") or "")
+                if zn_nm and zn_nm not in tree:
+                    tree[zn_nm] = {}
+            elif r_type == "FACILITY":
+                if rn_id in hidden_fac_ids or r_pid in hidden_zone_ids:
+                    continue
+                fac_nm = str(rn.get("name") or "")
+                if r_pid == eff_realm_id:
+                    if fac_nm:
+                        tree.setdefault(eff_r_name, {}).setdefault(fac_nm, [])
+                else:
+                    p_obj = realm_nodes_map.get(r_pid)
+                    if p_obj and str(p_obj.get("node_type") or "").upper() == "ZONE":
+                        zn_nm = str(p_obj.get("name") or "")
+                        if zn_nm and fac_nm:
+                            tree.setdefault(zn_nm, {}).setdefault(fac_nm, [])
+            elif r_type == "ROOM":
+                if r_pid in hidden_fac_ids or r_pid in hidden_zone_ids or _node_is_hidden_unrevealed(rn):
+                    continue
+                p_obj = realm_nodes_map.get(r_pid)
+                p_type = str((p_obj or {}).get("node_type") or "").upper()
+                rm_nm = str(rn.get("name") or "")
+                if p_type == "REALM" and rm_nm:
+                    subs_list = tree.setdefault(eff_r_name, {}).setdefault(eff_r_name, [])
+                    if rm_nm not in subs_list:
+                        subs_list.append(rm_nm)
+                elif p_type == "FACILITY" and p_obj and rm_nm:
+                    fac_nm = str(p_obj.get("name") or "")
+                    gp_id = str(p_obj.get("parent_id") or "")
+                    if gp_id in hidden_zone_ids:
+                        continue
+                    if gp_id == eff_realm_id:
+                        if fac_nm:
+                            subs_list = tree.setdefault(eff_r_name, {}).setdefault(fac_nm, [])
+                            if rm_nm not in subs_list:
+                                subs_list.append(rm_nm)
+                    else:
+                        gp_obj = realm_nodes_map.get(gp_id)
+                        if gp_obj and str(gp_obj.get("node_type") or "").upper() == "ZONE":
+                            zn_nm = str(gp_obj.get("name") or "")
+                            if zn_nm and fac_nm:
+                                subs_list = tree.setdefault(zn_nm, {}).setdefault(fac_nm, [])
+                                if rm_nm not in subs_list:
+                                    subs_list.append(rm_nm)
+
+        # Build allowed zone/facility set strictly inside eff_realm_id
+        allowed_zone_names = {
+            str(n.get("name") or "").strip().lower()
+            for n in realm_nodes_only
+            if str(n.get("node_type") or "").upper() == "ZONE"
+            and n.get("name")
+            and str(n.get("node_id") or "") not in hidden_zone_ids
+        }
+        has_direct_realm_children = any(
+            str(n.get("parent_id") or "") == eff_realm_id and str(n.get("node_type") or "").upper() in ("FACILITY", "ROOM")
+            for n in realm_nodes_only
+        )
+        if has_direct_realm_children:
+            allowed_zone_names.add(eff_r_name.strip().lower())
+        tree = {
+            zk: zv for zk, zv in tree.items()
+            if zk.strip().lower() in allowed_zone_names
+        }
+        all_nodes = [n for n in all_nodes if n in realm_nodes_only or n.get("node_id") == eff_realm_id]
+        # Restrict parse_tiered_location to eff_realm_id when current loc shares a name
+        if curr_node_id := (sess_row.get("current_node_id") if sess_row else None):
+            if curr_node_id in realm_nodes_map and get_node_realm_id_in_memory(curr_node_id, realm_nodes_map) == eff_realm_id:
+                _curr_fmt = db.format_node_tiered_location(session_id, curr_node_id)
+                if _curr_fmt:
+                    curr_z, curr_p, curr_sub = parse_tiered_location(_curr_fmt, scen_key, session_id=session_id, char_name=char_name)
 
     zone_atm_map: dict[str, str] = {}
 
     try:
-        for zn in (db.get_session_world_nodes(session_id) or []):
+        for zn in all_nodes:
             if zn.get("node_type") == "ZONE" and zn.get("name") and zn.get("atmosphere"):
                 zone_atm_map[zn["name"]] = zn["atmosphere"]
     except Exception:
@@ -1121,7 +1593,18 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
             ):
                 zone_atm_map[z] = atm
 
-
+    session_factions: list[dict] = []
+    if session_id:
+        try:
+            session_factions = db.get_factions(session_id) or []
+        except Exception:
+            session_factions = []
+    preloaded_p_house = ""
+    if session_id or char_name:
+        try:
+            preloaded_p_house = get_session_player_house_name(session_id, char_name=char_name, scenario_key=scen_key)
+        except Exception:
+            preloaded_p_house = ""
 
     summary_list = []
 
@@ -1139,7 +1622,16 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
             val_str = f"{zone_name} ➔ {primary_name}"
 
-            emoji = get_location_emoji(primary_name, zone_name=zone_name, waypoint_markers=waypoint_markers, session_id=session_id, scen_key=scen_key, char_name=char_name)
+            emoji = get_location_emoji(
+                primary_name,
+                zone_name=zone_name,
+                waypoint_markers=waypoint_markers,
+                session_id=session_id,
+                scen_key=scen_key,
+                char_name=char_name,
+                preloaded_factions=session_factions,
+                player_house_name=preloaded_p_house,
+            )
 
             
 
@@ -1191,17 +1683,13 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
             if location_has_merchant_shop(primary_name, scen_key=scen_key):
                 loc_badges.append("🛍️")
 
-            if location_has_faction_hq(primary_name, session_id=session_id):
+            if location_has_faction_hq(primary_name, session_id=session_id, preloaded_factions=session_factions):
                 loc_badges.append("🏛️")
                 zone_tags_set.add("🏛️ Faction HQ")
 
-            try:
-                p_house = get_session_player_house_name(session_id, char_name=char_name, scenario_key=scen_key)
-                if primary_name == p_house:
-                    loc_badges.append("🏠")
-                    zone_tags_set.add("🏠 Home")
-            except Exception:
-                pass
+            if preloaded_p_house and primary_name == preloaded_p_house:
+                loc_badges.append("🏠")
+                zone_tags_set.add("🏠 Home")
 
             arch_label, arch_emoji = get_location_archetype(primary_name, zone_name=zone_name, scen_key=scen_key)
             final_emoji = "🏠" if emoji == "🏠" else (arch_emoji or emoji)
@@ -1295,91 +1783,108 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
     if session_id:
         try:
-            from mechanics.world.schedules import get_npc_scheduled_node_id
-            from mechanics.world.locations.access_gate import get_node_effective_access_info
+            from mechanics.world.locations.access_gate import (
+                build_access_eval_context,
+                get_node_effective_access_info,
+            )
 
             curr_day, curr_min, _ = db.get_session_time(session_id)
-            contacts = db.get_contacts(session_id) or []
-            roster = db.get_school_roster(session_id) if hasattr(db, "get_school_roster") else []
-            all_nodes = db.get_session_world_nodes(session_id) or []
+
+            node_by_id: dict[str, dict] = {}
+            rooms_by_parent: dict[str, list[dict]] = {}
+            fac_zone_id_by_name_lower: dict[str, str] = {}
+            for _wn in all_nodes:
+                if not isinstance(_wn, dict):
+                    continue
+                _wn_id = _wn.get("node_id")
+                if not _wn_id:
+                    continue
+                node_by_id[_wn_id] = _wn
+                _wn_type = str(_wn.get("node_type") or "").upper()
+                if _wn_type == "ROOM":
+                    _wn_pid = _wn.get("parent_id")
+                    if _wn_pid:
+                        rooms_by_parent.setdefault(_wn_pid, []).append(_wn)
+                if _wn_type in ("FACILITY", "ZONE"):
+                    _wn_name_low = str(_wn.get("name") or "").strip().lower()
+                    if _wn_name_low:
+                        fac_zone_id_by_name_lower.setdefault(_wn_name_low, _wn_id)
+
+            eval_ctx = build_access_eval_context(
+                session_id,
+                scen_key=scen_key,
+                session=sess_row if isinstance(sess_row, dict) else None,
+                all_nodes=all_nodes,
+            )
+            props_ctx = build_node_props_index(
+                session_id,
+                scenario_key=scen_key,
+                char_name=char_name,
+                all_nodes=all_nodes,
+                node_by_id=eval_ctx["node_by_id"],
+                state_by_id=eval_ctx["state_by_id"],
+            )
+
             _is_anom_atlas = (
                 scenario_data.is_anomalous_incursions_scenario(scen_key)
                 or scenario_data.is_anomalous_high_school_scenario(scen_key)
             )
             _anom_res_stat = None
+            _anom_resolve_fn = None
+            _anom_meta_fn = None
+            _anom_node_match_index: tuple = ()
             if _is_anom_atlas:
                 try:
-                    from mechanics.world.anomalous_sites.domain_rules import get_resonator_charges_status
+                    from mechanics.world.anomalous_sites.catalog import (
+                        build_session_node_match_index,
+                        resolve_anomalous_site,
+                    )
+                    from mechanics.world.anomalous_sites.domain_rules import (
+                        build_site_map_meta,
+                        get_resonator_charges_status,
+                    )
+                    _anom_resolve_fn = resolve_anomalous_site
+                    _anom_meta_fn = build_site_map_meta
+                    _anom_node_match_index = build_session_node_match_index(all_nodes)
                     _anom_res_stat = get_resonator_charges_status(
                         session_id, world_nodes=all_nodes, current_day=curr_day, session=sess_row
                     )
                 except Exception:
                     _anom_res_stat = None
+                    _anom_resolve_fn = None
+                    _anom_meta_fn = None
+                    _anom_node_match_index = ()
 
-            occ_by_node: dict[str, dict] = {}
-            def _get_occ(nid: str):
-                if nid not in occ_by_node:
-                    occ_by_node[nid] = {"known_npcs": [], "unmet_count": 0}
-                return occ_by_node[nid]
-
-            def _record_npc_occ(raw_nid: str, npc_name: str, status: str) -> None:
-                n_obj = next((n for n in all_nodes if n["node_id"] == raw_nid), None)
-                is_room = bool(n_obj and n_obj.get("node_type") == "ROOM")
-                fac_id = n_obj.get("parent_id") if is_room else raw_nid
-                target_ids = [raw_nid, fac_id] if (is_room and fac_id) else ([fac_id] if fac_id else [raw_nid])
-                for oid in target_ids:
-                    if not oid:
-                        continue
-                    occ = _get_occ(oid)
-                    if not any(kn["name"].lower() == npc_name.lower() for kn in occ["known_npcs"]):
-                        occ["known_npcs"].append({"name": npc_name, "status": status})
-
-            appts = []
-            if hasattr(db, "get_phone_appointments"):
-                appts = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
-            for appt in appts:
-                tgt = appt.get("target_node_id")
-                if not tgt and appt.get("rendezvous_location"):
-                    tgt = db.resolve_node_id_from_location(session_id, appt["rendezvous_location"], prefer_facility=False)
-                if tgt:
-                    an = appt.get("npc_name", "")
-                    if an:
-                        _record_npc_occ(tgt, an, "Rendezvous")
-
-            c_names_lower = set()
-            for c in contacts:
-                cn = (c.get("name") or "").strip()
-                if not cn: continue
-                c_names_lower.add(cn.lower())
-                snid = get_npc_scheduled_node_id(c, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
-                if snid:
-                    _record_npc_occ(snid, cn, "Routine")
-
-            for r in roster:
-                rn = (r.get("name") or "").strip()
-                if not rn or rn.lower() in c_names_lower: continue
-                snid = get_npc_scheduled_node_id(r, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
-                if snid:
-                    sn = next((n for n in all_nodes if n["node_id"] == snid), None)
-                    is_room_r = bool(sn and sn.get("node_type") == "ROOM")
-                    fac_id = sn.get("parent_id") if is_room_r else snid
-                    for oid in ([snid, fac_id] if (is_room_r and fac_id) else ([fac_id] if fac_id else [])):
-                        if oid:
-                            _get_occ(oid)["unmet_count"] += 1
+            occ_by_node = build_location_occupancy_index(
+                session_id,
+                scen_key=scen_key,
+                curr_day=curr_day,
+                curr_min=curr_min,
+                node_by_id=node_by_id,
+            )
 
             # Single-source Dijkstra from current node across world_edges + room/facility links
             import heapq
             from collections import defaultdict
             all_edges = db.get_session_world_edges(session_id) or []
+            if session_id:
+                for zn_node in all_nodes:
+                    _z_r = get_realm_rules(zn_node) if str(zn_node.get("node_type") or "").upper() == "REALM" else None
+                    _ = _z_r
             curr_node_id = None
-            if current_loc:
-                curr_node_id = db.resolve_node_id_from_location(session_id, eff_curr_loc)
+            if eff_realm_id and sess_row and sess_row.get("current_node_id"):
+                curr_node_id = sess_row.get("current_node_id")
+            if not curr_node_id and current_loc:
+                curr_node_id = db.resolve_node_id_from_location(
+                    session_id, eff_curr_loc, preferred_realm_id=eff_realm_id
+                )
             if not curr_node_id and sess_row:
                 curr_node_id = sess_row.get("current_node_id")
             if not curr_node_id and eff_curr_loc:
-                curr_node_id = db.resolve_node_id_from_location(session_id, eff_curr_loc)
+                curr_node_id = db.resolve_node_id_from_location(
+                    session_id, eff_curr_loc, preferred_realm_id=eff_realm_id
+                )
 
-            node_by_id = {n["node_id"]: n for n in all_nodes}
             if curr_node_id and curr_node_id not in node_by_id and hasattr(db.world, "_LEGACY_NODE_ID_ALIASES"):
                 curr_node_id = db.world._LEGACY_NODE_ID_ALIASES.get(curr_node_id, curr_node_id)
 
@@ -1388,11 +1893,24 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 adj = defaultdict(list)
                 for e in all_edges:
                     u, v = e.get("from_node_id"), e.get("to_node_id")
+                    etype = str(e.get("edge_type") or "")
                     w = max(1, int(e.get("travel_minutes") or 2))
-                    if u and v:
-                        adj[u].append((v, w))
-                        if e.get("is_bidirectional", 1):
-                            adj[v].append((u, w))
+                    if not u or not v:
+                        continue
+                    if has_realms and eff_realm_id:
+                        u_r = get_node_realm_id_in_memory(str(u), realm_nodes_map)
+                        v_r = get_node_realm_id_in_memory(str(v), realm_nodes_map)
+                        is_intra_leyline_open = (
+                            u_r == eff_realm_id
+                            and v_r == eff_realm_id
+                            and etype == "leyline_spirit_passage"
+                            and int(e.get("is_locked") or 0) == 0
+                        )
+                        if u_r != eff_realm_id or v_r != eff_realm_id or (etype in PORTAL_EDGE_TYPES and not is_intra_leyline_open):
+                            continue
+                    adj[u].append((v, w))
+                    if e.get("is_bidirectional", 1):
+                        adj[v].append((u, w))
                 mega_ids = {
                     "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
                     "loc_general_hospital", "loc_theme_park", "loc_eastern_temple",
@@ -1429,7 +1947,6 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 for_atlas_visibility=True,
             )
 
-            wp_entries = get_location_waypoint_entries(session_id)
             entries_by_marker: dict[str, list[dict]] = {}
             entries_by_node_id: dict[str, list[dict]] = {}
             for wpe in wp_entries:
@@ -1448,13 +1965,24 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 for p_item in z_item.get("primary_locations", []):
                     p_nm = p_item["name"]
                     val_str = f"{z_nm} ➔ {p_nm}"
-                    pnid = db.resolve_node_id_from_location(session_id, val_str, prefer_facility=True)
+                    pnid = (
+                        fac_zone_id_by_name_lower.get(p_nm.strip().lower())
+                        if not any(sep in p_nm for sep in ("->", "➔", ">", "/"))
+                        else None
+                    )
+                    if not pnid:
+                        pnid = db.resolve_node_id_from_location(
+                            session_id,
+                            val_str,
+                            prefer_facility=True,
+                            preferred_realm_id=eff_realm_id,
+                        )
                     is_here_place = bool(
                         (pnid and pnid == curr_fac_id)
                         or (is_same_z and curr_p and curr_p.strip().lower() == p_nm.strip().lower())
                     )
                     p_item["is_current_place"] = is_here_place
-                    child_rooms = [n for n in all_nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == pnid] if pnid else []
+                    child_rooms = rooms_by_parent.get(pnid, []) if pnid else []
 
                     if is_here_place:
                         p_mins = 0
@@ -1473,7 +2001,16 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         zone_min_candidates.append(p_mins)
 
                     if pnid:
-                        acc = get_node_effective_access_info(session_id, pnid, current_day=curr_day, current_minute=curr_min, scen_key=scen_key)
+                        acc = get_node_effective_access_info(
+                            session_id,
+                            pnid,
+                            current_day=curr_day,
+                            current_minute=curr_min,
+                            scen_key=scen_key,
+                            session=sess_row if isinstance(sess_row, dict) else None,
+                            quest_gate_snapshot=eval_ctx["quest_gate_snapshot"],
+                            eval_ctx=eval_ctx,
+                        )
                         p_occ = occ_by_node.get(pnid, {"known_npcs": [], "unmet_count": 0})
                         p_item["node_id"] = pnid
                         p_item["access_tier"] = acc.get("access_tier", "open")
@@ -1485,13 +2022,16 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         p_item["scene_residue"] = acc.get("scene_residue") or p_item.get("scene_residue") or ""
                         p_item["known_npcs_here"] = p_occ["known_npcs"][:3]
                         p_item["unmet_activity_count"] = p_occ["unmet_count"]
-                        if _is_anom_atlas:
+                        if _is_anom_atlas and _anom_resolve_fn and _anom_meta_fn:
                             try:
-                                from mechanics.world.anomalous_sites.catalog import resolve_anomalous_site
-                                from mechanics.world.anomalous_sites.domain_rules import build_site_map_meta
-                                _p_anom_spec = resolve_anomalous_site(node_id=pnid, location_str=val_str, session_nodes=all_nodes)
+                                _p_anom_spec = _anom_resolve_fn(
+                                    node_id=pnid,
+                                    location_str=val_str,
+                                    curr_node=node_by_id.get(pnid),
+                                    node_match_index=_anom_node_match_index,
+                                )
                                 if _p_anom_spec and _p_anom_spec.get("site_type") != "embedded_wing":
-                                    p_item["anomalous_site_meta"] = build_site_map_meta(
+                                    p_item["anomalous_site_meta"] = _anom_meta_fn(
                                         session_id,
                                         _p_anom_spec,
                                         current_minute=curr_min,
@@ -1504,7 +2044,12 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                                 pass
 
                         from .residences import is_unpurchased_realty_node
-                        unbought_realty = is_unpurchased_realty_node(session_id, pnid, session=sess_row)
+                        unbought_realty = is_unpurchased_realty_node(
+                            session_id,
+                            pnid,
+                            session=sess_row,
+                            player_properties=eval_ctx["player_properties"],
+                        )
                         if unbought_realty:
                             p_item["is_unpurchased_realty"] = True
                             p_item["realty_price"] = int(unbought_realty.get("price") or 0)
@@ -1534,21 +2079,28 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                             else:
                                 cr_mins = max(1, p_mins + 1)
 
-                            cr_acc = get_node_effective_access_info(session_id, cr_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key)
+                            cr_acc = get_node_effective_access_info(
+                                session_id,
+                                cr_id,
+                                current_day=curr_day,
+                                current_minute=curr_min,
+                                scen_key=scen_key,
+                                session=sess_row if isinstance(sess_row, dict) else None,
+                                quest_gate_snapshot=eval_ctx["quest_gate_snapshot"],
+                                eval_ctx=eval_ctx,
+                            )
                             cr_occ = occ_by_node.get(cr_id, {"known_npcs": [], "unmet_count": 0})
                             if not p_item.get("scene_residue") and cr_acc.get("scene_residue"):
                                 p_item["scene_residue"] = cr_acc.get("scene_residue")
-                            cr_meta: dict[str, Any] = {}
-                            if cr.get("state_json"):
-                                try:
-                                    raw_cr_st = cr["state_json"]
-                                    cr_meta = json.loads(raw_cr_st) if isinstance(raw_cr_st, str) else dict(raw_cr_st)
-                                except Exception:
-                                    cr_meta = {}
+                            cr_meta: dict[str, Any] = eval_ctx["state_by_id"].get(cr_id) or {}
                             cr_is_transit = bool(cr.get("is_transit_hub") or cr_meta.get("is_transit_hub"))
                             cr_is_faction_hq = bool(
                                 cr_meta.get("is_faction_hq")
-                                or location_has_faction_hq(cr_name, session_id=session_id)
+                                or location_has_faction_hq(
+                                    cr_name,
+                                    session_id=session_id,
+                                    preloaded_factions=session_factions,
+                                )
                             )
                             cr_is_minor_hq = bool(cr_meta.get("is_minor_club_hq"))
                             cr_has_board = bool(
@@ -1579,13 +2131,16 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                             if cr_is_discreet:
                                 cr_badges.append("🤫")
                             cr_sub_meta = None
-                            if _is_anom_atlas:
+                            if _is_anom_atlas and _anom_resolve_fn and _anom_meta_fn:
                                 try:
-                                    from mechanics.world.anomalous_sites.catalog import resolve_anomalous_site
-                                    from mechanics.world.anomalous_sites.domain_rules import build_site_map_meta
-                                    _cr_spec = resolve_anomalous_site(node_id=cr_id, location_str=cr_name, session_nodes=all_nodes)
+                                    _cr_spec = _anom_resolve_fn(
+                                        node_id=cr_id,
+                                        location_str=cr_name,
+                                        curr_node=cr,
+                                        node_match_index=_anom_node_match_index,
+                                    )
                                     if _cr_spec and _cr_spec.get("site_type") == "embedded_wing":
-                                        cr_sub_meta = build_site_map_meta(
+                                        cr_sub_meta = _anom_meta_fn(
                                             session_id,
                                             _cr_spec,
                                             current_minute=curr_min,
@@ -1602,7 +2157,13 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                                 "is_current_room": cr_is_here,
                                 "travel_minutes": cr_mins,
                                 "travel_tag": format_travel_eta_tag(cr_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=cr_is_here),
-                                "props": get_node_props(session_id, cr_id, scenario_key=scen_key),
+                                "props": get_node_props(
+                                    session_id,
+                                    cr_id,
+                                    scenario_key=scen_key,
+                                    char_name=char_name,
+                                    props_ctx=props_ctx,
+                                ),
                                 "access_tier": cr_acc.get("access_tier", "open"),
                                 "access_badge": cr_acc.get("status_badge", "Open"),
                                 "is_unlocked": cr_acc.get("is_unlocked", False),
@@ -1633,14 +2194,7 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         _classify_waypoint_marker,
                     )
 
-                    p_node_obj = node_by_id.get(pnid) if pnid else None
-                    p_state_meta = {}
-                    if p_node_obj and p_node_obj.get("state_json"):
-                        try:
-                            raw_st = p_node_obj["state_json"]
-                            p_state_meta = json.loads(raw_st) if isinstance(raw_st, str) else dict(raw_st)
-                        except Exception:
-                            p_state_meta = {}
+                    p_state_meta = (eval_ctx["state_by_id"].get(pnid) or {}) if pnid else {}
                     if p_state_meta.get("is_hidden") and not p_state_meta.get("discovered"):
                         is_club_revealed = bool(
                             is_here_place
@@ -1649,7 +2203,7 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         )
                         if not is_club_revealed:
                             continue
-                        if pnid and session_id:
+                        if pnid and session_id and not readonly_mode:
                             try:
                                 reveal_hidden_club_facility(session_id, pnid)
                             except Exception:

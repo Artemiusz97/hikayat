@@ -193,8 +193,19 @@ async def assemble_and_call_turn_llm(
     _we_nsfw = uses_nsfw_model(session.get("scenario"))
     _we_lang = str(session.get("narration_language") or session.get("language") or "en")
     from mechanics.world.world_events.formatting import format_macro_events_for_z2, format_rumors_for_z3
-    macro_events_z2 = format_macro_events_for_z2(_we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw)
-    rumors_z3 = format_rumors_for_z3(_we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw, current_location=str(scene_loc or ""))
+    _pa_realm_id = ""
+    if session.get("id") and session.get("current_node_id"):
+        try:
+            from mechanics.world.locations.realms import get_node_realm_id
+            _pa_realm_id = get_node_realm_id(int(session["id"]), str(session["current_node_id"]))
+        except Exception:
+            _pa_realm_id = ""
+    macro_events_z2 = format_macro_events_for_z2(
+        _we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw, current_realm_id=_pa_realm_id
+    )
+    rumors_z3 = format_rumors_for_z3(
+        _we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw, current_location=str(scene_loc or ""), current_realm_id=_pa_realm_id
+    )
     # Z2 ordered least -> most volatile; the clock changes every turn so it goes last.
     fresh_zone_2 = "\n".join(p for p in [
         f"CHARACTER SHEET(S):\n{game_engine._party_sheet_text(party)}",

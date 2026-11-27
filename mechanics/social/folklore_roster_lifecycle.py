@@ -22,8 +22,11 @@ from .folklore_roster import (
     _build_villager_stats,
     _match_villager_entry,
     _slugify_id,
+    build_crossroads_basic_info_dict,
     build_villager_basic_info_dict,
     ensure_folklore_villager_roster,
+    ensure_spirit_crossroads_roster,
+    get_scheduled_crossroads_npcs_for_node,
     get_scheduled_villagers_for_node,
     is_myobu_fox_race,
 )
@@ -55,12 +58,30 @@ def _sync_villager_physical_garments(
 
     now = time.time()
     canon_key = _slugify_id(actor_name)
-    is_fox_beast = is_myobu_fox_race(race)
+    from .folklore_roster import is_folklore_beast_race, is_ghoul_canid_race, is_ghoul_race
 
-    if is_fox_beast:
+    is_beast = is_folklore_beast_race(race)
+    is_canid_beast = is_ghoul_canid_race(race)
+
+    if is_beast:
         canon_outfit = {slot: STATE_NONE for slot in ALL_GARMENT_SLOTS}
-        posture = "Poised on four spirit-fox paws"
-        holding = "Foxfire wisps"
+        posture = (
+            "Prowling silently on four nocturnal spirit-canid paws"
+            if is_canid_beast
+            else "Poised on four spirit-fox paws"
+        )
+        holding = "Iron-silver pack collar" if is_canid_beast else "Foxfire wisps"
+    elif is_ghoul_race(race):
+        canon_outfit = {
+            SLOT_OUTERWEAR: humanoid_outfit,
+            SLOT_TOP: humanoid_outfit,
+            SLOT_BOTTOM: "Tailored obsidian wool trousers",
+            SLOT_UNDER_TOP: "Worn",
+            SLOT_UNDER_BOTTOM: "Worn",
+            SLOT_FOOTWEAR: "Polished black leather boots",
+        }
+        posture = "Standing with cool aristocratic poise"
+        holding = "Empty hands"
     else:
         canon_outfit = {
             SLOT_OUTERWEAR: humanoid_outfit,
@@ -87,8 +108,8 @@ def _sync_villager_physical_garments(
     )
 
     for slot in ALL_GARMENT_SLOTS:
-        g_state = STATE_NONE if is_fox_beast else STATE_WORN
-        g_item = "" if is_fox_beast else str(canon_outfit.get(slot) or "")
+        g_state = STATE_NONE if is_beast else STATE_WORN
+        g_item = "" if is_beast else str(canon_outfit.get(slot) or "")
         depth = int(SLOT_LAYER_DEPTHS.get(slot, 2))
         conn.execute(
             """INSERT INTO actor_garments (session_id, actor_key, slot, state, item_name, layer_depth, updated_at)
@@ -144,9 +165,27 @@ def hydrate_folklore_villager_on_encounter(
             "predetermined_intercourse": "virgin" if spec.get("virgin") else "inexperienced",
         }
 
-        home_node = str(spec.get("home_node") or ("sub_kitsune_inner_plaza" if village_key == "kitsune" else "sub_bunian_inner_plaza"))
-        enclave_disp = "Sato-no-Inari — Hidden Kitsune Village" if village_key == "kitsune" else "Kampung Kayangan — Hidden Bunian Village"
-        court_house_name = "House of Shirakawa (Celestial Inari Court)" if village_key == "kitsune" else "Istana Seri Kayangan (Royal Bunian Court)"
+        home_node = str(
+            spec.get("home_node")
+            or (
+                "sub_kitsune_inner_plaza"
+                if village_key == "kitsune"
+                else ("sub_bunian_inner_plaza" if village_key == "bunian" else "sub_ghoul_inner_plaza")
+            )
+        )
+        from mechanics.world.locations.folklore_spirit_naming import (
+            get_spirit_court_procedural_name,
+            get_spirit_enclave_zone_title,
+        )
+        if village_key == "ghoul":
+            enclave_disp = get_spirit_enclave_zone_title(session_id, "ghoul") or "The Pale Ossuary — Sunken Vaults & Cloister"
+            court_house_name = get_spirit_court_procedural_name(session_id, "ghoul") or "Majlis al-Ghul (Ossuary Court)"
+        elif village_key == "kitsune":
+            enclave_disp = "Sato-no-Inari — Hidden Kitsune Village"
+            court_house_name = "House of Shirakawa (Celestial Inari Court)"
+        else:
+            enclave_disp = "Kampung Kayangan — Hidden Bunian Village"
+            court_house_name = "Istana Seri Kayangan (Royal Bunian Court)"
         fellow_villagers = [
             e for e in roster
             if e.get("folklore_village") == village_key and e.get("npc_id") != npc_id and e.get("name")
@@ -199,10 +238,13 @@ def hydrate_folklore_villager_on_encounter(
             if not merged_rel.get("family"):
                 merged_rel["family"] = folklore_relations["family"]
             merged_bi = {**old_bi, **basic_info}
-            if old_bi.get("contact_added") or is_befriended:
+            ghoul_met_relay = str(village_key or "").strip().lower() == "ghoul"
+            if old_bi.get("contact_added") or is_befriended or ghoul_met_relay:
                 merged_bi["contact_added"] = True
                 merged_bi["is_contact"] = True
-                merged_bi["unlocked_via_friendship"] = True
+                merged_bi["has_contact_info"] = True
+                if is_befriended or old_bi.get("unlocked_via_friendship"):
+                    merged_bi["unlocked_via_friendship"] = True
                 merged_bi["spirit_relay_unlocked"] = True
             conn.execute(
                 """UPDATE contacts
@@ -239,7 +281,9 @@ def hydrate_folklore_villager_on_encounter(
                     json.dumps(spec.get("appearance") or {}),
                     json.dumps(folklore_relations),
                     json.dumps(intimate_profile),
-                    "shy, quietly smitten warmth" if spec.get("secret_crush_on_pc") else "courteous folklore poise",
+                    "darkly playful, coolly fascinated predatory intrigue"
+                    if spec.get("predatory_fascination_on_pc")
+                    else ("shy, quietly smitten warmth" if spec.get("secret_crush_on_pc") else "courteous folklore poise"),
                     now,
                     now,
                 ),
@@ -308,7 +352,11 @@ def hydrate_folklore_villager_on_encounter(
             name=name,
             description=spec.get("personality_summary") or spec["role"],
             disposition="friendly",
-            faction="Sato-no-Inari Kitsune Enclave" if village_key == "kitsune" else "Kampung Kayangan Bunian",
+            faction=(
+                "Sato-no-Inari Kitsune Enclave"
+                if village_key == "kitsune"
+                else ("Kampung Kayangan Bunian" if village_key == "bunian" else "Pale Ossuary Al-Ghul Court")
+            ),
             traits=[spec["role"], spec["rank_title"]],
             race=race,
             appearance=spec.get("appearance") or {},
@@ -350,14 +398,140 @@ def befriend_folklore_villager(
                 (score, json.dumps(bi), time.time(), row["id"]),
             )
         roster = ensure_folklore_villager_roster(session_id, persist_db=True)
+        v_key_grant = ""
         for entry in roster:
             if str(entry.get("npc_id")) == str(ct.get("npc_id")):
+                v_key_grant = str(entry.get("folklore_village") or "")
                 if not entry.get("befriended"):
                     entry["befriended"] = True
                     entry["befriended_turn"] = eff_turn
                 break
         db.update_session(session_id, extra={"folklore_villager_roster": roster})
+        if v_key_grant in ("kitsune", "bunian", "ghoul"):
+            from mechanics.world.locations.folklore_spirit_realm import maybe_grant_spirit_guest_cottage
+            maybe_grant_spirit_guest_cottage(session_id, v_key_grant, turn_number=eff_turn, conn=conn)
     return db.get_contact(session_id, ct["name"])
+
+
+def hydrate_crossroads_cast_for_node(
+    session_id: int,
+    node_id: str,
+    current_minute: int = 480,
+    turn_number: int = 0,
+) -> List[Dict[str, Any]]:
+    """Hydrates neutral Dusk Confluence / Outpost NPCs scheduled at `node_id` into `contacts`."""
+    scheduled = get_scheduled_crossroads_npcs_for_node(
+        session_id, node_id, current_minute=current_minute, persist_db=True
+    )
+    if not scheduled:
+        return []
+    eff_turn = int(turn_number if turn_number else db.get_effective_session_turn(session_id))
+    hydrated: List[Dict[str, Any]] = []
+    with db.UnitOfWork() as conn:
+        roster = ensure_spirit_crossroads_roster(session_id, persist_db=True)
+        now = time.time()
+        for spec in scheduled:
+            npc_id = str(spec["npc_id"])
+            name = str(spec["name"])
+            init_score = int(spec.get("relationship_score") or spec.get("initial_affinity") or 10)
+            is_bef = bool(spec.get("befriended") or init_score >= 30)
+            bi = build_crossroads_basic_info_dict(spec, is_befriended=is_bef)
+            existing = conn.execute(
+                "SELECT id, relationship_score, basic_info_json FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+                (session_id, npc_id, name.lower()),
+            ).fetchone()
+            if existing:
+                old_bi = json.loads(existing["basic_info_json"] or "{}") if existing["basic_info_json"] else {}
+                merged_bi = {**old_bi, **bi}
+                if old_bi.get("contact_added") or is_bef:
+                    merged_bi["contact_added"] = True
+                    merged_bi["is_contact"] = True
+                    merged_bi["unlocked_via_friendship"] = True
+                    merged_bi["spirit_relay_unlocked"] = True
+                conn.execute(
+                    "UPDATE contacts SET npc_id = ?, basic_info_json = ?, updated_at = ? WHERE id = ?",
+                    (npc_id, json.dumps(merged_bi), now, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO contacts
+                       (session_id, character_id, npc_id, name, basic_info_json, relationship_score, track,
+                        unlocked_traits_json, preferences_json, race, gender, appearance_json, relations_json,
+                        emotional_tone, open_thread, created_at, updated_at)
+                       VALUES (?, 0, ?, ?, ?, ?, 'platonic', ?, '[]', ?, ?, '{}', '{}', 'hospitable spirit poise', '', ?, ?)""",
+                    (
+                        session_id,
+                        npc_id,
+                        name,
+                        json.dumps(bi),
+                        init_score,
+                        json.dumps([spec.get("role") or "Confluence Resident"]),
+                        str(spec.get("race") or "spirit_broker"),
+                        str(spec.get("gender") or ""),
+                        now,
+                        now,
+                    ),
+                )
+            for r_ent in roster:
+                if str(r_ent.get("npc_id")) == npc_id and not r_ent.get("hydrated"):
+                    r_ent["hydrated"] = True
+                    r_ent["hydrated_turn"] = eff_turn
+            ct_out = db.get_contact(session_id, name)
+            if ct_out:
+                hydrated.append(ct_out)
+        db.update_session(session_id, extra={"spirit_crossroads_roster": roster})
+    return hydrated
+
+
+def befriend_crossroads_npc(
+    session_id: int,
+    npc_id_or_name: str,
+    affinity_delta: int = 20,
+    turn_number: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """Unlocks Spirit Relay (`spirit_relay_unlocked: True`) for a neutral Crossroads / Outpost NPC."""
+    eff_turn = int(turn_number if turn_number is not None else db.get_effective_session_turn(session_id))
+    roster = ensure_spirit_crossroads_roster(session_id, persist_db=True)
+    target_l = str(npc_id_or_name or "").strip().lower()
+    spec = next(
+        (
+            r for r in roster
+            if str(r.get("npc_id") or "").lower() == target_l
+            or str(r.get("slot_key") or "").lower() == target_l
+            or str(r.get("name") or "").strip().lower() == target_l
+        ),
+        None,
+    )
+    if not spec:
+        return None
+    hydrate_crossroads_cast_for_node(
+        session_id,
+        str(spec.get("home_node") or "sub_crossroads_bazaar_walk"),
+        turn_number=eff_turn,
+    )
+    with db.UnitOfWork() as conn:
+        row = conn.execute(
+            "SELECT id, relationship_score, basic_info_json FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+            (session_id, spec["npc_id"], str(spec["name"]).lower()),
+        ).fetchone()
+        if row:
+            bi = json.loads(row["basic_info_json"] or "{}") if row["basic_info_json"] else {}
+            bi["contact_added"] = True
+            bi["is_contact"] = True
+            bi["unlocked_via_friendship"] = True
+            bi["spirit_relay_unlocked"] = True
+            new_score = max(30, min(100, int(row["relationship_score"] or 0) + int(affinity_delta or 0)))
+            conn.execute(
+                "UPDATE contacts SET relationship_score = ?, basic_info_json = ?, updated_at = ? WHERE id = ?",
+                (new_score, json.dumps(bi), time.time(), row["id"]),
+            )
+        roster_now = ensure_spirit_crossroads_roster(session_id, persist_db=True)
+        for r_ent in roster_now:
+            if str(r_ent.get("npc_id")) == str(spec["npc_id"]) and not r_ent.get("befriended"):
+                r_ent["befriended"] = True
+                r_ent["befriended_turn"] = eff_turn
+        db.update_session(session_id, extra={"spirit_crossroads_roster": roster_now})
+    return db.get_contact(session_id, str(spec["name"]))
 
 
 def shift_kitsune_form(
@@ -421,10 +595,11 @@ def shift_kitsune_form(
 
         row = conn.execute("SELECT id, basic_info_json, track FROM contacts WHERE id = ?", (ct["id"],)).fetchone()
         bi = json.loads(row["basic_info_json"] or "{}") if row else {}
+        prev_track = str((row["track"] if row else None) or "platonic")
         bi["race"] = norm_target
         bi["combat_kit_key"] = new_kit_key
         bi["innate_abilities"] = new_abilities
-        new_track = "platonic" if norm_target == "kitsune:myobu_fox" else str(row["track"] or "platonic")
+        new_track = "platonic" if norm_target == "kitsune:myobu_fox" else prev_track
         conn.execute(
             "UPDATE contacts SET race = ?, track = ?, basic_info_json = ?, appearance_json = ?, updated_at = ? WHERE id = ?",
             (norm_target, new_track, json.dumps(bi), json.dumps(app), time.time(), ct["id"]),
@@ -442,6 +617,7 @@ def shift_kitsune_form(
                     {
                         "turn": eff_turn,
                         "prev_form": cur_race,
+                        "prev_track": prev_track,
                         "new_form": norm_target,
                         "reason": shift_reason,
                     }
@@ -519,6 +695,8 @@ def sync_kitsune_circadian_forms_for_node(
 
 def _build_folklore_weapon_profile(race_val: str, village_key: str, tier: int) -> Dict[str, Any]:
     """Builds a mana-infused folklore spirit weapon profile capable of harming non-corporeal anomalies."""
+    from .folklore_roster import is_ghoul_canid_race
+
     eff_tier = max(1, int(tier or 3))
     if is_myobu_fox_race(race_val):
         return {
@@ -530,13 +708,34 @@ def _build_folklore_weapon_profile(race_val: str, village_key: str, tier: int) -
             "is_mana_infused": True,
             "mundane_weapon": False,
         }
-    if str(village_key or "").strip().lower() == "kitsune":
+    if is_ghoul_canid_race(race_val):
+        return {
+            "name": "Ash-Pit Spirit-Canid Fangs",
+            "damage_dice": "2d8",
+            "damage_type": "aether",
+            "atk_bonus": 7 + eff_tier * 3,
+            "matk_bonus": 6 + eff_tier * 3,
+            "is_mana_infused": True,
+            "mundane_weapon": False,
+        }
+    vk_low = str(village_key or "").strip().lower()
+    if vk_low == "kitsune":
         return {
             "name": "Inari Kagura Spirit-Fan & Ofuda",
             "damage_dice": "2d8",
             "damage_type": "fire",
             "atk_bonus": 6 + eff_tier * 3,
             "matk_bonus": 8 + eff_tier * 3,
+            "is_mana_infused": True,
+            "mundane_weapon": False,
+        }
+    if vk_low == "ghoul":
+        return {
+            "name": "Blackened-Silver Ossuary Cane-Sabre",
+            "damage_dice": "2d8",
+            "damage_type": "aether",
+            "atk_bonus": 7 + eff_tier * 3,
+            "matk_bonus": 7 + eff_tier * 3,
             "is_mana_infused": True,
             "mundane_weapon": False,
         }
@@ -558,12 +757,15 @@ def hydrate_village_cast_for_node(
     turn_number: int = 0,
 ) -> List[Dict[str, Any]]:
     """Hydrates any folklore villagers scheduled at an inner village room or glamour spot when the PC visits."""
+    from .folklore_ghoul import sync_ghoul_contextual_forms_for_node
+
     sync_kitsune_circadian_forms_for_node(session_id, node_id, current_minute=current_minute, turn_number=turn_number)
+    sync_ghoul_contextual_forms_for_node(session_id, node_id, current_minute=current_minute, turn_number=turn_number)
     scheduled = get_scheduled_villagers_for_node(session_id, node_id, current_minute=current_minute, persist_db=True)
     hydrated: List[Dict[str, Any]] = []
     veil_cache: Dict[str, Dict[str, Any]] = {}
     for entry in scheduled:
-        if node_id in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade") and not entry.get("is_daytime_wanderer"):
+        if node_id in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade", "sub_uc_black_font") and not entry.get("is_daytime_wanderer"):
             v_key_c = str(entry.get("folklore_village") or "")
             if v_key_c not in veil_cache:
                 veil_cache[v_key_c] = get_village_veil_status(session_id, v_key_c)
@@ -581,9 +783,11 @@ def recruit_folklore_companion(
     turn_number: int = 0,
 ) -> Dict[str, Any]:
     """
-    Recruits a befriended folklore villager (including kitsune:myobu_fox as a fox-fire beast companion!)
+    Recruits a befriended folklore villager (including beast forms as spirit beast companions!)
     into session_party_npcs with their 5-ability folklore combat kit.
     """
+    from .folklore_roster import is_folklore_beast_race
+
     eff_turn = int(turn_number or db.get_effective_session_turn(session_id))
     ct = hydrate_folklore_villager_on_encounter(session_id, npc_id_or_name, turn_number=eff_turn)
     if not ct:
@@ -599,9 +803,13 @@ def recruit_folklore_companion(
     max_hp = 70 + tier * 25
     max_mp = 50 + tier * 20
     race_str = str(ct.get("race") or "")
-    v_key = str(bi.get("folklore_village") or ("kitsune" if "kitsune" in race_str.lower() else "bunian")).lower()
+    v_key = str(
+        bi.get("folklore_village")
+        or ("kitsune" if "kitsune" in race_str.lower() else ("ghoul" if "ghoul" in race_str.lower() else "bunian"))
+    ).lower()
     is_fox = is_myobu_fox_race(race_str)
-    attr = "fire" if (is_fox or v_key == "kitsune") else "aether"
+    is_beast = is_folklore_beast_race(race_str)
+    attr = "fire" if (is_fox or v_key == "kitsune") else ("shadow" if v_key == "ghoul" else "aether")
     party_entry = {
         "npc_id": ct.get("npc_id"),
         "name": ct["name"],
@@ -611,7 +819,7 @@ def recruit_folklore_companion(
         "race": race_str,
         "gender": ct.get("gender"),
         "is_folklore_villager": True,
-        "is_beast_companion": is_fox,
+        "is_beast_companion": is_beast,
         "folklore_village": v_key,
         "agent_tier": tier,
         "attribute": attr,
@@ -646,13 +854,13 @@ def resolve_glamour_wanderer_interaction(
     Supports pure preview (`persist_db=False`) during pre-turn stage evaluation.
     """
     safe_min = int(current_minute or 0) % 1440
-    if not (540 <= safe_min <= 1020):
-        return {"present": False, "reason": "outside_daytime_window"}
-
     roster = ensure_folklore_villager_roster(session_id, persist_db=persist_db)
     wanderer: Optional[Dict[str, Any]] = None
     for entry in roster:
-        if not entry.get("is_daytime_wanderer"):
+        if not (entry.get("is_daytime_wanderer") or entry.get("is_ghoul_city_wanderer")):
+            continue
+        is_ghoul_w = bool(entry.get("is_ghoul_city_wanderer") or entry.get("folklore_village") == "ghoul")
+        if not is_ghoul_w and not (540 <= safe_min <= 1020):
             continue
         sched_nodes = set((entry.get("schedule") or {}).values())
         if (
@@ -665,11 +873,17 @@ def resolve_glamour_wanderer_interaction(
                 entry["folklore_village"] == "bunian"
                 and node_id in ("loc_forest_trails", "sub_trail_gateway", "sub_cedar_bridge")
             )
+            or (
+                entry["folklore_village"] == "ghoul"
+                and node_id in ("loc_hosp_morgue", "loc_hosp_emergency_triage", "sub_crypt_ossuary", "sub_uc_salvage_stalls", "sub_uc_tunnel_cantina")
+            )
         ):
             wanderer = entry
             break
 
     if not wanderer:
+        if not (540 <= safe_min <= 1020):
+            return {"present": False, "reason": "outside_daytime_window"}
         return {"present": False}
 
     village_key = str(wanderer["folklore_village"])

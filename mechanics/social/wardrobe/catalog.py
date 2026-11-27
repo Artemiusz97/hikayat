@@ -7,6 +7,7 @@ across all Hikayat genres, factions, cliques, species, and personality styles.
 import hashlib
 from typing import Any, Dict, Mapping
 
+from mechanics.social.persona.core import is_male_gender as _canon_is_male_gender
 from mechanics.social.roster_tags import derive_age_group, normalize_standing
 
 from .constants import (
@@ -151,10 +152,7 @@ def _seed_idx(seed_key: str, modulo: int) -> int:
 
 
 def _is_male_gender(gender_val: Any) -> bool:
-    g = str(gender_val or "").strip().lower()
-    return any(w in g for w in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(
-        w in g for w in ("female", "woman", "girl", "lady", "she", "her")
-    )
+    return _canon_is_male_gender(gender_val)
 
 
 def _extract_meta_flags(npc: Mapping[str, Any], scen_key: str) -> dict[str, Any]:
@@ -179,15 +177,24 @@ def _extract_meta_flags(npc: Mapping[str, Any], scen_key: str) -> dict[str, Any]
     srt = str(npc.get("social_role_type") or basic.get("social_role_type") or "").strip().lower()
     desc = str(npc.get("description") or basic.get("description") or npc.get("personality_summary") or "").strip()
 
+    from mechanics.social.persona import normalize_openness_tier
+
     traits_raw = npc.get("traits") or npc.get("unlocked_traits") or basic.get("traits") or []
     traits_str = " ".join(str(t) for t in traits_raw) if isinstance(traits_raw, list) else str(traits_raw)
-    open_val = str(app.get("erotic_openness") or app.get("openness") or "").lower()
+    open_raw = str(app.get("erotic_openness") or app.get("openness") or "").strip()
+    open_val = open_raw.lower()
     dem_val = str(npc.get("demeanor") or basic.get("demeanor") or app.get("intimate_demeanor") or "").lower()
-    persona_probe = f"{role} {clique} {traits_str} {open_val} {dem_val} {desc}".lower()
+    persona_probe = f"{role} {clique} {traits_str} {dem_val} {desc}".lower()
 
-    is_prude = any(k in persona_probe for k in ("prude", "modest", "chaste", "prudish", "sheltered", "timid", "strict"))
-    is_shameless = any(k in persona_probe for k in ("shameless", "lewd", "hedonist", "nympho", "lascivious", "provocative", "seductive"))
-    is_bold = is_shameless or any(k in persona_probe for k in ("bold", "uninhibited", "flirtatious", "forward", "flirty"))
+    if open_raw:
+        open_tier = normalize_openness_tier(open_raw)
+        is_prude = open_tier == "prude"
+        is_shameless = open_tier == "shameless"
+        is_bold = open_tier in ("bold", "shameless")
+    else:
+        is_prude = any(k in persona_probe for k in ("prude", "modest", "chaste", "prudish", "sheltered", "timid", "strict"))
+        is_shameless = any(k in persona_probe for k in ("shameless", "lewd", "hedonist", "nympho", "lascivious", "provocative", "seductive"))
+        is_bold = is_shameless or any(k in persona_probe for k in ("bold", "uninhibited", "flirtatious", "forward", "flirty"))
     is_rebellious = any(k in persona_probe for k in ("rebel", "delinquent", "slacker", "rule-breaker", "unruly"))
 
     genre_family = resolve_wardrobe_genre_family(scen_key)
@@ -249,8 +256,11 @@ def _extract_meta_flags(npc: Mapping[str, Any], scen_key: str) -> dict[str, Any]
         "is_shameless": is_shameless,
         "is_rebellious": is_rebellious,
         "is_myobu_fox": race == "kitsune:myobu_fox",
+        "is_ghoul_canid": race in ("ghoul:canid", "ghoul_canid"),
+        "is_folklore_beast": race in ("kitsune:myobu_fox", "ghoul:canid", "ghoul_canid"),
         "is_bunian": race == "orang_bunian" or "bunian" in race,
         "is_kitsune_humanoid": race in ("kitsune:humanoid", "kitsune"),
+        "is_ghoul_humanoid": race in ("ghoul:humanoid", "ghoul"),
         "app": app,
         "basic": basic,
     }
@@ -467,6 +477,67 @@ def _resolve_duty_outfit(meta: Mapping[str, Any], seed_key: str) -> tuple[str, s
     return ("Hooded traveler's capelet", "Tailored leather bodice over linen blouse", "Pleated traveling skirt", "Knee-high leather boots")
 
 
+def _npc_has_tactical_kit(meta: Mapping[str, Any]) -> bool:
+    """True only for Special Agents, double-life operatives, combat responders, or anomalous org members."""
+    if meta.get("is_special_agent") or meta.get("is_double_life"):
+        return True
+    role_low = str(meta.get("role") or "").lower()
+    desc_low = str(meta.get("desc") or "").lower()
+    fac_low = str(meta.get("faction_id") or "").lower()
+    probe = f"{role_low} {desc_low}".strip()
+    if any(
+        tok in fac_low
+        for tok in ("public_agency", "private_agency", "monastic", "cult", "clandestine", "syndicate")
+    ):
+        return True
+    combat_tokens = (
+        "agent",
+        "operative",
+        "containment",
+        "tactical",
+        "exorcist",
+        "hunter",
+        "paladin",
+        "knight",
+        "soldier",
+        "guard",
+        "police",
+        "swat",
+        "security",
+        "enforcer",
+        "mercenary",
+        "fixer",
+        "cleaner",
+        "broker",
+        "field specialist",
+        "hazmat",
+        "paramedic",
+        "rescue",
+        "warden",
+        "bounty",
+    )
+    return any(tok in probe for tok in combat_tokens)
+
+
+def _npc_has_secret_faction_kit(meta: Mapping[str, Any], npc_or_contact: Mapping[str, Any]) -> bool:
+    """True only for characters affiliated with a secret/clandestine/velvet faction."""
+    fac_low = str(meta.get("faction_id") or "").lower()
+    club_low = str(meta.get("club") or "").lower()
+    cat_low = str(
+        npc_or_contact.get("faction_category")
+        or (meta.get("basic") or {}).get("faction_category")
+        or ""
+    ).lower()
+    return bool(
+        "cult" in fac_low
+        or "clandestine" in fac_low
+        or "syndicate" in fac_low
+        or "velvet" in fac_low
+        or "velvet" in club_low
+        or "nsfw_club" in cat_low
+    )
+
+
 def build_npc_wardrobe_presets(
     npc_or_contact: Mapping[str, Any],
     scen_key: str = "fantasy",
@@ -477,11 +548,16 @@ def build_npc_wardrobe_presets(
     name = meta["name"]
     seed_base = f"{session_id}:{name.lower()}:{meta['genre_family']}"
 
-    if meta["is_myobu_fox"]:
+    if meta["is_folklore_beast"]:
         empty_slots = {s: "none" for s in ("outerwear", "top", "bottom", "under_top", "under_bottom", "footwear")}
+        kit_keys = [KIT_SPORT, KIT_SWIM, KIT_BATH, KIT_DOJO]
+        if _npc_has_tactical_kit(meta):
+            kit_keys.append(KIT_TACTICAL)
+        if _npc_has_secret_faction_kit(meta, npc_or_contact):
+            kit_keys.append(KIT_SECRET_FACTION)
         return {
             "presets": {PRESET_DUTY: dict(empty_slots), PRESET_CASUAL: dict(empty_slots), PRESET_SLEEPWEAR: dict(empty_slots)},
-            "activity_kits": {k: dict(empty_slots) for k in (KIT_SPORT, KIT_SWIM, KIT_BATH, KIT_DOJO, KIT_TACTICAL, KIT_SECRET_FACTION)},
+            "activity_kits": {k: dict(empty_slots) for k in kit_keys},
             "overlays": {},
             "meta": {k: v for k, v in meta.items() if k not in ("app", "basic")},
         }
@@ -514,6 +590,12 @@ def build_npc_wardrobe_presets(
             ("Light silk selendang", "Soft pastel silk kebaya", "Flowing batik sarong skirt", "Woven silk slippers")
             if not meta["is_male"]
             else ("none", "Embroidered silk baju melayu", "Matching silk trousers & sampin", "Leather dress sandals")
+        )
+    elif meta["is_ghoul_humanoid"]:
+        c_out, c_top, c_bot, c_foot = (
+            ("Tailored charcoal trench overcoat", "Black fitted silk-weave turtleneck", "Tailored obsidian wool trousers", "Polished black leather boots")
+            if meta["is_male"]
+            else ("Long tailored obsidian wool coat", "High-collar black silk blouse", "Pleated dark charcoal midi skirt", "Low-heeled black leather ankle boots")
         )
 
     # Preserve custom appearance.attire for spontaneous non-rostered NPCs
@@ -600,49 +682,54 @@ def build_npc_wardrobe_presets(
     # Dojo
     dojo_slots = _slot_dict("none", "Crisp white martial arts gi jacket", "Belted cotton gi trousers", "Barefoot", meta, preset_key=KIT_DOJO, scen_key=scen_key)
 
-    # Tactical Field Rig
-    if genre in ("anomalous_incursions", "anomalous_high"):
-        tac_slots = _slot_dict(
-            "Warded ballistic containment coat",
-            "Armored tactical rig & resonance harness",
-            "Reinforced combat trousers",
-            "Combat field boots",
-            meta,
-            preset_key=KIT_TACTICAL,
-            scen_key=scen_key,
-        )
-    else:
-        tac_slots = dict(duty_slots)
+    has_tactical = _npc_has_tactical_kit(meta)
+    has_secret_fac = _npc_has_secret_faction_kit(meta, npc_or_contact)
 
-    # Secret Faction Regalia (double-life sanctums)
-    fac_low = meta["faction_id"].lower()
-    if "cult" in fac_low:
-        sec_slots = _slot_dict(
-            "Hooded crimson occult cloak",
-            "Gold-sigil ritual vestments",
-            "Flowing dark ceremonial robe",
-            "Strapped ritual boots",
-            meta,
-            preset_key=KIT_SECRET_FACTION,
-            scen_key=scen_key,
-        )
-    elif "clandestine" in fac_low or "syndicate" in fac_low:
-        sec_slots = _slot_dict(
-            "Stealth-weave syndicate trench",
-            "Shadow-fiber turtleneck & utility rig",
-            "Reinforced covert trousers",
-            "Silent infiltration boots",
-            meta,
-            preset_key=KIT_SECRET_FACTION,
-            scen_key=scen_key,
-        )
-    elif "velvet" in fac_low or "velvet" in meta["club"].lower() or "nsfw" in str(npc_or_contact.get("faction_category") or "").lower():
-        if meta["is_male"]:
-            sec_slots = _slot_dict("Tailored velvet salon jacket", "Unbuttoned silk dress shirt", "Fitted black salon slacks", "Polished dress shoes", meta, preset_key=KIT_SECRET_FACTION, scen_key=scen_key)
+    # Tactical Field Rig (agents, double-life operatives, combat responders, anomalous orgs)
+    tac_slots = None
+    if has_tactical:
+        if genre in ("anomalous_incursions", "anomalous_high"):
+            tac_slots = _slot_dict(
+                "Warded ballistic containment coat",
+                "Armored tactical rig & resonance harness",
+                "Reinforced combat trousers",
+                "Combat field boots",
+                meta,
+                preset_key=KIT_TACTICAL,
+                scen_key=scen_key,
+            )
         else:
-            sec_slots = _slot_dict("Sheer velvet salon bolero", "Lace-trimmed velvet corset top", "High-slit velvet salon skirt", "Strappy heeled pumps", meta, preset_key=KIT_SECRET_FACTION, scen_key=scen_key)
-    else:
-        sec_slots = dict(tac_slots)
+            tac_slots = dict(duty_slots)
+
+    # Secret Faction Regalia (double-life sanctums ONLY — never duplicate tactical on non-members)
+    sec_slots = None
+    if has_secret_fac:
+        fac_low = meta["faction_id"].lower()
+        if "cult" in fac_low:
+            sec_slots = _slot_dict(
+                "Hooded crimson occult cloak",
+                "Gold-sigil ritual vestments",
+                "Flowing dark ceremonial robe",
+                "Strapped ritual boots",
+                meta,
+                preset_key=KIT_SECRET_FACTION,
+                scen_key=scen_key,
+            )
+        elif "clandestine" in fac_low or "syndicate" in fac_low:
+            sec_slots = _slot_dict(
+                "Stealth-weave syndicate trench",
+                "Shadow-fiber turtleneck & utility rig",
+                "Reinforced covert trousers",
+                "Silent infiltration boots",
+                meta,
+                preset_key=KIT_SECRET_FACTION,
+                scen_key=scen_key,
+            )
+        else:
+            if meta["is_male"]:
+                sec_slots = _slot_dict("Tailored velvet salon jacket", "Unbuttoned silk dress shirt", "Fitted black salon slacks", "Polished dress shoes", meta, preset_key=KIT_SECRET_FACTION, scen_key=scen_key)
+            else:
+                sec_slots = _slot_dict("Sheer velvet salon bolero", "Lace-trimmed velvet corset top", "High-slit velvet salon skirt", "Strappy heeled pumps", meta, preset_key=KIT_SECRET_FACTION, scen_key=scen_key)
 
     modesty_robe = "Flannel bathrobe over sleepwear" if meta["is_male"] else "Soft knit cardigan over sleepwear"
     overlays = {
@@ -651,20 +738,24 @@ def build_npc_wardrobe_presets(
         OVERLAY_MODESTY_ROBE: modesty_robe,
     }
 
+    activity_kits_out: dict[str, Any] = {
+        KIT_SPORT: sport_slots,
+        KIT_SWIM: swim_slots,
+        KIT_BATH: bath_slots,
+        KIT_DOJO: dojo_slots,
+    }
+    if tac_slots is not None:
+        activity_kits_out[KIT_TACTICAL] = tac_slots
+    if sec_slots is not None:
+        activity_kits_out[KIT_SECRET_FACTION] = sec_slots
+
     return {
         "presets": {
             PRESET_DUTY: duty_slots,
             PRESET_CASUAL: casual_slots,
             PRESET_SLEEPWEAR: sleep_slots,
         },
-        "activity_kits": {
-            KIT_SPORT: sport_slots,
-            KIT_SWIM: swim_slots,
-            KIT_BATH: bath_slots,
-            KIT_DOJO: dojo_slots,
-            KIT_TACTICAL: tac_slots,
-            KIT_SECRET_FACTION: sec_slots,
-        },
+        "activity_kits": activity_kits_out,
         "overlays": overlays,
         "meta": {k: v for k, v in meta.items() if k not in ("app", "basic")},
     }
